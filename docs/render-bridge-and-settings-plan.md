@@ -1,7 +1,7 @@
 # 渲染数据桥与 Cycles 画面控制里程碑
 
 状态：已确认，实施中（单元 A/A2 已验收；单元 D 基础接入已收口；设置、能力检测与 Pass 查看器已完成自动验证，等待游戏验收）
-基线：Minecraft 26.2 / NeoForge 26.2.0.58 / Cycles 5.2 / C ABI v6
+基线：Minecraft 26.2 / NeoForge 26.2.0.58 / Cycles 5.2 / C ABI v7
 
 ## 1. 目标
 
@@ -175,7 +175,7 @@ Provider 必须读取 DH 对外提供或能够稳定适配的最终 LOD 网格/�
 
 场景格式和设置都会成为稳定契约，修改时必须同步升级 ABI。
 
-单元 A 冻结的 ABI v4 整场景入口继续保留；Section 流送阶段升级为 ABI v5；设置阶段升级为 ABI v6，并继续避免把 C++ 类型暴露给 Java：
+单元 A 冻结的 ABI v4 整场景入口继续保留；Section 流送阶段升级为 ABI v5；设置阶段升级为 ABI v6；性能诊断阶段升级为 ABI v7，并继续避免把 C++ 类型暴露给 Java：
 
 - `CyclesBridgeCamera`：80 字节，沿用已验证的相机坐标约定。
 - `CyclesBridgeScene`：48 字节，场景原点和各数组计数。
@@ -188,7 +188,7 @@ Provider 必须读取 DH 对外提供或能够稳定适配的最终 LOD 网格/�
 - `CyclesBridgeFrame`：40 字节，低分辨率尺寸、generation、状态标记和实际 sample 数。
 - `CyclesBridgeRenderSettings`：ABI v6 新增，固定 208 字节；包含稳定的设置 revision、设备/分辨率/采样/光程/过滤/降噪/显示/Pass ID。
 - `CyclesBridgeCapabilities`：ABI v6 新增，固定 64 字节；区分编译能力、枚举到的设备、设备实际支持的降噪器、Pass mask 和最大输出尺寸。
-- `CyclesBridgeDiagnostics`：ABI v6 新增，固定 96 字节；报告当前已生效设置 revision、实际设备/降噪器/Pass、场景/相机/帧代次、尺寸、sample、Section 数和最近 reset 等级。
+- `CyclesBridgeDiagnostics`：ABI v6 新增、ABI v7 追加采样遥测，固定 112 字节；报告当前已生效设置 revision、实际设备/降噪器/Pass、场景/相机/帧代次、尺寸、实际/目标 sample、采样状态/sample rate、Section 数和最近 reset 等级。
 - Pass 使用稳定枚举/位掩码，不用 UI 显示字符串作为协议键。
 
 每个结构继续包含 `struct_size`、`struct_version` 和保留字段。Java FFM 布局、C 头、参数校验和 Native 冒烟测试必须同时更新。
@@ -256,7 +256,7 @@ Minecraft 相机持续运动，不能直接照搬 Blender 离线渲染的单一�
 - 查询实际可用性；界面不能显示一个运行时不可用的选项为“正常”。
 - 指定降噪器失败时按照设置决定自动回退或报告错误，不能导致 Minecraft 崩溃。
 
-当前实现状态：ABI v6 已区分“配置请求”“构建时编译能力”“设备枚举能力”和“当前实际生效降噪器”。OptiX 已在 RTX 5080 的 native 冒烟中实际启用并产出画面；当前 Cycles 静态库仍以 `WITH_CYCLES_OPENIMAGEDENOISE=OFF` 构建，因此 OIDN 会准确报告为不可用，未假装已经支持。重建 Cycles/OIDN 及部署 DLL 保留到后续独立阶段。
+当前实现状态：ABI v7 已区分“配置请求”“构建时编译能力”“设备枚举能力”和“当前实际生效降噪器”，并追加实际采样遥测。OptiX 已在 RTX 5080 的 native 冒烟中实际启用并产出画面；当前 Cycles 静态库仍以 `WITH_CYCLES_OPENIMAGEDENOISE=OFF` 构建，因此 OIDN 会准确报告为不可用，未假装已经支持。重建 Cycles/OIDN 及部署 DLL 保留到后续独立阶段。
 
 ### 6.4 线性 HDR 与色彩管理
 
@@ -419,7 +419,7 @@ Section 流送切换到 ABI v5 后，旧高度场暂不再合并进活动场景�
 - HDR 测试场景在 AgX 下保留高光层次，Raw/Standard 行为可对照。
 - 设置错误不会让 Minecraft 进程崩溃。
 
-当前状态：采样、分辨率、光程、过滤、设备策略、OptiX 降噪和基础显示参数已经通过 ABI v6 接通；真正的线性 HDR Pass cache、Blender OCIO 资产/AgX 和 OIDN 构建尚未完成，因此单元 B 只完成了控制面与一部分 Cycles 参数，不标记为整体验收。
+当前状态：采样、分辨率、光程、过滤、设备策略、OptiX 降噪和基础显示参数已经通过 ABI v7 接通；真正的线性 HDR Pass cache、Blender OCIO 资产/AgX 和 OIDN 构建尚未完成，因此单元 B 只完成了控制面与一部分 Cycles 参数，不标记为整体验收。
 
 ### 单元 C：Minecraft 设置界面与 Pass 查看器
 

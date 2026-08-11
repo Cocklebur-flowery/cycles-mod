@@ -179,6 +179,7 @@ struct CameraRequest {
     std::uint32_t render_width = 0;
     std::uint32_t render_height = 0;
     int sample_count = 1;
+    std::uint32_t sampling_state = CYCLES_BRIDGE_SAMPLING_INTERACTIVE;
     std::uint64_t revision = 0;
 };
 
@@ -371,6 +372,7 @@ class FrameStore final {
         std::lock_guard lock(mutex_);
         width_ = 0;
         height_ = 0;
+        sample_count_ = 0;
         rgba_.clear();
         generation_++;
     }
@@ -1255,6 +1257,8 @@ class CyclesEngine::Impl final {
             if (requested_camera_) {
                 requested_camera_->sample_count =
                     static_cast<int>(requested_settings_.interactive_samples);
+                requested_camera_->sampling_state =
+                    CYCLES_BRIDGE_SAMPLING_INTERACTIVE;
                 requested_camera_->revision = ++camera_revision_;
                 last_camera_change_ = std::chrono::steady_clock::now();
                 last_camera_generation_ = frames_.generation();
@@ -1305,6 +1309,8 @@ class CyclesEngine::Impl final {
                             requested_settings_);
                     requested_camera_->sample_count =
                         static_cast<int>(requested_settings_.interactive_samples);
+                    requested_camera_->sampling_state =
+                        CYCLES_BRIDGE_SAMPLING_INTERACTIVE;
                     requested_camera_->revision = ++camera_revision_;
                     last_camera_change_ = std::chrono::steady_clock::now();
                     last_camera_generation_ = frames_.generation();
@@ -1385,6 +1391,9 @@ class CyclesEngine::Impl final {
             diagnostics.reset_level = last_reset_level_;
             diagnostics.settings_revision = active_settings_revision_diagnostic_;
             diagnostics.active_pass = active_pass_diagnostic_;
+            diagnostics.target_sample_count = target_sample_count_diagnostic_;
+            diagnostics.sampling_state = sampling_state_diagnostic_;
+            diagnostics.sample_rate = sample_rate_diagnostic_;
         }
         const auto [width, height] = frames_.size();
         diagnostics.frame_generation = frames_.generation();
@@ -1495,6 +1504,7 @@ class CyclesEngine::Impl final {
             if (!requested_camera_ || !same_camera(*requested_camera_, request)) {
                 request.sample_count =
                     static_cast<int>(requested_settings_.interactive_samples);
+                request.sampling_state = CYCLES_BRIDGE_SAMPLING_INTERACTIVE;
                 request.revision = ++camera_revision_;
                 requested_camera_ = request;
                 last_camera_change_ = now;
@@ -1509,6 +1519,7 @@ class CyclesEngine::Impl final {
                                requested_settings_.stationary_delay_millis)
                        && frames_.generation() != last_camera_generation_) {
                 request.sample_count = static_cast<int>(requested_settings_.still_samples);
+                request.sampling_state = CYCLES_BRIDGE_SAMPLING_STILL;
                 request.revision = ++camera_revision_;
                 requested_camera_ = request;
                 changed = true;
@@ -1654,8 +1665,8 @@ class CyclesEngine::Impl final {
         }
         ccl::SessionParams render_params = params;
         render_params.samples = std::max(1, camera_request.sample_count);
-        const bool still = camera_request.sample_count
-            == static_cast<int>(settings.still_samples);
+        const bool still =
+            camera_request.sampling_state == CYCLES_BRIDGE_SAMPLING_STILL;
         const std::uint32_t time_limit_millis = still
             ? settings.still_time_limit_millis
             : settings.interactive_time_limit_millis;
@@ -1664,14 +1675,45 @@ class CyclesEngine::Impl final {
             settings,
             camera_request.camera.depth_far,
             render_params.samples);
-        frames_.set_sample_count(render_params.samples);
+        frames_.set_sample_count(0);
+        sampling_target_ = render_params.samples;
+        sampling_measure_count_ = 0;
+        sampling_rate_ = 0.0F;
+        sampling_measure_time_ = std::chrono::steady_clock::now();
         {
             std::lock_guard lock(state_mutex_);
             effective_denoiser_ = effective_denoiser;
+            target_sample_count_diagnostic_ =
+                static_cast<std::uint32_t>(render_params.samples);
+            sampling_state_diagnostic_ = camera_request.sampling_state;
+            sample_rate_diagnostic_ = 0.0F;
         }
         session.reset(render_params, buffer);
         session.start();
         set_state("rendering", {});
+    }
+
+    void update_sampling_progress(ccl::Session& session) {
+        const int actual = std::clamp(
+            session.progress.get_current_sample(), 0, sampling_target_);
+        frames_.set_sample_count(actual);
+
+        const auto now = std::chrono::steady_clock::now();
+        if (actual != sampling_measure_count_) {
+            const double seconds = std::chrono::duration<double>(
+                now - sampling_measure_time_).count();
+            if (seconds > 0.0) {
+                sampling_rate_ = static_cast<float>(
+                    static_cast<double>(actual - sampling_measure_count_) / seconds);
+            }
+            sampling_measure_count_ = actual;
+            sampling_measure_time_ = now;
+        } else if (now - sampling_measure_time_ >= std::chrono::milliseconds(500)) {
+            sampling_rate_ = 0.0F;
+        }
+
+        std::lock_guard lock(state_mutex_);
+        sample_rate_diagnostic_ = std::max(0.0F, sampling_rate_);
     }
 
     void worker_main() {
@@ -1722,6 +1764,10 @@ class CyclesEngine::Impl final {
                 }
                 observed_scene_revision = requested_scene ? requested_scene->revision : 0;
                 observed_camera_revision = requested_camera ? requested_camera->revision : 0;
+
+                if (session) {
+                    update_sampling_progress(*session);
+                }
 
                 if (requested_settings.revision != active_settings_revision) {
                     const bool pass_changed = requested_settings.active_pass
@@ -1856,8 +1902,16 @@ class CyclesEngine::Impl final {
     std::uint32_t last_reset_level_ = CYCLES_BRIDGE_RESET_NONE;
     std::uint64_t active_settings_revision_diagnostic_ = 0;
     std::uint32_t active_pass_diagnostic_ = CYCLES_BRIDGE_PASS_COMBINED;
+    std::uint32_t target_sample_count_diagnostic_ = 0;
+    std::uint32_t sampling_state_diagnostic_ = CYCLES_BRIDGE_SAMPLING_IDLE;
+    float sample_rate_diagnostic_ = 0.0F;
     std::string state_;
     std::string terminal_error_;
+
+    int sampling_target_ = 0;
+    int sampling_measure_count_ = 0;
+    float sampling_rate_ = 0.0F;
+    std::chrono::steady_clock::time_point sampling_measure_time_{};
 
     std::vector<ccl::DeviceInfo> devices_;
     FrameStore frames_;

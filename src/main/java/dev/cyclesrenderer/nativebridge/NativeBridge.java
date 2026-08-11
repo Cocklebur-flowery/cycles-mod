@@ -23,7 +23,7 @@ import static java.lang.foreign.ValueLayout.JAVA_INT;
 import static java.lang.foreign.ValueLayout.JAVA_LONG;
 
 public final class NativeBridge {
-    public static final int ABI_VERSION = 6;
+    public static final int ABI_VERSION = 7;
 
     private static final String LIBRARY_PATH_PROPERTY = "cyclesrenderer.nativeLibrary";
     private static final int STRUCT_VERSION = 1;
@@ -168,7 +168,11 @@ public final class NativeBridge {
             JAVA_INT.withName("section_count"),
             JAVA_INT.withName("reset_level"),
             JAVA_INT.withName("frame_ready"),
-            MemoryLayout.sequenceLayout(4, JAVA_INT).withName("reserved"));
+            MemoryLayout.sequenceLayout(4, JAVA_INT).withName("reserved"),
+            JAVA_INT.withName("target_sample_count"),
+            JAVA_INT.withName("sampling_state"),
+            JAVA_FLOAT.withName("sample_rate"),
+            JAVA_INT.withName("reserved_v7"));
     private static final MemoryLayout VERTEX_LAYOUT = MemoryLayout.structLayout(
             JAVA_FLOAT.withName("position_x"),
             JAVA_FLOAT.withName("position_y"),
@@ -213,7 +217,7 @@ public final class NativeBridge {
                 || FRAME_LAYOUT.byteSize() != 40L
                 || SETTINGS_LAYOUT.byteSize() != 208L
                 || CAPABILITIES_LAYOUT.byteSize() != 64L
-                || DIAGNOSTICS_LAYOUT.byteSize() != 96L
+                || DIAGNOSTICS_LAYOUT.byteSize() != 112L
                 || VERTEX_LAYOUT.byteSize() != 40L
                 || TRIANGLE_LAYOUT.byteSize() != 16L
                 || MATERIAL_LAYOUT.byteSize() != 32L
@@ -718,7 +722,10 @@ public final class NativeBridge {
                     diagnosticsSegment.get(JAVA_INT, 64L),
                     diagnosticsSegment.get(JAVA_INT, 68L),
                     diagnosticsSegment.get(JAVA_INT, 72L),
-                    diagnosticsSegment.get(JAVA_INT, 76L) != 0);
+                    diagnosticsSegment.get(JAVA_INT, 76L) != 0,
+                    diagnosticsSegment.get(JAVA_INT, 96L),
+                    diagnosticsSegment.get(JAVA_INT, 100L),
+                    diagnosticsSegment.get(JAVA_FLOAT, 104L));
         }
 
         private RenderedFrame renderFrame(
@@ -984,7 +991,10 @@ public final class NativeBridge {
             int sampleCount,
             int sectionCount,
             int resetLevel,
-            boolean frameReady) {
+            boolean frameReady,
+            int targetSampleCount,
+            int samplingState,
+            float sampleRate) {
         public String stateName() {
             return switch (stateCode) {
                 case 1 -> "scene-staging";
@@ -1021,6 +1031,15 @@ public final class NativeBridge {
                 case 2 -> "buffer";
                 case 3 -> "session";
                 default -> "none";
+            };
+        }
+
+        public String samplingStateName() {
+            return switch (samplingState) {
+                case 1 -> "interactive";
+                case 2 -> "settling";
+                case 3 -> "still";
+                default -> "idle";
             };
         }
     }

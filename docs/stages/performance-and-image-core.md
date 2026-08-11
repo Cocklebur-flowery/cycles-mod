@@ -87,8 +87,8 @@ F10 叠加层采用“当前值 + 最近窗口统计”，不把目标值伪装�
 
 | 子阶段 | 预期提交 | 主要交付物 | 状态 |
 | --- | --- | --- | --- |
-| P0 | `docs: record performance and image pipeline stage` | 本文档、指标字典、瓶颈假设 | 实施中 |
-| P1 | `feat: report actual render sampling` | ABI v7、实际/目标 sample、sample state/rate、F10 | 待开始 |
+| P0 | `docs: record performance and image pipeline stage` | 本文档、指标字典、瓶颈假设 | 已完成（`7afa984`） |
+| P1 | `feat: report actual render sampling` | ABI v7、实际/目标 sample、sample state/rate、F10 | 已完成（本提交） |
 | P2 | `perf: add frame pipeline telemetry` | Native convert/copy、Java/Vulkan upload、帧计数 | 待开始 |
 | P3 | `perf: trace section update latency` | 捕获/upsert/commit/队列与卡顿热点 | 待开始 |
 | P4 | `perf: throttle display frame delivery` | 上传限频、latest-only、保留上一有效帧 | 待开始 |
@@ -124,3 +124,11 @@ P1 至 P4 完成后进行一次 1080p 游戏人工里程碑：观察实际 sampl
 
 性能验收不设置脱离硬件和场景的固定 FPS 门槛。第一目标是让瓶颈可见、消除重复全帧 CPU 工作、避免黑帧和长同步停顿；帧率目标在得到真实遥测后冻结。
 
+## 7. 实施记录
+
+### P1：实际采样状态
+
+- ABI v7 在保留 v6 诊断字段和 16 字节 reserved 区域后，追加目标 sample、采样状态和 sample/s。
+- 原有 `sample_count` 修正为 Cycles `Progress.get_current_sample()` 报告的实际完成值；目标值不再写入该字段。
+- 首次相机/场景变更标记为 Interactive，达到静止延迟后切换为 Still；Settling ID 已保留给后续渐进策略。
+- F10 和 F9 状态摘要使用 `actual/target`，不再只显示配置目标。

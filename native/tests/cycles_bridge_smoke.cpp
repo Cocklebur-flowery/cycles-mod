@@ -3,6 +3,7 @@
 #include <Windows.h>
 
 #include <array>
+#include <cmath>
 #include <cstdint>
 #include <cstring>
 #include <iostream>
@@ -211,12 +212,30 @@ bool wait_for_settings(CyclesBridgeRenderer* renderer, std::uint64_t revision) {
     return false;
 }
 
+bool wait_for_actual_sample(
+    CyclesBridgeRenderer* renderer,
+    CyclesBridgeDiagnostics& diagnostics) {
+    for (int attempt = 0; attempt < 200; ++attempt) {
+        if (!require_ok(
+                cycles_bridge_query_diagnostics(renderer, &diagnostics),
+                "sampling diagnostics")) {
+            return false;
+        }
+        if (diagnostics.sample_count > 0U) {
+            return true;
+        }
+        Sleep(10);
+    }
+    std::cerr << "native diagnostics never reported a completed sample\n";
+    return false;
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
     const bool require_optix = argc > 1 && std::strcmp(argv[1], "--require-optix") == 0;
     std::cerr << "[smoke] ABI check\n";
-    if (cycles_bridge_abi_version() != 6U) {
+    if (cycles_bridge_abi_version() != 7U) {
         std::cerr << "unexpected native ABI " << cycles_bridge_abi_version() << '\n';
         return 1;
     }
@@ -408,19 +427,24 @@ int main(int argc, char** argv) {
         }
     }
 
-    if (!require_ok(
-            cycles_bridge_query_diagnostics(renderer, &diagnostics),
-            "final diagnostics query")) {
+    if (!wait_for_actual_sample(renderer, diagnostics)) {
         cycles_bridge_destroy_renderer(renderer);
         return 1;
     }
     if (diagnostics.settings_revision != settings.revision
         || diagnostics.active_pass != CYCLES_BRIDGE_PASS_COMBINED
-        || diagnostics.width != kWidth || diagnostics.height != kHeight) {
+        || diagnostics.width != kWidth || diagnostics.height != kHeight
+        || diagnostics.target_sample_count != settings.interactive_samples
+        || diagnostics.sample_count > diagnostics.target_sample_count
+        || !std::isfinite(diagnostics.sample_rate)
+        || diagnostics.sample_rate < 0.0F
+        || diagnostics.sampling_state == CYCLES_BRIDGE_SAMPLING_IDLE) {
         std::cerr << "unexpected diagnostics after Combined restore: revision="
                   << diagnostics.settings_revision << ";pass=" << diagnostics.active_pass
                   << ";resolution=" << diagnostics.width << 'x' << diagnostics.height
-                  << ";samples=" << diagnostics.sample_count << '\n';
+                  << ";samples=" << diagnostics.sample_count << '/'
+                  << diagnostics.target_sample_count
+                  << ";sampling_state=" << diagnostics.sampling_state << '\n';
         cycles_bridge_destroy_renderer(renderer);
         return 1;
     }

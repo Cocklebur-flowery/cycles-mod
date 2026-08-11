@@ -135,7 +135,9 @@ public final class CyclesSettingsScreen extends Screen {
             lines.add(Component.literal(
                     "Native: " + diagnostics.stateName() + "; "
                             + diagnostics.width() + "x" + diagnostics.height()
-                            + "; samples=" + diagnostics.sampleCount()
+                            + "; sample=" + diagnostics.sampleCount()
+                            + "/" + diagnostics.targetSampleCount()
+                            + " (" + diagnostics.samplingStateName() + ")"
                             + "; sections=" + diagnostics.sectionCount()));
         } catch (RuntimeException error) {
             lines.add(Component.translatable(

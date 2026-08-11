@@ -328,7 +328,15 @@ public final class CyclesRendererMod {
                     minecraft.font,
                     diagnostics.width() + "x" + diagnostics.height()
                             + "  pass=" + settings.activePass().name()
-                            + "  samples=" + diagnostics.sampleCount(),
+                            + "  sample=" + diagnostics.sampleCount()
+                            + "/" + diagnostics.targetSampleCount(),
+                    6, y, 0xFFE0E0E0);
+            y += 10;
+            graphics.text(
+                    minecraft.font,
+                    "sampling=" + diagnostics.samplingStateName()
+                            + "  rate=" + Math.round(diagnostics.sampleRate() * 10.0F) / 10.0F
+                            + " sample/s",
                     6, y, 0xFFE0E0E0);
             y += 10;
             graphics.text(

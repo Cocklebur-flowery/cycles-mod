@@ -72,6 +72,13 @@ enum CyclesBridgeResetLevel : std::uint32_t {
     CYCLES_BRIDGE_RESET_SESSION = 3,
 };
 
+enum CyclesBridgeSamplingState : std::uint32_t {
+    CYCLES_BRIDGE_SAMPLING_IDLE = 0,
+    CYCLES_BRIDGE_SAMPLING_INTERACTIVE = 1,
+    CYCLES_BRIDGE_SAMPLING_SETTLING = 2,
+    CYCLES_BRIDGE_SAMPLING_STILL = 3,
+};
+
 struct CyclesBridgeCamera {
     std::uint32_t struct_size;
     std::uint32_t struct_version;
@@ -217,6 +224,10 @@ struct CyclesBridgeDiagnostics {
     std::uint32_t reset_level;
     std::uint32_t frame_ready;
     std::uint32_t reserved[4];
+    std::uint32_t target_sample_count;
+    std::uint32_t sampling_state;
+    float sample_rate;
+    std::uint32_t reserved_v7;
 };
 
 struct CyclesBridgeVertex {
