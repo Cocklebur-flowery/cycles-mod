@@ -143,6 +143,13 @@ int main(int argc, char** argv) {
         cycles_bridge_destroy_renderer(renderer);
         return 1;
     }
+    if (!require_ok(
+            cycles_bridge_render(
+                renderer, &camera, pixels.data(), pixels.size()),
+            "completed frame readback")) {
+        cycles_bridge_destroy_renderer(renderer);
+        return 1;
+    }
 
     std::cout << info << '\n'
               << "frame=" << kWidth << 'x' << kHeight

@@ -243,8 +243,7 @@ class FrameStore final {
 
         for (int tile_y = 0; tile_y < tile.size.y; ++tile_y) {
             const int source_y = tile_y;
-            const int cycles_y = tile.offset.y + tile_y;
-            const int target_y = tile.full_size.y - 1 - cycles_y;
+            const int target_y = tile.offset.y + tile_y;
             if (target_y < 0 || target_y >= static_cast<int>(height_)) {
                 continue;
             }
