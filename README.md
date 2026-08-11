@@ -12,6 +12,7 @@
 - 使用 Minecraft 的面剔除规则，并从最终 `TextureAtlasSprite` 提取资源包覆盖后的 RGBA 像素。
 - Cycles 材质支持基础纹理、方块/生物群系 Tint、Cutout Alpha Clip 和基础发光；半透明层暂时跳过并计数。
 - 资源包重载会增加场景资源代次并强制重建快照，不复用旧 Sprite 像素。
+- 安装 Distant Horizons 3.2.1 / API 7 时，实验性可选 Provider 会在后台读取 DH 地形仓库并尝试生成彩色远景高度场；未安装、未初始化或读取失败时只关闭远景分支。当前游戏测试尚未看到可靠远景，完整 DH 可见性与质量留待后续兼容阶段。
 - Cycles 在自己的会话线程中渐进渲染，Minecraft 渲染线程只提交相机并读取最新完成帧。
 - 内部渲染分辨率上限为 `480 × 270`，当前每次累计 8 个样本，再放大到窗口尺寸。
 - Minecraft 的 Vulkan swapchain、纹理和命令编码器仍由 Minecraft 管理；Cycles 不使用 Vulkan。
@@ -89,7 +90,9 @@ run-client.cmd runClient
 ## 运行时数据流
 
 ```text
-ClientRenderSnapshot（最终 BakedQuad、Sprite、Tint）
+Minecraft 最终 BakedQuad / Sprite / Tint（近景）
+DistantHorizonsSceneProvider / Terrain Repo（可选远景）
+  -> ClientRenderSnapshot
   -> NativeBridge（ABI v4 扁平场景数组）
   -> CyclesEngine 请求队列
   -> Cycles 网格 + 内存纹理 + Diffuse/Cutout/Emission 材质
@@ -99,12 +102,13 @@ ClientRenderSnapshot（最终 BakedQuad、Sprite、Tint）
   -> Minecraft Vulkan writeToTexture
 ```
 
-场景在相机进入新的区块/高度 Section 或资源包重载时重新捕获。相机位置、朝向、FOV 或输出尺寸变化时会重置 Cycles 累计；静止时继续积累当前帧。
+近景在相机进入新的区块/高度 Section 或资源包重载时重新捕获。DH Provider 每移动 64 方块异步刷新远景，完成后通过独立 revision 触发场景上传，不在 Minecraft 渲染线程读取数据库。相机位置、朝向、FOV 或输出尺寸变化时会重置 Cycles 累计；静止时继续积累当前帧。
 
 ## 代码入口
 
 - `CyclesRendererMod.java`：F8 生命周期、场景刷新和 Vulkan 上传。
 - `ClientRenderSnapshot.java`：从客户端世界最终模型采集固定范围的网格、纹理和基础材质。
+- `DistantHorizonsSceneProvider.java`：反射检测 DH API 7，在后台读取 Terrain Repo 并发布不可变远景高度场。
 - `NativeBridge.java`：Java 25 FFM 布局、native 生命周期和 ABI 校验。
 - `native/include/cycles_bridge.h`：稳定 C ABI；修改结构、状态码或函数时必须同步升级 Java ABI。
 - `native/src/cycles_bridge.cpp`：C ABI 参数校验和错误边界。

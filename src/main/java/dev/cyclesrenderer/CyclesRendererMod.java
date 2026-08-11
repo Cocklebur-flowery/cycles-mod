@@ -4,6 +4,7 @@ import com.mojang.blaze3d.platform.InputConstants;
 import com.mojang.blaze3d.systems.RenderSystem;
 import dev.cyclesrenderer.nativebridge.NativeBridge;
 import dev.cyclesrenderer.scene.ClientRenderSnapshot;
+import dev.cyclesrenderer.scene.DistantHorizonsSceneProvider;
 import net.minecraft.client.KeyMapping;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
@@ -103,7 +104,7 @@ public final class CyclesRendererMod {
 
         var mainTarget = minecraft.gameRenderer.mainRenderTarget();
         try {
-            refreshVoxelSceneIfNeeded(level, camera);
+            refreshSceneIfNeeded(level, camera);
             long frameId = nativeFrameId++;
             ByteBuffer pixels = NativeBridge.renderFrame(
                     mainTarget.width,
@@ -130,19 +131,27 @@ public final class CyclesRendererMod {
         }
     }
 
-    private static void refreshVoxelSceneIfNeeded(
+    private static void refreshSceneIfNeeded(
             ClientLevel level,
             CameraRenderState camera) {
         long currentResourceRevision = resourceRevision;
+        DistantHorizonsSceneProvider.SceneState distantHorizonsState =
+                DistantHorizonsSceneProvider.update(level, camera.pos);
         if (snapshotLevel == level
                 && renderSnapshot != null
-                && renderSnapshot.isCurrentFor(camera.pos, currentResourceRevision)) {
+                && renderSnapshot.isCurrentFor(
+                        camera.pos,
+                        currentResourceRevision,
+                        distantHorizonsState.revision())) {
             return;
         }
 
         long captureStart = System.nanoTime();
         ClientRenderSnapshot capturedSnapshot = ClientRenderSnapshot.capture(
-                level, camera.pos, currentResourceRevision);
+                level,
+                camera.pos,
+                currentResourceRevision,
+                distantHorizonsState);
         NativeBridge.uploadScene(capturedSnapshot);
         renderSnapshot = capturedSnapshot;
         snapshotLevel = level;
@@ -150,7 +159,8 @@ public final class CyclesRendererMod {
         LOGGER.info(
                 "Uploaded model scene: origin=({}, {}, {}), vertices={}, triangles={}, "
                         + "materials={}, textures={}, quads={}, skippedTranslucent={}, "
-                        + "unsupportedTints={}, skippedModelBlocks={}, capture={} ms",
+                        + "unsupportedTints={}, skippedModelBlocks={}, dhCells={}, dhQuads={}, "
+                        + "dhStatus={}, capture={} ms",
                 capturedSnapshot.originX(),
                 capturedSnapshot.originY(),
                 capturedSnapshot.originZ(),
@@ -162,6 +172,9 @@ public final class CyclesRendererMod {
                 capturedSnapshot.skippedTranslucentQuadCount(),
                 capturedSnapshot.unsupportedTintQuadCount(),
                 capturedSnapshot.skippedModelBlockCount(),
+                capturedSnapshot.distantHorizonsCellCount(),
+                capturedSnapshot.distantHorizonsQuadCount(),
+                distantHorizonsState.status(),
                 captureMilliseconds);
     }
 
@@ -187,6 +200,7 @@ public final class CyclesRendererMod {
         testFrameEnabled = false;
         renderSnapshot = null;
         snapshotLevel = null;
+        DistantHorizonsSceneProvider.reset();
         NativeBridge.close();
     }
 

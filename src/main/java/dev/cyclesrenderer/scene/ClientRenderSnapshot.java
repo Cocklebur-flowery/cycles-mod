@@ -19,6 +19,7 @@ import net.minecraft.util.RandomSource;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.RenderShape;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.material.MapColor;
 import net.minecraft.world.phys.Vec3;
 import net.neoforged.neoforge.client.model.quad.BakedNormals;
 import org.joml.Vector3fc;
@@ -42,10 +43,13 @@ public record ClientRenderSnapshot(
         int skippedTranslucentQuadCount,
         int unsupportedTintQuadCount,
         int skippedModelBlockCount,
+        int distantHorizonsCellCount,
+        int distantHorizonsQuadCount,
         int regionChunkX,
         int regionSectionY,
         int regionChunkZ,
-        long resourceRevision) {
+        long resourceRevision,
+        long distantHorizonsRevision) {
     public static final int SNAPSHOT_SIZE_X = 64;
     public static final int SNAPSHOT_SIZE_Y = 32;
     public static final int SNAPSHOT_SIZE_Z = 64;
@@ -55,11 +59,17 @@ public record ClientRenderSnapshot(
 
     private static final float CUTOUT_ALPHA_THRESHOLD = 0.5F;
     private static final int[] QUAD_TRIANGLES = {0, 1, 2, 0, 2, 3};
+    private static final int FALLBACK_MAP_COLOR = 0x7F7F7F;
+    private static final Identifier GENERATED_ATLAS = Identifier.fromNamespaceAndPath(
+            "cyclesrenderer", "generated");
+    private static final Identifier WHITE_SPRITE = Identifier.fromNamespaceAndPath(
+            "cyclesrenderer", "generated/white");
 
     public static ClientRenderSnapshot capture(
             ClientLevel level,
             Vec3 cameraPosition,
-            long resourceRevision) {
+            long resourceRevision,
+            DistantHorizonsSceneProvider.SceneState distantHorizonsState) {
         int cameraBlockX = Mth.floor(cameraPosition.x);
         int cameraBlockY = Mth.floor(cameraPosition.y);
         int cameraBlockZ = Mth.floor(cameraPosition.z);
@@ -121,11 +131,25 @@ public record ClientRenderSnapshot(
             }
         }
 
-        return builder.build(chunkX, sectionY, chunkZ, resourceRevision);
+        DistantHorizonsSceneProvider.LodSnapshot distantSnapshot = distantHorizonsState.snapshot();
+        if (distantSnapshot != null && distantSnapshot.level() == level) {
+            builder.appendDistantHorizons(level, distantSnapshot);
+        }
+
+        return builder.build(
+                chunkX,
+                sectionY,
+                chunkZ,
+                resourceRevision,
+                distantHorizonsState.revision());
     }
 
-    public boolean isCurrentFor(Vec3 cameraPosition, long currentResourceRevision) {
+    public boolean isCurrentFor(
+            Vec3 cameraPosition,
+            long currentResourceRevision,
+            long currentDistantHorizonsRevision) {
         return resourceRevision == currentResourceRevision
+                && distantHorizonsRevision == currentDistantHorizonsRevision
                 && regionChunkX == SectionPos.blockToSectionCoord(Mth.floor(cameraPosition.x))
                 && regionSectionY == SectionPos.blockToSectionCoord(Mth.floor(cameraPosition.y))
                 && regionChunkZ == SectionPos.blockToSectionCoord(Mth.floor(cameraPosition.z));
@@ -173,6 +197,9 @@ public record ClientRenderSnapshot(
         private int skippedTranslucentQuadCount;
         private int unsupportedTintQuadCount;
         private int skippedModelBlockCount;
+        private int distantHorizonsCellCount;
+        private int distantHorizonsQuadCount;
+        private int solidColorTextureIndex = -1;
 
         private SceneBuilder(BlockColors blockColors, int originX, int originY, int originZ) {
             this.blockColors = blockColors;
@@ -210,16 +237,7 @@ public record ClientRenderSnapshot(
                     ? MATERIAL_FLAG_CUTOUT
                     : 0;
             int emissionLevel = Mth.clamp(materialInfo.lightEmission(), 0, 15);
-            MaterialKey materialKey = new MaterialKey(textureIndex, flags, emissionLevel);
-            int materialIndex = materialIndices.computeIfAbsent(materialKey, key -> {
-                int index = materials.size();
-                materials.add(new MaterialData(
-                        key.textureIndex,
-                        key.flags,
-                        key.emissionLevel / 15.0F * 4.0F,
-                        key.flags == MATERIAL_FLAG_CUTOUT ? CUTOUT_ALPHA_THRESHOLD : 0.0F));
-                return index;
-            });
+            int materialIndex = materialIndex(textureIndex, flags, emissionLevel);
 
             int tint = tintColor(materialInfo.tintIndex(), level, position, state);
             int computedNormal = BakedNormals.computeQuadNormal(
@@ -266,6 +284,215 @@ public record ClientRenderSnapshot(
             quadCount++;
         }
 
+        private void appendDistantHorizons(
+                ClientLevel level,
+                DistantHorizonsSceneProvider.LodSnapshot snapshot) {
+            BlockPos.MutableBlockPos colorPosition = new BlockPos.MutableBlockPos();
+            int cellSize = snapshot.cellSize();
+            for (DistantHorizonsSceneProvider.LodCell cell : snapshot.cells().values()) {
+                if (overlapsNearScene(cell.minX(), cell.minZ(), cellSize)) {
+                    continue;
+                }
+
+                int rgb = FALLBACK_MAP_COLOR;
+                try {
+                    colorPosition.set(
+                            cell.minX() + cellSize / 2,
+                            cell.topY() - 1,
+                            cell.minZ() + cellSize / 2);
+                    MapColor mapColor = cell.blockState().getMapColor(level, colorPosition);
+                    if (mapColor.col != 0) {
+                        rgb = mapColor.col;
+                    }
+                } catch (RuntimeException ignored) {
+                    // A modded BlockState may require a loaded chunk to compute MapColor.
+                }
+                int color = packRgba(0xFF000000 | rgb);
+                int materialIndex = materialIndex(
+                        solidColorTextureIndex(), 0, 0);
+                float minX = cell.minX();
+                float maxX = minX + cellSize;
+                float minZ = cell.minZ();
+                float maxZ = minZ + cellSize;
+                float topY = cell.topY();
+
+                appendDistantQuad(
+                        minX, topY, minZ,
+                        minX, topY, maxZ,
+                        maxX, topY, maxZ,
+                        maxX, topY, minZ,
+                        0.0F, 1.0F, 0.0F,
+                        materialIndex, color);
+
+                appendDistantSide(
+                        snapshot.cellAt(cell.minX(), cell.minZ() - cellSize),
+                        cell,
+                        cellSize,
+                        cell.minZ(),
+                        Direction.NORTH,
+                        materialIndex,
+                        color);
+                appendDistantSide(
+                        snapshot.cellAt(cell.minX(), cell.minZ() + cellSize),
+                        cell,
+                        cellSize,
+                        cell.minZ() + cellSize,
+                        Direction.SOUTH,
+                        materialIndex,
+                        color);
+                appendDistantSide(
+                        snapshot.cellAt(cell.minX() - cellSize, cell.minZ()),
+                        cell,
+                        cellSize,
+                        cell.minX(),
+                        Direction.WEST,
+                        materialIndex,
+                        color);
+                appendDistantSide(
+                        snapshot.cellAt(cell.minX() + cellSize, cell.minZ()),
+                        cell,
+                        cellSize,
+                        cell.minX() + cellSize,
+                        Direction.EAST,
+                        materialIndex,
+                        color);
+                distantHorizonsCellCount++;
+            }
+        }
+
+        private void appendDistantSide(
+                DistantHorizonsSceneProvider.LodCell neighbor,
+                DistantHorizonsSceneProvider.LodCell cell,
+                int cellSize,
+                float plane,
+                Direction direction,
+                int materialIndex,
+                int color) {
+            if (neighbor == null || neighbor.topY() >= cell.topY()) {
+                return;
+            }
+            float bottomY = Math.max(cell.bottomY(), neighbor.topY());
+            float topY = cell.topY();
+            if (bottomY >= topY) {
+                return;
+            }
+
+            float minX = cell.minX();
+            float maxX = minX + cellSize;
+            float minZ = cell.minZ();
+            float maxZ = minZ + cellSize;
+            switch (direction) {
+                case NORTH -> appendDistantQuad(
+                        minX, bottomY, plane,
+                        minX, topY, plane,
+                        maxX, topY, plane,
+                        maxX, bottomY, plane,
+                        0.0F, 0.0F, -1.0F,
+                        materialIndex, color);
+                case SOUTH -> appendDistantQuad(
+                        maxX, bottomY, plane,
+                        maxX, topY, plane,
+                        minX, topY, plane,
+                        minX, bottomY, plane,
+                        0.0F, 0.0F, 1.0F,
+                        materialIndex, color);
+                case WEST -> appendDistantQuad(
+                        plane, bottomY, maxZ,
+                        plane, topY, maxZ,
+                        plane, topY, minZ,
+                        plane, bottomY, minZ,
+                        -1.0F, 0.0F, 0.0F,
+                        materialIndex, color);
+                case EAST -> appendDistantQuad(
+                        plane, bottomY, minZ,
+                        plane, topY, minZ,
+                        plane, topY, maxZ,
+                        plane, bottomY, maxZ,
+                        1.0F, 0.0F, 0.0F,
+                        materialIndex, color);
+                default -> throw new IllegalArgumentException("unsupported LOD side " + direction);
+            }
+        }
+
+        private void appendDistantQuad(
+                float x0, float y0, float z0,
+                float x1, float y1, float z1,
+                float x2, float y2, float z2,
+                float x3, float y3, float z3,
+                float normalX, float normalY, float normalZ,
+                int materialIndex,
+                int color) {
+            int vertexBase = vertexCount;
+            ensureVertexCapacity(vertexCount + 4);
+            float[] positions = {
+                    x0, y0, z0,
+                    x1, y1, z1,
+                    x2, y2, z2,
+                    x3, y3, z3
+            };
+            for (int corner = 0; corner < 4; corner++) {
+                int dataOffset = vertexCount * VERTEX_FLOAT_STRIDE;
+                int positionOffset = corner * 3;
+                vertexData[dataOffset] = positions[positionOffset] - originX;
+                vertexData[dataOffset + 1] = positions[positionOffset + 1] - originY;
+                vertexData[dataOffset + 2] = positions[positionOffset + 2] - originZ;
+                vertexData[dataOffset + 3] = normalX;
+                vertexData[dataOffset + 4] = normalY;
+                vertexData[dataOffset + 5] = normalZ;
+                vertexData[dataOffset + 6] = corner >= 2 ? 1.0F : 0.0F;
+                vertexData[dataOffset + 7] = corner == 1 || corner == 2 ? 1.0F : 0.0F;
+                vertexColors[vertexCount] = color;
+                vertexCount++;
+            }
+
+            ensureTriangleCapacity(triangleCount + 2);
+            for (int triangle = 0; triangle < 2; triangle++) {
+                int output = triangleCount * TRIANGLE_INT_STRIDE;
+                int input = triangle * 3;
+                triangleData[output] = vertexBase + QUAD_TRIANGLES[input];
+                triangleData[output + 1] = vertexBase + QUAD_TRIANGLES[input + 1];
+                triangleData[output + 2] = vertexBase + QUAD_TRIANGLES[input + 2];
+                triangleData[output + 3] = materialIndex;
+                triangleCount++;
+            }
+            quadCount++;
+            distantHorizonsQuadCount++;
+        }
+
+        private boolean overlapsNearScene(int minX, int minZ, int cellSize) {
+            return minX < originX + SNAPSHOT_SIZE_X
+                    && minX + cellSize > originX
+                    && minZ < originZ + SNAPSHOT_SIZE_Z
+                    && minZ + cellSize > originZ;
+        }
+
+        private int materialIndex(int textureIndex, int flags, int emissionLevel) {
+            MaterialKey materialKey = new MaterialKey(textureIndex, flags, emissionLevel);
+            return materialIndices.computeIfAbsent(materialKey, key -> {
+                int index = materials.size();
+                materials.add(new MaterialData(
+                        key.textureIndex,
+                        key.flags,
+                        key.emissionLevel / 15.0F * 4.0F,
+                        key.flags == MATERIAL_FLAG_CUTOUT ? CUTOUT_ALPHA_THRESHOLD : 0.0F));
+                return index;
+            });
+        }
+
+        private int solidColorTextureIndex() {
+            if (solidColorTextureIndex >= 0) {
+                return solidColorTextureIndex;
+            }
+            solidColorTextureIndex = textures.size();
+            textures.add(new TextureData(
+                    GENERATED_ATLAS,
+                    WHITE_SPRITE,
+                    1,
+                    1,
+                    new byte[]{(byte) 0xFF, (byte) 0xFF, (byte) 0xFF, (byte) 0xFF}));
+            return solidColorTextureIndex;
+        }
+
         private int tintColor(
                 int tintIndex,
                 ClientLevel level,
@@ -309,7 +536,8 @@ public record ClientRenderSnapshot(
                 int chunkX,
                 int sectionY,
                 int chunkZ,
-                long resourceRevision) {
+                long resourceRevision,
+                long distantHorizonsRevision) {
             return new ClientRenderSnapshot(
                     originX,
                     originY,
@@ -323,10 +551,13 @@ public record ClientRenderSnapshot(
                     skippedTranslucentQuadCount,
                     unsupportedTintQuadCount,
                     skippedModelBlockCount,
+                    distantHorizonsCellCount,
+                    distantHorizonsQuadCount,
                     chunkX,
                     sectionY,
                     chunkZ,
-                    resourceRevision);
+                    resourceRevision,
+                    distantHorizonsRevision);
         }
 
         private void ensureVertexCapacity(int required) {
