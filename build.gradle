@@ -39,6 +39,7 @@ def nativeSourceDirectory = layout.projectDirectory.dir('native')
 def nativeBuildDirectory = layout.buildDirectory.dir('native').get().asFile
 def nativeLibraryFile = new File(nativeBuildDirectory, 'bin/cyclesrenderer_native.dll')
 def nativeSmokeFile = new File(nativeBuildDirectory, 'bin/cyclesrenderer_smoke.exe')
+def nativeRuntimeDirectory = nativeLibraryFile.parentFile
 def cyclesSourceDirectory = layout.projectDirectory.dir('.deps/cycles').asFile
 def cyclesBuildDirectory = layout.projectDirectory.dir('.deps/cycles-build').asFile
 def cyclesInstallDirectory = layout.projectDirectory.dir('.deps/cycles-install').asFile
@@ -215,6 +216,12 @@ tasks.register('prepareVulkanClientConfig') {
 
 tasks.named('runClient').configure {
     dependsOn 'buildNative', 'prepareVulkanClientConfig'
+    String inheritedPath = System.getenv('PATH') ?: ''
+    String nativeRuntimePath = nativeRuntimeDirectory.absolutePath
+    if (!inheritedPath.isEmpty()) {
+        nativeRuntimePath += File.pathSeparator + inheritedPath
+    }
+    environment 'PATH', nativeRuntimePath
 }
 
 // This block of code expands all declared replace properties in the specified resource targets.

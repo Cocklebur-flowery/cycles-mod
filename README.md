@@ -74,6 +74,8 @@ run-client.cmd runClient
 
 `runNativeSmoke` 会构造一个小型彩色体素场景，等待真实 Cycles 帧并输出所选后端、设备、分辨率和帧校验和。
 
+`runClient` 只会为启动出的 Minecraft 进程把 `build/native/bin/` 加入 `PATH`，使 Windows 能找到 Cycles 的二级 DLL 依赖；它不会修改系统或用户环境变量。修改 native 运行时文件后必须重新启动客户端。
+
 ## 运行时数据流
 
 ```text
