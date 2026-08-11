@@ -16,16 +16,16 @@ import net.neoforged.neoforge.client.event.RegisterKeyMappingsEvent;
 import net.neoforged.neoforge.client.event.RenderGuiEvent;
 import net.neoforged.neoforge.client.event.RenderLevelStageEvent;
 import net.neoforged.neoforge.common.NeoForge;
-import org.joml.Vector4f;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import java.nio.ByteBuffer;
 
 @Mod(value = CyclesRendererMod.MOD_ID, dist = Dist.CLIENT)
 public final class CyclesRendererMod {
     public static final String MOD_ID = "cyclesrenderer";
 
     private static final Logger LOGGER = LoggerFactory.getLogger(CyclesRendererMod.class);
-    private static final Vector4f TEST_FRAME_COLOR = new Vector4f(0.063F, 0.094F, 0.173F, 1.0F);
     private static final KeyMapping.Category KEY_CATEGORY = new KeyMapping.Category(
             Identifier.fromNamespaceAndPath(MOD_ID, "main"));
     private static final KeyMapping TOGGLE_TEST_FRAME = new KeyMapping(
@@ -35,6 +35,7 @@ public final class CyclesRendererMod {
             KEY_CATEGORY);
 
     private static boolean testFrameEnabled;
+    private static long nativeFrameId;
 
     public CyclesRendererMod(IEventBus modEventBus) {
         modEventBus.addListener(CyclesRendererMod::registerKeyMappings);
@@ -51,7 +52,7 @@ public final class CyclesRendererMod {
     private static void onClientTick(ClientTickEvent.Post event) {
         while (TOGGLE_TEST_FRAME.consumeClick()) {
             if (testFrameEnabled) {
-                testFrameEnabled = false;
+                disableExperimentalRenderer();
                 continue;
             }
 
@@ -62,6 +63,7 @@ public final class CyclesRendererMod {
             }
 
             LOGGER.info("Native renderer bridge ready: {}", probe.message());
+            nativeFrameId = 0L;
             testFrameEnabled = true;
         }
     }
@@ -76,13 +78,33 @@ public final class CyclesRendererMod {
         }
 
         var mainTarget = Minecraft.getInstance().gameRenderer.mainRenderTarget();
-        RenderSystem.getDevice()
-                .createCommandEncoder()
-                .clearColorAndDepthTextures(
-                        mainTarget.getColorTexture(),
-                        TEST_FRAME_COLOR,
-                        mainTarget.getDepthTexture(),
-                        0.0);
+        try {
+            long frameId = nativeFrameId++;
+            ByteBuffer pixels = NativeBridge.renderFrame(
+                    mainTarget.width, mainTarget.height, frameId);
+            RenderSystem.getDevice()
+                    .createCommandEncoder()
+                    .writeToTexture(
+                            mainTarget.getColorTexture(),
+                            pixels,
+                            0,
+                            0,
+                            0,
+                            0,
+                            mainTarget.width,
+                            mainTarget.height);
+            if (frameId == 0L) {
+                LOGGER.info("Native RGBA frame upload active: {}x{}", mainTarget.width, mainTarget.height);
+            }
+        } catch (RuntimeException error) {
+            LOGGER.error("Native frame rendering failed; restoring the vanilla renderer", error);
+            disableExperimentalRenderer();
+        }
+    }
+
+    private static void disableExperimentalRenderer() {
+        testFrameEnabled = false;
+        NativeBridge.close();
     }
 
     private static void onRenderGui(RenderGuiEvent.Pre event) {
