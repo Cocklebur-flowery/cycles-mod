@@ -3,9 +3,12 @@ package dev.cyclesrenderer;
 import com.mojang.blaze3d.platform.InputConstants;
 import com.mojang.blaze3d.systems.RenderSystem;
 import dev.cyclesrenderer.nativebridge.NativeBridge;
+import dev.cyclesrenderer.scene.ClientVoxelSnapshot;
 import net.minecraft.client.KeyMapping;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
+import net.minecraft.client.multiplayer.ClientLevel;
+import net.minecraft.client.renderer.state.level.CameraRenderState;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.Identifier;
 import net.neoforged.api.distmarker.Dist;
@@ -36,6 +39,8 @@ public final class CyclesRendererMod {
 
     private static boolean testFrameEnabled;
     private static long nativeFrameId;
+    private static ClientVoxelSnapshot voxelSnapshot;
+    private static ClientLevel snapshotLevel;
 
     public CyclesRendererMod(IEventBus modEventBus) {
         modEventBus.addListener(CyclesRendererMod::registerKeyMappings);
@@ -64,6 +69,8 @@ public final class CyclesRendererMod {
 
             LOGGER.info("Native renderer bridge ready: {}", probe.message());
             nativeFrameId = 0L;
+            voxelSnapshot = null;
+            snapshotLevel = null;
             testFrameEnabled = true;
         }
     }
@@ -77,11 +84,22 @@ public final class CyclesRendererMod {
             return;
         }
 
-        var mainTarget = Minecraft.getInstance().gameRenderer.mainRenderTarget();
+        Minecraft minecraft = Minecraft.getInstance();
+        ClientLevel level = minecraft.level;
+        CameraRenderState camera = event.getLevelRenderState().cameraRenderState;
+        if (level == null || !camera.initialized) {
+            return;
+        }
+
+        var mainTarget = minecraft.gameRenderer.mainRenderTarget();
         try {
+            refreshVoxelSceneIfNeeded(level, camera);
             long frameId = nativeFrameId++;
             ByteBuffer pixels = NativeBridge.renderFrame(
-                    mainTarget.width, mainTarget.height, frameId);
+                    mainTarget.width,
+                    mainTarget.height,
+                    frameId,
+                    createCameraInput(camera));
             RenderSystem.getDevice()
                     .createCommandEncoder()
                     .writeToTexture(
@@ -102,8 +120,55 @@ public final class CyclesRendererMod {
         }
     }
 
+    private static void refreshVoxelSceneIfNeeded(
+            ClientLevel level,
+            CameraRenderState camera) {
+        if (snapshotLevel == level
+                && voxelSnapshot != null
+                && voxelSnapshot.isForCameraPosition(camera.pos)) {
+            return;
+        }
+
+        long captureStart = System.nanoTime();
+        ClientVoxelSnapshot capturedSnapshot = ClientVoxelSnapshot.capture(level, camera.pos);
+        NativeBridge.uploadScene(capturedSnapshot);
+        voxelSnapshot = capturedSnapshot;
+        snapshotLevel = level;
+        long captureMilliseconds = (System.nanoTime() - captureStart) / 1_000_000L;
+        LOGGER.info(
+                "Uploaded voxel scene: origin=({}, {}, {}), size={}x{}x{}, solid={}, capture={} ms",
+                capturedSnapshot.originX(),
+                capturedSnapshot.originY(),
+                capturedSnapshot.originZ(),
+                capturedSnapshot.sizeX(),
+                capturedSnapshot.sizeY(),
+                capturedSnapshot.sizeZ(),
+                capturedSnapshot.solidVoxelCount(),
+                captureMilliseconds);
+    }
+
+    private static NativeBridge.CameraInput createCameraInput(CameraRenderState camera) {
+        float projectionScaleY = camera.projectionMatrix.m11();
+        if (!Float.isFinite(projectionScaleY) || projectionScaleY <= 0.0F) {
+            throw new IllegalStateException("invalid camera projection scale: " + projectionScaleY);
+        }
+        float verticalFovRadians = 2.0F * (float) Math.atan(1.0F / projectionScaleY);
+        return new NativeBridge.CameraInput(
+                camera.pos.x,
+                camera.pos.y,
+                camera.pos.z,
+                camera.orientation.x(),
+                camera.orientation.y(),
+                camera.orientation.z(),
+                camera.orientation.w(),
+                verticalFovRadians,
+                Math.max(camera.depthFar, 1.0F));
+    }
+
     private static void disableExperimentalRenderer() {
         testFrameEnabled = false;
+        voxelSnapshot = null;
+        snapshotLevel = null;
         NativeBridge.close();
     }
 
