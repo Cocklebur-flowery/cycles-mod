@@ -385,6 +385,7 @@ public final class CyclesRendererMod {
         }
         try {
             NativeBridge.Diagnostics diagnostics = NativeBridge.diagnostics();
+            NativeBridge.Capabilities capabilities = NativeBridge.capabilities();
             NativeBridge.PassDescriptor passDescriptor =
                     NativeBridge.passDescriptor(diagnostics.activePassId());
             CyclesRenderSettings settings = CyclesClientConfig.snapshot();
@@ -402,8 +403,25 @@ public final class CyclesRendererMod {
                     diagnostics.width() + "x" + diagnostics.height()
                             + "  pass=" + settings.activePass().name()
                             + "/" + diagnostics.activeFramePassName()
-                            + "  sample=" + diagnostics.sampleCount()
-                            + "/" + diagnostics.targetSampleCount(),
+                            + "  sample actual/target=" + diagnostics.sampleCount()
+                            + "/" + diagnostics.targetSampleCount()
+                            + " (" + sampleProgressPercent(diagnostics) + "%)",
+                    6, y, 0xFFE0E0E0);
+            y += 10;
+            graphics.text(
+                    minecraft.font,
+                    "color=" + settings.viewTransform().name()
+                            + " supported="
+                            + capabilities.supportsViewTransform(settings.viewTransform())
+                            + " ocio=" + capabilities.colorConfigStateName()
+                            + " mask=0x" + Integer.toHexString(capabilities.colorTransformMask()),
+                    6, y, 0xFFE0E0E0);
+            y += 10;
+            graphics.text(
+                    minecraft.font,
+                    "color LUT=" + capabilities.colorLutEdgeLength() + "^3 "
+                            + capabilities.colorLutPixelFormatName()
+                            + "  " + NativeBridge.colorManagementInfo(),
                     6, y, 0xFFE0E0E0);
             y += 10;
             graphics.text(
@@ -607,6 +625,12 @@ public final class CyclesRendererMod {
                             + "/" + diagnostics.maxRenderStartMicros()
                             + " count=" + diagnostics.renderStartCount(),
                     6, y, 0xFFE0E0E0);
+            y += 10;
+            graphics.text(
+                    minecraft.font,
+                    "largest EMA stage=" + largestEmaStage(
+                            presentation, capture, scene, diagnostics),
+                    6, y, 0xFFFFDD88);
         } catch (RuntimeException error) {
             graphics.text(
                     minecraft.font,
@@ -617,5 +641,37 @@ public final class CyclesRendererMod {
 
     private static double oneDecimalMebibytes(long bytes) {
         return Math.round(bytes / 104_857.6D) / 10.0D;
+    }
+
+    private static int sampleProgressPercent(NativeBridge.Diagnostics diagnostics) {
+        if (diagnostics.targetSampleCount() <= 0) {
+            return 0;
+        }
+        return Math.min(100, Math.round(
+                diagnostics.sampleCount() * 100.0F / diagnostics.targetSampleCount()));
+    }
+
+    private static String largestEmaStage(
+            CyclesFramePresenter.Telemetry presentation,
+            SectionGeometryCollector.Telemetry capture,
+            SectionSceneManager.Telemetry scene,
+            NativeBridge.Diagnostics diagnostics) {
+        String[] names = {
+            "GPU upload", "mesh capture", "Java scene", "FFI upsert", "FFI commit",
+            "Cycles delta", "render start", "native display"
+        };
+        long[] micros = {
+            presentation.emaUploadMicros(), capture.emaCaptureMicros(), scene.emaUpdateMicros(),
+            scene.emaUpsertMicros(), scene.emaCommitMicros(),
+            diagnostics.emaSceneDeltaMicros(), diagnostics.emaRenderStartMicros(),
+            diagnostics.emaConvertMicros()
+        };
+        int largest = 0;
+        for (int index = 1; index < micros.length; ++index) {
+            if (micros[index] > micros[largest]) {
+                largest = index;
+            }
+        }
+        return names[largest] + " " + micros[largest] + "us";
     }
 }

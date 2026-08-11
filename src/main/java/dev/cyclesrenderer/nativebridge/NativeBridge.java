@@ -23,8 +23,9 @@ import static java.lang.foreign.ValueLayout.JAVA_INT;
 import static java.lang.foreign.ValueLayout.JAVA_LONG;
 
 public final class NativeBridge {
-    public static final int ABI_VERSION = 15;
+    public static final int ABI_VERSION = 16;
     public static final int PIXEL_FORMAT_RGBA16_FLOAT = 2;
+    public static final int PIXEL_FORMAT_RGBA32_FLOAT = 3;
 
     private static final String LIBRARY_PATH_PROPERTY = "cyclesrenderer.nativeLibrary";
     private static final int STRUCT_VERSION = 1;
@@ -36,6 +37,7 @@ public final class NativeBridge {
     private static final long TEST_FRAME_ID = 7L;
     private static final int BUILD_INFO_BYTES = 128;
     private static final int RENDERER_INFO_BYTES = 512;
+    private static final int COLOR_INFO_BYTES = 2048;
     private static final int MAX_NATIVE_FRAME_BYTES = 3840 * 2160 * 4;
     public static final long CAPABILITY_SETTINGS = 1L << 0;
     public static final long CAPABILITY_PASS_VIEWER = 1L << 1;
@@ -179,7 +181,27 @@ public final class NativeBridge {
             JAVA_INT.withName("maximum_width"),
             JAVA_INT.withName("maximum_height"),
             JAVA_INT.withName("device_count"),
-            MemoryLayout.sequenceLayout(5, JAVA_INT).withName("reserved"));
+            JAVA_INT.withName("color_transform_mask"),
+            JAVA_INT.withName("color_lut_edge_length"),
+            JAVA_INT.withName("color_lut_pixel_format"),
+            JAVA_INT.withName("color_config_state"),
+            JAVA_INT.withName("reserved"));
+    private static final MemoryLayout COLOR_LUT_DESCRIPTOR_LAYOUT = MemoryLayout.structLayout(
+            JAVA_INT.withName("struct_size"),
+            JAVA_INT.withName("struct_version"),
+            JAVA_INT.withName("view_transform"),
+            JAVA_INT.withName("edge_length"),
+            JAVA_INT.withName("width"),
+            JAVA_INT.withName("height"),
+            JAVA_INT.withName("pixel_format"),
+            JAVA_INT.withName("flags"),
+            JAVA_LONG.withName("pixel_byte_count"),
+            JAVA_FLOAT.withName("shaper_log2_min"),
+            JAVA_FLOAT.withName("shaper_log2_max"),
+            JAVA_FLOAT.withName("shaper_epsilon"),
+            JAVA_INT.withName("interpolation"),
+            JAVA_INT.withName("reserved_0"),
+            JAVA_INT.withName("reserved_1"));
     private static final MemoryLayout DIAGNOSTICS_LAYOUT = MemoryLayout.structLayout(
             JAVA_INT.withName("struct_size"),
             JAVA_INT.withName("struct_version"),
@@ -293,6 +315,7 @@ public final class NativeBridge {
                 || SETTINGS_LAYOUT.byteSize() != 208L
                 || PASS_DESCRIPTOR_LAYOUT.byteSize() != 64L
                 || CAPABILITIES_LAYOUT.byteSize() != 64L
+                || COLOR_LUT_DESCRIPTOR_LAYOUT.byteSize() != 64L
                 || DIAGNOSTICS_LAYOUT.byteSize() != 328L
                 || VERTEX_LAYOUT.byteSize() != 40L
                 || TRIANGLE_LAYOUT.byteSize() != 16L
@@ -417,6 +440,21 @@ public final class NativeBridge {
         }
     }
 
+    public static String colorManagementInfo() {
+        return requireState().colorManagementInfo();
+    }
+
+    public static ColorLut colorLut(CyclesRenderSettings.ViewTransform viewTransform) {
+        BridgeState state = requireState();
+        try {
+            return state.colorLut(viewTransform);
+        } catch (Throwable error) {
+            rethrowFatalError(error);
+            throw new IllegalStateException("native color LUT query failed: "
+                    + describe(error), error);
+        }
+    }
+
     public static Diagnostics diagnostics() {
         BridgeState state = requireState();
         try {
@@ -516,6 +554,7 @@ public final class NativeBridge {
         private final MethodHandle destroyRenderer;
         private final MethodHandle writeRendererInfo;
         private final MethodHandle queryCapabilities;
+        private final MethodHandle queryColorLut;
         private final MethodHandle queryPassDescriptor;
         private final MethodHandle applySettings;
         private final MethodHandle queryDiagnostics;
@@ -538,8 +577,10 @@ public final class NativeBridge {
         private final MemorySegment framePixelsSegment;
         private final ByteBuffer framePixels;
         private final String buildInfo;
+        private final String colorManagementInfo;
 
         private long generation;
+        private Capabilities cachedCapabilities;
         private boolean closed;
 
         private BridgeState(
@@ -548,6 +589,7 @@ public final class NativeBridge {
                 MethodHandle destroyRenderer,
                 MethodHandle writeRendererInfo,
                 MethodHandle queryCapabilities,
+                MethodHandle queryColorLut,
                 MethodHandle queryPassDescriptor,
                 MethodHandle applySettings,
                 MethodHandle queryDiagnostics,
@@ -560,12 +602,14 @@ public final class NativeBridge {
                 MethodHandle releaseFrame,
                 MethodHandle renderFrame,
                 MemorySegment renderer,
-                String buildInfo) {
+                String buildInfo,
+                String colorManagementInfo) {
             this.libraryArena = libraryArena;
             this.fillTestFrame = fillTestFrame;
             this.destroyRenderer = destroyRenderer;
             this.writeRendererInfo = writeRendererInfo;
             this.queryCapabilities = queryCapabilities;
+            this.queryColorLut = queryColorLut;
             this.queryPassDescriptor = queryPassDescriptor;
             this.applySettings = applySettings;
             this.queryDiagnostics = queryDiagnostics;
@@ -588,6 +632,7 @@ public final class NativeBridge {
             this.framePixelsSegment = libraryArena.allocate(MAX_NATIVE_FRAME_BYTES, 16);
             this.framePixels = framePixelsSegment.asByteBuffer();
             this.buildInfo = buildInfo;
+            this.colorManagementInfo = colorManagementInfo;
         }
 
         private static BridgeState open(Path libraryPath) throws Throwable {
@@ -616,6 +661,13 @@ public final class NativeBridge {
                 MethodHandle queryCapabilities = downcall(linker, symbols,
                         "cycles_bridge_query_capabilities",
                         FunctionDescriptor.of(JAVA_INT, ADDRESS, ADDRESS));
+                MethodHandle writeColorManagementInfo = downcall(linker, symbols,
+                        "cycles_bridge_write_color_management_info",
+                        FunctionDescriptor.of(JAVA_INT, ADDRESS, ADDRESS, JAVA_INT));
+                MethodHandle queryColorLut = downcall(linker, symbols,
+                        "cycles_bridge_query_color_lut",
+                        FunctionDescriptor.of(
+                                JAVA_INT, ADDRESS, JAVA_INT, ADDRESS, ADDRESS, JAVA_LONG));
                 MethodHandle queryPassDescriptor = downcall(linker, symbols,
                         "cycles_bridge_query_pass_descriptor",
                         FunctionDescriptor.of(JAVA_INT, JAVA_INT, ADDRESS));
@@ -671,12 +723,20 @@ public final class NativeBridge {
                 if (renderer.address() == 0L) {
                     throw new IllegalStateException("renderer creation returned a null handle");
                 }
+                String colorManagementInfo;
+                try (Arena arena = Arena.ofConfined()) {
+                    MemorySegment buffer = arena.allocate(COLOR_INFO_BYTES);
+                    checkStatus((int) writeColorManagementInfo.invokeExact(
+                            renderer, buffer, COLOR_INFO_BYTES), "color management info call");
+                    colorManagementInfo = buffer.getString(0, StandardCharsets.UTF_8);
+                }
                 return new BridgeState(
                         libraryArena,
                         fillTestFrame,
                         destroyRenderer,
                         writeRendererInfo,
                         queryCapabilities,
+                        queryColorLut,
                         queryPassDescriptor,
                         applySettings,
                         queryDiagnostics,
@@ -689,7 +749,8 @@ public final class NativeBridge {
                         releaseFrame,
                         renderFrame,
                         renderer,
-                        buildInfo);
+                        buildInfo,
+                        colorManagementInfo);
             } catch (Throwable error) {
                 if (destroyRenderer != null && renderer.address() != 0L) {
                     try {
@@ -830,6 +891,9 @@ public final class NativeBridge {
         }
 
         private Capabilities capabilities() throws Throwable {
+            if (cachedCapabilities != null) {
+                return cachedCapabilities;
+            }
             capabilitiesSegment.fill((byte) 0);
             capabilitiesSegment.set(
                     JAVA_INT, 0L, Math.toIntExact(CAPABILITIES_LAYOUT.byteSize()));
@@ -837,14 +901,76 @@ public final class NativeBridge {
             checkRendererStatus(
                     (int) queryCapabilities.invokeExact(renderer, capabilitiesSegment),
                     "capability query");
-            return new Capabilities(
+            cachedCapabilities = new Capabilities(
                     capabilitiesSegment.get(JAVA_LONG, 8L),
                     capabilitiesSegment.get(JAVA_LONG, 16L),
                     capabilitiesSegment.get(JAVA_INT, 24L),
                     capabilitiesSegment.get(JAVA_INT, 28L),
                     capabilitiesSegment.get(JAVA_INT, 32L),
                     capabilitiesSegment.get(JAVA_INT, 36L),
-                    capabilitiesSegment.get(JAVA_INT, 40L));
+                    capabilitiesSegment.get(JAVA_INT, 40L),
+                    capabilitiesSegment.get(JAVA_INT, 44L),
+                    capabilitiesSegment.get(JAVA_INT, 48L),
+                    capabilitiesSegment.get(JAVA_INT, 52L),
+                    capabilitiesSegment.get(JAVA_INT, 56L));
+            return cachedCapabilities;
+        }
+
+        private String colorManagementInfo() {
+            return colorManagementInfo;
+        }
+
+        private ColorLut colorLut(CyclesRenderSettings.ViewTransform viewTransform)
+                throws Throwable {
+            if (viewTransform.nativeId() < 2) {
+                throw new IllegalArgumentException(
+                        viewTransform + " does not require an OCIO LUT");
+            }
+            try (Arena arena = Arena.ofConfined()) {
+                MemorySegment descriptor = arena.allocate(COLOR_LUT_DESCRIPTOR_LAYOUT);
+                descriptor.set(
+                        JAVA_INT, 0L, Math.toIntExact(COLOR_LUT_DESCRIPTOR_LAYOUT.byteSize()));
+                descriptor.set(JAVA_INT, 4L, STRUCT_VERSION);
+                checkRendererStatus(
+                        (int) queryColorLut.invokeExact(
+                                renderer,
+                                viewTransform.nativeId(),
+                                descriptor,
+                                MemorySegment.NULL,
+                                0L),
+                        "color LUT descriptor query");
+                long byteCount = descriptor.get(JAVA_LONG, 32L);
+                if (byteCount <= 0L || byteCount > Integer.MAX_VALUE
+                        || (byteCount & 15L) != 0L) {
+                    throw new IllegalStateException(
+                            "invalid native color LUT byte count " + byteCount);
+                }
+                ByteBuffer pixels = ByteBuffer.allocateDirect(Math.toIntExact(byteCount))
+                        .order(ByteOrder.nativeOrder());
+                checkRendererStatus(
+                        (int) queryColorLut.invokeExact(
+                                renderer,
+                                viewTransform.nativeId(),
+                                descriptor,
+                                MemorySegment.ofBuffer(pixels),
+                                byteCount),
+                        "color LUT pixel query");
+                pixels.clear();
+                return new ColorLut(
+                        new ColorLutDescriptor(
+                                descriptor.get(JAVA_INT, 8L),
+                                descriptor.get(JAVA_INT, 12L),
+                                descriptor.get(JAVA_INT, 16L),
+                                descriptor.get(JAVA_INT, 20L),
+                                descriptor.get(JAVA_INT, 24L),
+                                descriptor.get(JAVA_INT, 28L),
+                                descriptor.get(JAVA_LONG, 32L),
+                                descriptor.get(JAVA_FLOAT, 40L),
+                                descriptor.get(JAVA_FLOAT, 44L),
+                                descriptor.get(JAVA_FLOAT, 48L),
+                                descriptor.get(JAVA_INT, 52L)),
+                        pixels.asReadOnlyBuffer().order(ByteOrder.nativeOrder()));
+            }
         }
 
         private PassDescriptor passDescriptor(int passId) throws Throwable {
@@ -1336,13 +1462,35 @@ public final class NativeBridge {
             int deviceMask,
             int maximumWidth,
             int maximumHeight,
-            int deviceCount) {
+            int deviceCount,
+            int colorTransformMask,
+            int colorLutEdgeLength,
+            int colorLutPixelFormat,
+            int colorConfigState) {
         public boolean has(long capability) {
             return (flags & capability) != 0L;
         }
 
         public boolean supportsPass(CyclesRenderSettings.PassView pass) {
             return (passMask & (1L << pass.nativeId())) != 0L;
+        }
+
+        public boolean supportsViewTransform(CyclesRenderSettings.ViewTransform viewTransform) {
+            return (colorTransformMask & (1 << viewTransform.nativeId())) != 0;
+        }
+
+        public String colorConfigStateName() {
+            return switch (colorConfigState) {
+                case 1 -> "ready";
+                case 2 -> "error";
+                default -> "unavailable";
+            };
+        }
+
+        public String colorLutPixelFormatName() {
+            return colorLutPixelFormat == PIXEL_FORMAT_RGBA32_FLOAT
+                    ? "RGBA32_FLOAT"
+                    : "unknown";
         }
 
         public boolean optixDenoiserAvailable() {
@@ -1360,6 +1508,31 @@ public final class NativeBridge {
 
         private static String availability(boolean value) {
             return value ? "available" : "unavailable";
+        }
+    }
+
+    public record ColorLutDescriptor(
+            int viewTransform,
+            int edgeLength,
+            int width,
+            int height,
+            int pixelFormat,
+            int flags,
+            long pixelByteCount,
+            float shaperLog2Min,
+            float shaperLog2Max,
+            float shaperEpsilon,
+            int interpolation) {
+    }
+
+    public record ColorLut(ColorLutDescriptor descriptor, ByteBuffer pixels) {
+        public ColorLut {
+            pixels = pixels.asReadOnlyBuffer().order(ByteOrder.nativeOrder());
+        }
+
+        @Override
+        public ByteBuffer pixels() {
+            return pixels.duplicate().order(ByteOrder.nativeOrder());
         }
     }
 
