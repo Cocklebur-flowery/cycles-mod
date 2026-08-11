@@ -19,11 +19,11 @@
 - 设置页开放设备策略、分辨率、交互/静止采样、自适应采样、时间限制、光程反弹、Clamp、像素过滤、种子、降噪、EV、Gamma、查看变换、活动 Pass 和诊断开关。设置按 revision 异步提交给 Cycles 工作线程。
 - Pass 查看器按需创建并显示 `Combined`、`Depth`、`Normal`、`Diffuse Color`、`Emission`、`Roughness` 和 `Sample Count`，不会同时把所有 Pass 复制到 Java/Vulkan。
 - Native 以 `(Pass ID, Raw/Denoised)` 缓存最近查看过的 RGBA16F Pass，默认 LRU 预算为 256 MiB；F10 显示条目、占用、命中、淘汰、注册表和活动 descriptor。Pass 只在首次访问时加入注册 mask；当前每次切换仍重建 Cycles Session，以规避 Cycles 5.2 DisplayDriver 原地切换停在 `0/1` sample 的问题。
-- 运行时能力查询会报告实际设备、可用 Pass 和降噪器。当前构建已验证 RTX 5080 上的 OptiX 降噪；移动/Settling 阶段输出 Raw，只有静止 Combined 才实际调度降噪并写入 Denoised cache。OpenImageDenoise 仍未编入 Cycles 静态库，因此会报告不可用。
+- 运行时能力查询会报告实际设备、可用 Pass 和降噪器。当前构建已在 RTX 5080 上分别验证 OptiX 与 OpenImageDenoise 2.5；移动/Settling 阶段输出 Raw，只有静止 Combined 才实际调度所选降噪器并写入 Denoised cache。
 - Java 每次只租用并上传 Native 的低分辨率 RGBA16F 新帧；Minecraft Vulkan 使用专用全屏 pipeline 在 GPU 上完成基础显示变换并最近邻放大到主渲染目标，不再在 CPU 上生成 4K RGBA 临时帧。
 - Minecraft 的 Vulkan swapchain、纹理和命令编码器仍由 Minecraft 管理；Cycles 不使用 Vulkan。
 
-当前 Native DisplayDriver、类型化 Pass cache 与 Minecraft 上传纹理均保持 scene-linear RGBA16F。`Standard` 和调试用 `Raw` 已生效，EV/Gamma 在 GPU 显示 shader 中应用；`AgX` 与 `Khronos PBR Neutral` 的配置 ID 已预留，但在 Blender OCIO 配置/LUT 正式部署前按 `Standard` 显示，不能视为 Blender 色彩管理已经完成。暂未实现 OpenImageDenoise、正确的玻璃/水折射材质、方块实体、实体、天空系统、动态光源、LabPBR 和跨平台打包。
+当前 Native DisplayDriver、类型化 Pass cache 与 Minecraft 上传纹理均保持 scene-linear RGBA16F。`Standard` 和调试用 `Raw` 已生效，EV/Gamma 在 GPU 显示 shader 中应用；`AgX` 与 `Khronos PBR Neutral` 的配置 ID 已预留，但在 Blender OCIO 配置/LUT 正式部署前按 `Standard` 显示，不能视为 Blender 色彩管理已经完成。暂未实现正确的玻璃/水折射材质、方块实体、实体、天空系统、动态光源、LabPBR 和跨平台打包。
 
 普通 Section 修改已经下沉到现有 Cycles Scene；但几何规模变化以及 Section 增删仍会让 Cycles 更新设备几何和加速结构，不能视为零成本局部 BVH 更新。共享图集、场景原点或设备变化仍会重建 Session。
 
@@ -49,6 +49,7 @@
 - CMake 3.25 或更高版本
 - Cycles `v5.2.0`，提交 `3b97e190c5ff1a2ed2160d879ad5bf95bea7b8ba`
 - Blender Windows libraries，提交 `60d6e96b917568278d400a4024c98da0fb777338`
+- OpenImageDenoise `2.5.0`（来自上述固定 Windows 依赖树）
 - CUDA 13.3、OptiX 9.1
 
 `.deps/`、`.tools/`、Gradle 缓存、构建输出和游戏运行目录均不进入 Git。
@@ -91,9 +92,9 @@ run-client.cmd runClient
 .\gradlew.bat runClient
 ```
 
-`buildNative` 会构建 native DLL 和冒烟程序，并把 `.deps/cycles-install` 中的运行时 DLL 与 `lib/kernel_*.zst` 自动部署到 `build/native/bin/`。不需要手工复制 JAR、DLL 或 GPU 内核。
+`buildNative` 会构建 native DLL 和冒烟程序，并把 `.deps/cycles-install` 中的通用运行时 DLL、OIDN 主库/core/CPU/CUDA 插件与 `lib/kernel_*.zst` 自动部署到 `build/native/bin/`。不需要手工复制 JAR、DLL 或 GPU 内核；面向 NVIDIA 的构建不会部署 OIDN HIP/SYCL 插件。
 
-`runNativeSmoke` 会构造一个带 UV、彩色纹理与 Alpha Clip 的小型网格场景，验证 ABI v15 的 RGBA16F DisplayDriver、帧租约 acquire/release、独立相机更新、能力/诊断、实际/目标 sample、Interactive/Settling/Still、动态分辨率尺寸跃迁、全部 7 个 Pass descriptor/按需注册、Raw/Denoised Pass cache、OptiX 的 Interactive Raw/Still Denoised 调度，以及 Section 创建、修改和删除，然后输出实际后端、设备、分辨率和帧校验和。
+`runNativeSmoke` 会构造一个带 UV、彩色纹理与 Alpha Clip 的小型网格场景，验证 ABI v15 的 RGBA16F DisplayDriver、帧租约 acquire/release、独立相机更新、能力/诊断、实际/目标 sample、Interactive/Settling/Still、动态分辨率尺寸跃迁、全部 7 个 Pass descriptor/按需注册、Raw/Denoised Pass cache、OptiX 与 OIDN 各自的 Interactive Raw/Still Denoised 调度，以及 Section 创建、修改和删除，然后输出实际后端、设备、分辨率和帧校验和。
 
 `runClient` 只会为启动出的 Minecraft 进程把 `build/native/bin/` 加入 `PATH`，使 Windows 能找到 Cycles 的二级 DLL 依赖；它不会修改系统或用户环境变量。修改 native 运行时文件后必须重新启动客户端。
 
@@ -153,6 +154,10 @@ Cycles 的 GPU 内核通过 `path_init()` 相对于 `cyclesrenderer_native.dll` 
 build/native/bin/
   cyclesrenderer_native.dll
   OpenImageIO.dll 等运行时 DLL
+  OpenImageDenoise.dll
+  OpenImageDenoise_core.dll
+  OpenImageDenoise_device_cpu.dll
+  OpenImageDenoise_device_cuda.dll
   lib/
     kernel_optix.ptx.zst
     kernel_optix_mnee.ptx.zst
@@ -170,7 +175,7 @@ build/native/bin/
 4. `run-client.cmd runClient`
 5. 进入世界按 F9，确认完整配置页可打开；选择 Fixed `1920 × 1080` 后返回游戏，再按 F10 确认 native 尺寸和设置 revision 更新。
 6. 按 F8 启用，确认日志/叠加层显示实际后端；依次切换 Combined、Depth、Normal、Diffuse Color、Emission、Roughness 和 Sample Count。
-7. 若能力页显示 OptiX 降噪可用，选择 OptiX 并确认 F10 的实际降噪器为 OptiX；当前 OIDN 应显示不可用。
+7. 分别选择 OptiX 与 OpenImageDenoise，确认交互期间 F10 显示所选后端但实际降噪为 Off，停止移动进入 Still 后实际降噪器切换为对应后端且 Variant 为 Denoised。
 8. 确认方块纹理上下方向正确，左右/上下转动及前后移动方向正确。
 9. 连续破坏和放置方块，确认对应 Section 更新；改变游戏视距并移动跨区块，确认范围随之变化且不出现蓝色清屏。
 10. 按 F8 恢复原版；退出并重新进入客户端，确认 CLIENT 配置仍然保留。

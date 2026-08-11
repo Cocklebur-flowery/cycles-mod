@@ -1,6 +1,6 @@
 # Cycles 降噪调度（P10）
 
-状态：P10a 已实现，等待游戏内人工验收
+状态：P10a/P10b/P10c 已完成自动验证，等待游戏内人工验收
 目标平台：Cycles 5.2、OptiX、OpenImageDenoise 2.5
 
 ## 1. 调度契约
@@ -23,13 +23,15 @@ Raw 与 Denoised 继续使用 P9 的独立缓存键。进入 Still 产生的新�
 
 - P10a：落实 Interactive Raw / Still Denoised，并用 OptiX Smoke 验证状态转换（已完成）。
 - P10b：ABI/F10 增加调度原因、有效起始 sample、运行与跳过计数（已完成）。
-- P10c：用本地 Blender Windows 依赖重建 Cycles，启用 OIDN 2.5 并验证 DLL 部署与实际渲染。
+- P10c：用本地 Blender Windows 依赖重建 Cycles，启用 OIDN 2.5 并验证 DLL 部署与实际渲染（已完成）。
 
 P10c 不从系统目录寻找或安装依赖；只允许使用 `.deps/cycles/lib/windows_x64/openimagedenoise` 中已经下载的头文件、导入库和运行时 DLL。若链接或运行闭包不完整，停止并报告缺失文件。
 
 ## 3. 验证
 
-Native Smoke 在 RTX/OptiX 可用时必须观察到：启用设置后的首个 Interactive 帧为 Raw、`effective_denoiser=Off`；静止延迟后 Combined 变为 Denoised 且 `effective_denoiser=OptiX`；随后 Pass cache 仍同时保留 Combined Denoised 与调试 Pass Raw。
+Native Smoke 在 RTX/OptiX 可用时必须分别对 OptiX 与 OIDN 观察到：启用设置后的首个 Interactive 帧为 Raw、`effective_denoiser=Off`；静止延迟后 Combined 变为 Denoised 且 `effective_denoiser` 等于所选后端。OptiX 路径随后还验证 Pass cache 同时保留 Combined Denoised 与调试 Pass Raw。
+
+P10c 的固定 Windows 构建以 `WITH_CYCLES_OPENIMAGEDENOISE=ON` 生成 Cycles 静态库。Native 链接 OIDN 2.5 导入库，并只部署 NVIDIA/CPU 所需的主库、core、CPU 和 CUDA 四个 DLL；HIP/SYCL 插件不进入运行目录。RTX 5080 smoke 已实际完成 OptiX 和 OIDN 两条 Still Denoised 渲染路径，而不是只检查能力位。
 
 ABI v15 在诊断结构尾部追加：选中降噪器、当前是否调度、有效起始 sample、调度原因，以及累计 run/skip 次数。有效起始 sample 是 `min(配置起始值, 当前目标 samples)`，反映 Cycles 会在最后一个 sample 强制执行降噪的实际规则。run/skip 统计渲染请求，不宣称是降噪器内部调用次数或 GPU 耗时。
 

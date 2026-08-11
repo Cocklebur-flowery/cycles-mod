@@ -1,7 +1,7 @@
 # 渲染数据桥与 Cycles 画面控制里程碑
 
 状态：已确认，实施中（单元 A/A2 已验收；单元 D 基础接入已收口；类型化 HDR Pass 缓存 P9a 已完成自动验证）
-基线：Minecraft 26.2 / NeoForge 26.2.0.58 / Cycles 5.2 / C ABI v13
+基线：Minecraft 26.2 / NeoForge 26.2.0.58 / Cycles 5.2 / C ABI v15
 
 ## 1. 目标
 
@@ -35,7 +35,7 @@
 - 内部分辨率固定上限为 `480 × 270`，采样固定为 8。
 - OutputDriver 立即把线性浮点结果转成 sRGB RGBA8，超过显示范围的 HDR 信息被截断。
 - OpenColorIO 库已链接，但运行目录没有 Blender OCIO 配置和 LUT。
-- OptiX 已构建；OpenImageDenoise 依赖已下载，但 Cycles 静态库当前以 `WITH_CYCLES_OPENIMAGEDENOISE=OFF` 构建。
+- OptiX 与 OpenImageDenoise 2.5 均已构建；Native 只部署 OIDN 主库、core、CPU 与 CUDA 插件。
 - 开启实验渲染器时会跳过整个原版世界 FrameGraph，其他 MOD 插入其中的世界渲染 Pass 也不会执行。
 
 必须保留的现有行为：
@@ -260,7 +260,7 @@ Minecraft 相机持续运动，不能直接照搬 Blender 离线渲染的单一�
 - 查询实际可用性；界面不能显示一个运行时不可用的选项为“正常”。
 - 指定降噪器失败时按照设置决定自动回退或报告错误，不能导致 Minecraft 崩溃。
 
-当前实现状态：ABI v12 已区分“配置请求”“构建时编译能力”“设备枚举能力”和“当前实际生效降噪器”，追加实际采样、帧管线和场景更新遥测，将相机更新与成品帧复制解耦，通过 Cycles DisplayDriver 保存 scene-linear RGBA16F，并用三槽 acquire/release 租约向 FFM 暴露稳定只读帧。Minecraft 实时路径直接上传该 RGBA16F view，旧 RGBA8 转换只保留给兼容调用与 smoke。OptiX 已在 RTX 5080 的 native 冒烟中实际启用并产出画面；当前 Cycles 静态库仍以 `WITH_CYCLES_OPENIMAGEDENOISE=OFF` 构建，因此 OIDN 会准确报告为不可用，未假装已经支持。重建 Cycles/OIDN 及部署 DLL 保留到后续独立阶段。
+当前实现状态：ABI v15 已区分“配置请求”“构建时编译能力”“设备枚举能力”“已选择后端”和“当前实际调度后端”，并报告调度原因、有效起始 sample 与 run/skip 请求计数。Minecraft 实时路径直接上传 Cycles DisplayDriver 的 scene-linear RGBA16F view。Cycles 静态库已以 `WITH_CYCLES_OPENIMAGEDENOISE=ON` 重建；RTX 5080 native smoke 已分别让 OptiX 和 OIDN 完成 `Interactive Raw -> Still Denoised`，并验证 OIDN 运行库闭包。
 
 ### 6.4 线性 HDR 与色彩管理
 
@@ -423,7 +423,7 @@ Section 流送切换到 ABI v5 后，旧高度场暂不再合并进活动场景�
 - HDR 测试场景在 AgX 下保留高光层次，Raw/Standard 行为可对照。
 - 设置错误不会让 Minecraft 进程崩溃。
 
-当前状态：采样、分辨率、光程、过滤、设备策略、OptiX 降噪和基础显示参数已经接通，Combined 显示源已是可租用并由 Vulkan 直接上传的 scene-linear RGBA16F；渐进状态已明确区分 Interactive、Settling 和 Still。ABI v14 已完成类型化 HDR Pass cache、descriptor 和 on-demand registry；Blender OCIO 资产/AgX 和 OIDN 构建尚未完成，因此单元 B 仍只完成了一部分，不标记为整体验收。
+当前状态：采样、分辨率、光程、过滤、设备策略、OptiX/OIDN 降噪和基础显示参数已经接通，Combined 显示源已是可租用并由 Vulkan 直接上传的 scene-linear RGBA16F；渐进状态已明确区分 Interactive、Settling 和 Still。ABI v15 已完成类型化 HDR Pass cache、descriptor、on-demand registry 和降噪调度诊断；Blender OCIO 资产/AgX 尚未完成，因此单元 B 仍只完成了一部分，不标记为整体验收。
 
 ### 单元 C：Minecraft 设置界面与 Pass 查看器
 

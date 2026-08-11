@@ -7,6 +7,7 @@ set(CYCLES_SOURCE_DIR "${CYCLESRENDERER_ROOT}/.deps/cycles" CACHE PATH "Cycles s
 set(CYCLES_BUILD_DIR "${CYCLESRENDERER_ROOT}/.deps/cycles-build" CACHE PATH "Cycles build tree")
 set(CYCLES_INSTALL_DIR "${CYCLESRENDERER_ROOT}/.deps/cycles-install" CACHE PATH "Cycles install tree")
 set(CYCLES_WINDOWS_LIB_DIR "${CYCLES_SOURCE_DIR}/lib/windows_x64" CACHE PATH "Blender Windows dependency tree")
+set(OIDN_ROOT_DIR "${CYCLES_WINDOWS_LIB_DIR}/openimagedenoise")
 
 set(CYCLES_RELEASE_LIB_DIR "${CYCLES_BUILD_DIR}/lib/Release")
 
@@ -19,6 +20,17 @@ endfunction()
 require_file("${CYCLES_SOURCE_DIR}/src/session/session.h" "Cycles headers")
 require_file("${CYCLES_RELEASE_LIB_DIR}/cycles_session.lib" "Cycles Release libraries")
 require_file("${CYCLES_INSTALL_DIR}/lib/kernel_optix.ptx.zst" "Cycles OptiX kernel")
+require_file("${OIDN_ROOT_DIR}/lib/OpenImageDenoise.lib" "OpenImageDenoise import library")
+
+set(OIDN_RUNTIME_DLLS
+    "${OIDN_ROOT_DIR}/bin/OpenImageDenoise.dll"
+    "${OIDN_ROOT_DIR}/bin/OpenImageDenoise_core.dll"
+    "${OIDN_ROOT_DIR}/bin/OpenImageDenoise_device_cpu.dll"
+    "${OIDN_ROOT_DIR}/bin/OpenImageDenoise_device_cuda.dll"
+)
+foreach(runtime_dll IN LISTS OIDN_RUNTIME_DLLS)
+    require_file("${runtime_dll}" "OpenImageDenoise runtime")
+endforeach()
 
 add_library(cyclesrenderer_native SHARED
     src/cycles_bridge.cpp
@@ -39,6 +51,7 @@ target_compile_definitions(cyclesrenderer_native PRIVATE
     WITH_CUDA
     WITH_CUDA_DYNLOAD
     WITH_OPTIX
+    WITH_OPENIMAGEDENOISE
     WITH_OCIO
     WITH_PUGIXML
     WITH_SYSTEM_PUGIXML
@@ -65,6 +78,7 @@ target_include_directories(cyclesrenderer_native
         "${CYCLES_WINDOWS_LIB_DIR}/openexr/include/OpenEXR"
         "${CYCLES_WINDOWS_LIB_DIR}/imath/include"
         "${CYCLES_WINDOWS_LIB_DIR}/imath/include/Imath"
+        "${OIDN_ROOT_DIR}/include"
 )
 
 target_link_libraries(cyclesrenderer_native PRIVATE
@@ -92,6 +106,7 @@ target_link_libraries(cyclesrenderer_native PRIVATE
     "${CYCLES_WINDOWS_LIB_DIR}/pugixml/lib/pugixml.lib"
     "${CYCLES_WINDOWS_LIB_DIR}/zlib/lib/libz_st.lib"
     "${CYCLES_WINDOWS_LIB_DIR}/pthreads/lib/pthreadVC3.lib"
+    "${OIDN_ROOT_DIR}/lib/OpenImageDenoise.lib"
     psapi
     Version
     Dbghelp
@@ -120,7 +135,16 @@ set_target_properties(cyclesrenderer_native PROPERTIES
 )
 
 file(GLOB CYCLES_RUNTIME_DLLS CONFIGURE_DEPENDS "${CYCLES_INSTALL_DIR}/*.dll")
+list(FILTER CYCLES_RUNTIME_DLLS EXCLUDE REGEX "[/\\\\]OpenImageDenoise[^/\\\\]*\\.dll$")
 foreach(runtime_dll IN LISTS CYCLES_RUNTIME_DLLS)
+    add_custom_command(TARGET cyclesrenderer_native POST_BUILD
+        COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+            "${runtime_dll}"
+            "$<TARGET_FILE_DIR:cyclesrenderer_native>"
+        VERBATIM
+    )
+endforeach()
+foreach(runtime_dll IN LISTS OIDN_RUNTIME_DLLS)
     add_custom_command(TARGET cyclesrenderer_native POST_BUILD
         COMMAND "${CMAKE_COMMAND}" -E copy_if_different
             "${runtime_dll}"

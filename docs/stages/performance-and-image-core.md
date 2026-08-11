@@ -98,7 +98,7 @@ F10 叠加层采用“当前值 + 最近窗口统计”，不把目标值伪装�
 | P7 | `feat: present scene-linear rgba16f frames` | Vulkan RGBA16F 与最小显示 Shader | 已完成（P7a/P7b） |
 | P8 | `feat: add progressive interaction states` | Interactive/Settling/Still 和动态分辨率 | 已完成（P8a/P8b） |
 | P9 | `feat: add typed pass cache` | Pass 注册表、内存预算、raw/denoised 分离 | 已完成（P9a/P9b，待游戏内人工验收） |
-| P10 | `feat: schedule cycles denoisers` | OptiX/OIDN 能力、调度与 OIDN 构建 | P10a 调度已完成；P10b/P10c 待开始 |
+| P10 | `feat: schedule cycles denoisers` | OptiX/OIDN 能力、调度与 OIDN 构建 | 已完成（P10a/P10b/P10c，待游戏内人工验收） |
 | P11 | `feat: integrate ocio color management` | OCIO Vulkan、AgX、ACES 2、工作/显示空间 | 待开始 |
 | P12 | `feat: expose sampling and physical camera controls` | 原生蓝噪声、镜头、裁剪、景深 | 待开始 |
 | P13 | `spike: evaluate hdr and vulkan interop` | Windows HDR 与 CUDA/Vulkan 互操作报告 | 待开始 |
@@ -220,3 +220,15 @@ P1 至 P4 完成后进行一次 1080p 游戏人工里程碑：观察实际 sampl
 - 调试 Pass 始终保持 Raw；`effective_denoiser` 只报告当前渲染实际启用的降噪器，不把配置选择或设备能力冒充成生效状态。
 - Cycles 在 sampling state 切换时更新 Integrator denoise topology；OptiX Smoke 已验证同一 Renderer 中 `Interactive Raw -> Still Denoised`、Combined Denoised/Depth Raw 分键缓存及后续状态机回归。
 - 调度契约、OIDN 构建边界和人工验证见 [Cycles 降噪调度](denoising.md)。
+
+### P10b：降噪调度诊断
+
+- ABI v15 在诊断结构尾部追加 selected/effective 后端、是否实际调度、调度原因、有效起始 sample 与累计 run/skip 渲染请求。
+- `effective_denoiser` 只表示当前渲染真正执行的后端；Interactive/Settling、调试 Pass 和不可用配置不会再被误报为正在降噪。
+- F10 同时显示选择值、实际值、原因和计数，便于区分“设置已选中”“设备支持”和“Still 帧已执行”三类状态。
+
+### P10c：OpenImageDenoise 2.5 构建与部署
+
+- 固定 Cycles 构建改为 `WITH_CYCLES_OPENIMAGEDENOISE=ON`，依赖获取清单纳入本地 `openimagedenoise` 目录；不从系统目录安装或寻找另一份 OIDN。
+- Native 链接 OIDN 导入库，只复制主库、core、CPU 和 CUDA 四个 DLL；不部署本阶段不会使用的 HIP/SYCL 插件。
+- RTX 5080 native smoke 在同一完整回归中分别验证 OptiX 与 OIDN 的 `Interactive Raw -> Still Denoised`，并继续覆盖 Pass cache、Section 增删和动态分辨率。

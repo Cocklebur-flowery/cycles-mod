@@ -290,7 +290,9 @@ bool wait_for_denoised_still(
     CyclesBridgeFrame& frame,
     std::vector<std::uint8_t>& pixels,
     CyclesBridgeDiagnostics& diagnostics,
-    std::string& info) {
+    std::string& info,
+    std::uint32_t expected_denoiser,
+    const char* denoiser_name) {
     for (int attempt = 0; attempt < 400; ++attempt) {
         camera.frame_id++;
         if (!require_ok(
@@ -304,8 +306,8 @@ bool wait_for_denoised_still(
         }
         info = renderer_info(renderer);
         if (diagnostics.sampling_state == CYCLES_BRIDGE_SAMPLING_STILL
-            && diagnostics.effective_denoiser == 1U
-            && diagnostics.selected_denoiser == 1U
+            && diagnostics.effective_denoiser == expected_denoiser
+            && diagnostics.selected_denoiser == expected_denoiser
             && diagnostics.denoiser_scheduled != 0U
             && diagnostics.effective_denoiser_start_sample == 1U
             && diagnostics.denoiser_schedule_reason
@@ -318,7 +320,7 @@ bool wait_for_denoised_still(
         }
         Sleep(10);
     }
-    std::cerr << "OptiX denoiser never produced a Still frame: " << info
+    std::cerr << denoiser_name << " denoiser never produced a Still frame: " << info
               << ";state=" << diagnostics.sampling_state
               << ";effective=" << diagnostics.effective_denoiser
               << ";selected=" << diagnostics.selected_denoiser
@@ -615,7 +617,7 @@ int main(int argc, char** argv) {
             || diagnostics.denoiser_schedule_skip_count == 0U
             || diagnostics.active_frame_variant != CYCLES_BRIDGE_FRAME_VARIANT_RAW
             || !wait_for_denoised_still(
-                renderer, camera, frame, pixels, diagnostics, info)) {
+                renderer, camera, frame, pixels, diagnostics, info, 1U, "OptiX")) {
             std::cerr << "detected OptiX denoiser did not follow Interactive Raw -> Still Denoised: "
                       << "state=" << diagnostics.sampling_state
                       << ";effective=" << diagnostics.effective_denoiser
@@ -654,7 +656,7 @@ int main(int argc, char** argv) {
                 renderer, camera, frame, pixels, "denoised cache combined", info, true,
                 CYCLES_BRIDGE_PASS_COMBINED)
             || !wait_for_denoised_still(
-                renderer, camera, frame, pixels, diagnostics, info)
+                renderer, camera, frame, pixels, diagnostics, info, 1U, "OptiX")
             || !require_ok(
                 cycles_bridge_query_diagnostics(renderer, &diagnostics),
                 "denoised pass cache diagnostics")
@@ -681,6 +683,65 @@ int main(int argc, char** argv) {
             cycles_bridge_destroy_renderer(renderer);
             return 1;
         }
+    }
+
+    if ((capabilities.capability_flags & CYCLES_BRIDGE_CAPABILITY_OIDN_COMPILED) == 0U
+        || (capabilities.denoiser_mask & CYCLES_BRIDGE_DENOISER_OPENIMAGEDENOISE) == 0U) {
+        std::cerr << "OpenImageDenoise was not compiled or exposed by the active device\n";
+        cycles_bridge_destroy_renderer(renderer);
+        return 1;
+    }
+
+    std::cerr << "[smoke] Enabling the detected OpenImageDenoise denoiser\n";
+    settings.denoiser_mode = 3U;
+    settings.stationary_delay_millis = 500U;
+    settings.revision++;
+    if (!require_ok(
+            cycles_bridge_apply_settings(renderer, &settings),
+            "OpenImageDenoise settings")
+        || !wait_for_settings(renderer, settings.revision)
+        || !wait_for_updated_frame(
+            renderer, camera, frame, pixels, "OpenImageDenoise", info, true)
+        || !require_ok(
+            cycles_bridge_query_diagnostics(renderer, &diagnostics),
+            "OpenImageDenoise diagnostics")
+        || diagnostics.effective_denoiser != 0U
+        || diagnostics.selected_denoiser != 2U
+        || diagnostics.denoiser_scheduled != 0U
+        || diagnostics.effective_denoiser_start_sample != 0U
+        || (diagnostics.denoiser_schedule_reason
+                != CYCLES_BRIDGE_DENOISER_SCHEDULE_INTERACTIVE
+            && diagnostics.denoiser_schedule_reason
+                != CYCLES_BRIDGE_DENOISER_SCHEDULE_SETTLING)
+        || diagnostics.denoiser_schedule_skip_count == 0U
+        || diagnostics.active_frame_variant != CYCLES_BRIDGE_FRAME_VARIANT_RAW
+        || !wait_for_denoised_still(
+            renderer, camera, frame, pixels, diagnostics, info, 2U, "OpenImageDenoise")) {
+        std::cerr << "detected OpenImageDenoise denoiser did not follow Interactive Raw -> Still Denoised: "
+                  << "state=" << diagnostics.sampling_state
+                  << ";effective=" << diagnostics.effective_denoiser
+                  << ";selected=" << diagnostics.selected_denoiser
+                  << ";scheduled=" << diagnostics.denoiser_scheduled
+                  << ";start=" << diagnostics.effective_denoiser_start_sample
+                  << ";reason=" << diagnostics.denoiser_schedule_reason
+                  << ";run/skip=" << diagnostics.denoiser_schedule_run_count
+                  << '/' << diagnostics.denoiser_schedule_skip_count
+                  << ";variant=" << diagnostics.active_frame_variant << '\n';
+        cycles_bridge_destroy_renderer(renderer);
+        return 1;
+    }
+
+    settings.denoiser_mode = 0U;
+    settings.stationary_delay_millis = 150U;
+    settings.revision++;
+    if (!require_ok(
+            cycles_bridge_apply_settings(renderer, &settings),
+            "OpenImageDenoise restore settings")
+        || !wait_for_settings(renderer, settings.revision)
+        || !wait_for_updated_frame(
+            renderer, camera, frame, pixels, "OpenImageDenoise restore", info, true)) {
+        cycles_bridge_destroy_renderer(renderer);
+        return 1;
     }
 
     if (!wait_for_actual_sample(renderer, diagnostics)) {
