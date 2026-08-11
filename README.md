@@ -6,7 +6,7 @@
 
 ## 当前阶段
 
-- Cycles 5.2 已通过 C ABI v12 接入 Java Foreign Function & Memory API；v12 在 RGBA16F DisplayDriver 后加入三槽帧环与显式 acquire/release 租约。
+- Cycles 5.2 已通过 C ABI v12 接入 Java Foreign Function & Memory API；v12 在 RGBA16F DisplayDriver 后加入三槽帧环与显式 acquire/release 租约，Minecraft 实时路径已直接上传租约中的 RGBA16F。
 - 近景不再扫描固定 `64 × 32 × 64` 方块盒，而是直接复制 Minecraft `SectionCompiler` 生成的 16³ Section 网格。
 - 活跃 Section 范围跟随游戏的“有效渲染距离”；水平判定复用原版区块距离规则，垂直范围复用原版渲染器的 Section 范围和世界高度边界。
 - 方块放置/破坏、光照更新、区块装卸和视距移动触发原版 Section 重编译后，会以稳定 Section ID 增量替换或移除 Native 几何。
@@ -144,7 +144,7 @@ DH Provider 代码仍隔离保留，但本阶段不再把其低模高度场合�
 
 ## ABI 与运行时约束
 
-ABI v12 保留旧的整场景入口、v5 Section 布局和 v6 设置/能力字段；`CyclesBridgeRenderSettings` 固定 208 字节、`CyclesBridgeCapabilities` 固定 64 字节，`CyclesBridgeDiagnostics` 固定 240 字节。v7 报告实际采样；v8 追加帧管线统计；v9 追加场景更新时间；v10 新增 `update_camera`；v11 切换 scene-linear `half4`；v12 新增 `CyclesBridgeFrameView` 与 `acquire_frame/release_frame`。租约持有期间对应槽位不会被 Cycles 覆写，Java `AcquiredFrame` 必须用 try-with-resources 在 `NativeBridge.close()` 前释放。旧 `render_frame` 继续兼容转换 RGBA8；P7 将让 Vulkan 直接消费租约中的 RGBA16F。Java 与 DLL 的 ABI 版本不一致时会在启用前拒绝运行。
+ABI v12 保留旧的整场景入口、v5 Section 布局和 v6 设置/能力字段；`CyclesBridgeRenderSettings` 固定 208 字节、`CyclesBridgeCapabilities` 固定 64 字节，`CyclesBridgeDiagnostics` 固定 240 字节。v7 报告实际采样；v8 追加帧管线统计；v9 追加场景更新时间；v10 新增 `update_camera`；v11 切换 scene-linear `half4`；v12 新增 `CyclesBridgeFrameView` 与 `acquire_frame/release_frame`。租约持有期间对应槽位不会被 Cycles 覆写，Java `AcquiredFrame` 必须用 try-with-resources 在 `NativeBridge.close()` 前释放。Minecraft 实时路径直接把租约上传到 `GpuFormat.RGBA16_FLOAT`；旧 `render_frame` 的 RGBA8 转换仅保留给兼容调用和 smoke test。Java 与 DLL 的 ABI 版本不一致时会在启用前拒绝运行。
 
 Cycles 的 GPU 内核通过 `path_init()` 相对于 `cyclesrenderer_native.dll` 查找。因此以下布局是运行时契约：
 

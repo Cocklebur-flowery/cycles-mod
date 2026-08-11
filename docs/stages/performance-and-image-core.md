@@ -173,3 +173,9 @@ P1 至 P4 完成后进行一次 1080p 游戏人工里程碑：观察实际 sampl
 - Native 维护 3 个独立 half4 槽位；当前发布槽与读者仍持有的槽位都不会被 Cycles 选为下一写入目标。没有空闲槽时丢弃本次显示更新，不阻塞渲染线程等待 Java。
 - Java FFM 将 Native 指针重新解释为受限 `ByteBuffer`，`AcquiredFrame.close()` 先使 Java view 失效，再释放 Native token。消费者必须使用 try-with-resources，且不得跨 `NativeBridge.close()` 保存租约。
 - F10 新增 active/peak lease、槽位数和因槽位繁忙而丢弃的显示更新；Native smoke 验证 updated/unchanged acquire、RGBA16F 字节数、release 和租约遥测。
+
+### P7a：直接上传 half-float
+
+- Minecraft 实时帧改为消费 ABI v12 acquired view，不再调用 `render_frame` 的 RGBA8 兼容拷贝。
+- Presenter 创建 `GpuFormat.RGBA16_FLOAT` 纹理并按每像素 8 字节上传；命令上传记录后立即释放 Native 槽位租约。
+- RGBA8 转换仍供 native smoke 与旧调用者使用，但已离开游戏实时渲染循环。

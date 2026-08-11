@@ -23,7 +23,7 @@ public final class CyclesFramePresenter {
     private long emaUploadMicros;
     private long maxUploadMicros;
 
-    public void update(NativeBridge.RenderedFrame frame) {
+    public void update(NativeBridge.AcquiredFrame frame) {
         RenderSystem.assertOnRenderThread();
         if (!frame.updated()) {
             return;
@@ -31,13 +31,17 @@ public final class CyclesFramePresenter {
         if (frame.pixels() == null || frame.width() <= 0 || frame.height() <= 0) {
             throw new IllegalArgumentException("updated native frame has no pixel data");
         }
+        if (frame.pixelFormat() != NativeBridge.PIXEL_FORMAT_RGBA16_FLOAT) {
+            throw new IllegalArgumentException(
+                    "unsupported native frame pixel format: " + frame.pixelFormat());
+        }
         if (nativeFrameTarget == null) {
             nativeFrameTarget = new TextureTarget(
                     "Cycles native frame",
                     frame.width(),
                     frame.height(),
                     false,
-                    GpuFormat.RGBA8_UNORM);
+                    GpuFormat.RGBA16_FLOAT);
         } else if (nativeFrameTarget.width != frame.width()
                 || nativeFrameTarget.height != frame.height()) {
             nativeFrameTarget.resize(frame.width(), frame.height());
@@ -58,7 +62,7 @@ public final class CyclesFramePresenter {
         maxUploadMicros = Math.max(maxUploadMicros, lastUploadMicros);
         uploadCount++;
         uploadedBytes += Math.multiplyExact(
-                Math.multiplyExact((long) frame.width(), frame.height()), 4L);
+                Math.multiplyExact((long) frame.width(), frame.height()), 8L);
         if (lastGeneration != 0L && frame.generation() > lastGeneration + 1L) {
             generationGaps += frame.generation() - lastGeneration - 1L;
         }
@@ -89,6 +93,10 @@ public final class CyclesFramePresenter {
 
     public boolean hasFrame() {
         return ready && nativeFrameTarget != null;
+    }
+
+    public long generation() {
+        return lastGeneration;
     }
 
     public Telemetry telemetry() {

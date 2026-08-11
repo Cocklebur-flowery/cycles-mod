@@ -240,25 +240,30 @@ public final class CyclesRendererMod {
             recordCameraCall(System.nanoTime() - cameraStart);
 
             long now = System.nanoTime();
-            NativeBridge.RenderedFrame frame = null;
+            int deliveredWidth = 0;
+            int deliveredHeight = 0;
+            int deliveredSamples = 0;
+            boolean framePolled = false;
             if (!FRAME_PRESENTER.hasFrame()
                     || now - lastFrameDeliveryNanos >= FRAME_DELIVERY_INTERVAL_NANOS) {
                 long bridgeStart = System.nanoTime();
-                frame = NativeBridge.renderFrame(
-                        mainTarget.width,
-                        mainTarget.height,
-                        frameId,
-                        cameraInput);
-                recordBridgeCall(System.nanoTime() - bridgeStart);
+                try (NativeBridge.AcquiredFrame frame = NativeBridge.acquireFrame(
+                        FRAME_PRESENTER.generation())) {
+                    recordBridgeCall(System.nanoTime() - bridgeStart);
+                    framePolled = true;
+                    deliveredWidth = frame.width();
+                    deliveredHeight = frame.height();
+                    deliveredSamples = frame.sampleCount();
+                    FRAME_PRESENTER.update(frame);
+                }
                 lastFrameDeliveryNanos = System.nanoTime();
-                FRAME_PRESENTER.update(frame);
             } else {
                 skippedFrameDeliveryCount++;
             }
             FRAME_PRESENTER.present(mainTarget);
 
             now = System.nanoTime();
-            if (frame != null
+            if (framePolled
                     && (update.reset() || update.committed())
                     && now - lastStatsLogNanos >= 2_000_000_000L) {
                 lastStatsLogNanos = now;
@@ -273,9 +278,9 @@ public final class CyclesRendererMod {
                         update.acceptedSections(),
                         update.uploadedSections(),
                         update.removedSections(),
-                        frame.width(),
-                        frame.height(),
-                        frame.sampleCount(),
+                        deliveredWidth,
+                        deliveredHeight,
+                        deliveredSamples,
                         NativeBridge.rendererInfo());
             }
         } catch (RuntimeException error) {
@@ -417,7 +422,7 @@ public final class CyclesRendererMod {
             graphics.text(
                     minecraft.font,
                     "store=" + diagnostics.framePixelFormatName()
-                            + " pull=RGBA8_UNORM",
+                            + " lease/upload=RGBA16_FLOAT",
                     6, y, 0xFFE0E0E0);
             y += 10;
             graphics.text(

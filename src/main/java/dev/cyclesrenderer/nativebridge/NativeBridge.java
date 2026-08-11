@@ -24,6 +24,7 @@ import static java.lang.foreign.ValueLayout.JAVA_LONG;
 
 public final class NativeBridge {
     public static final int ABI_VERSION = 12;
+    public static final int PIXEL_FORMAT_RGBA16_FLOAT = 2;
 
     private static final String LIBRARY_PATH_PROPERTY = "cyclesrenderer.nativeLibrary";
     private static final int STRUCT_VERSION = 1;
