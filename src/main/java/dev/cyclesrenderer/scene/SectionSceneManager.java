@@ -1,0 +1,418 @@
+package dev.cyclesrenderer.scene;
+
+import dev.cyclesrenderer.nativebridge.NativeBridge;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.multiplayer.ClientLevel;
+import net.minecraft.client.renderer.texture.TextureAtlas;
+import net.minecraft.client.renderer.texture.TextureAtlasSprite;
+import net.minecraft.core.SectionPos;
+import net.minecraft.resources.Identifier;
+import net.minecraft.server.level.ChunkTrackingView;
+import net.minecraft.util.ARGB;
+import net.minecraft.util.Mth;
+import net.minecraft.world.level.ChunkPos;
+import net.minecraft.world.phys.Vec3;
+
+import java.util.HashMap;
+import java.util.Iterator;
+import java.util.Map;
+import java.util.concurrent.ConcurrentLinkedQueue;
+
+public final class SectionSceneManager {
+    private static final int MAX_SECTION_UPLOADS_PER_FRAME = 24;
+    private static final long SECTION_UPLOAD_BUDGET_NANOS = 4_000_000L;
+    private static final long INITIAL_SCENE_QUIET_NANOS = 750_000_000L;
+    private static final long UPDATE_SCENE_QUIET_NANOS = 100_000_000L;
+    private static final int ORIGIN_GRANULARITY = 256;
+    private static final int ORIGIN_REBASE_DISTANCE = 1024;
+
+    private final Map<Long, CachedSection> sections = new HashMap<>();
+    private final ConcurrentLinkedQueue<Long> unloadedChunks = new ConcurrentLinkedQueue<>();
+
+    private ClientLevel level;
+    private long resourceRevision = Long.MIN_VALUE;
+    private int sceneOriginX;
+    private int sceneOriginY;
+    private int sceneOriginZ;
+    private int lastCameraSectionX = Integer.MIN_VALUE;
+    private int lastCameraSectionY = Integer.MIN_VALUE;
+    private int lastCameraSectionZ = Integer.MIN_VALUE;
+    private int lastViewDistance = Integer.MIN_VALUE;
+    private boolean pendingCommit;
+    private boolean hasCommittedScene;
+    private long lastMutationNanos;
+    private long uploadedSectionCount;
+    private long removedSectionCount;
+    private int activeVertexCount;
+    private int activeTriangleCount;
+
+    public UpdateResult update(
+            Minecraft minecraft,
+            ClientLevel currentLevel,
+            Vec3 cameraPosition,
+            long currentResourceRevision) {
+        int cameraSectionX = SectionPos.blockToSectionCoord(Mth.floor(cameraPosition.x));
+        int cameraSectionY = SectionPos.blockToSectionCoord(Mth.floor(cameraPosition.y));
+        int cameraSectionZ = SectionPos.blockToSectionCoord(Mth.floor(cameraPosition.z));
+        int viewDistance = minecraft.options.getEffectiveRenderDistance();
+        boolean reset = level != currentLevel
+                || resourceRevision != currentResourceRevision
+                || needsOriginRebase(cameraPosition);
+        if (reset) {
+            resetScene(minecraft, currentLevel, cameraPosition, currentResourceRevision);
+            cameraSectionX = SectionPos.blockToSectionCoord(Mth.floor(cameraPosition.x));
+            cameraSectionY = SectionPos.blockToSectionCoord(Mth.floor(cameraPosition.y));
+            cameraSectionZ = SectionPos.blockToSectionCoord(Mth.floor(cameraPosition.z));
+            viewDistance = minecraft.options.getEffectiveRenderDistance();
+        }
+
+        boolean rangeChanged = cameraSectionX != lastCameraSectionX
+                || cameraSectionY != lastCameraSectionY
+                || cameraSectionZ != lastCameraSectionZ
+                || viewDistance != lastViewDistance;
+        if (rangeChanged) {
+            evictOutsideVanillaRange(
+                    currentLevel,
+                    cameraSectionX,
+                    cameraSectionY,
+                    cameraSectionZ,
+                    viewDistance);
+            lastCameraSectionX = cameraSectionX;
+            lastCameraSectionY = cameraSectionY;
+            lastCameraSectionZ = cameraSectionZ;
+            lastViewDistance = viewDistance;
+        }
+        processChunkUnloads();
+
+        int accepted = drainCompiledSections(
+                currentLevel,
+                cameraSectionX,
+                cameraSectionY,
+                cameraSectionZ,
+                viewDistance);
+        long now = System.nanoTime();
+        boolean committed = false;
+        long quietInterval = hasCommittedScene
+                ? UPDATE_SCENE_QUIET_NANOS
+                : INITIAL_SCENE_QUIET_NANOS;
+        if (pendingCommit && now - lastMutationNanos >= quietInterval) {
+            NativeBridge.commitScene();
+            pendingCommit = false;
+            hasCommittedScene = true;
+            committed = true;
+        }
+
+        return new UpdateResult(
+                sections.size(),
+                activeVertexCount,
+                activeTriangleCount,
+                accepted,
+                committed,
+                uploadedSectionCount,
+                removedSectionCount,
+                viewDistance,
+                reset);
+    }
+
+    public void onChunkUnload(ClientLevel unloadingLevel, ChunkPos chunkPos) {
+        if (unloadingLevel == level) {
+            unloadedChunks.add(chunkPos.pack());
+        }
+    }
+
+    public void reset() {
+        level = null;
+        resourceRevision = Long.MIN_VALUE;
+        sections.clear();
+        unloadedChunks.clear();
+        lastCameraSectionX = Integer.MIN_VALUE;
+        lastCameraSectionY = Integer.MIN_VALUE;
+        lastCameraSectionZ = Integer.MIN_VALUE;
+        lastViewDistance = Integer.MIN_VALUE;
+        pendingCommit = false;
+        hasCommittedScene = false;
+        uploadedSectionCount = 0L;
+        removedSectionCount = 0L;
+        activeVertexCount = 0;
+        activeTriangleCount = 0;
+        SectionGeometryCollector.setActiveLevel(null);
+    }
+
+    private void resetScene(
+            Minecraft minecraft,
+            ClientLevel currentLevel,
+            Vec3 cameraPosition,
+            long currentResourceRevision) {
+        sections.clear();
+        unloadedChunks.clear();
+        SectionGeometryCollector.setActiveLevel(currentLevel);
+        sceneOriginX = snapOrigin(Mth.floor(cameraPosition.x));
+        sceneOriginY = snapOrigin(Mth.floor(cameraPosition.y));
+        sceneOriginZ = snapOrigin(Mth.floor(cameraPosition.z));
+        SectionGeometrySnapshot.SceneResources resources = createResources(
+                minecraft, sceneOriginX, sceneOriginY, sceneOriginZ);
+        NativeBridge.resetScene(resources);
+        level = currentLevel;
+        resourceRevision = currentResourceRevision;
+        lastCameraSectionX = Integer.MIN_VALUE;
+        lastCameraSectionY = Integer.MIN_VALUE;
+        lastCameraSectionZ = Integer.MIN_VALUE;
+        lastViewDistance = Integer.MIN_VALUE;
+        pendingCommit = false;
+        hasCommittedScene = false;
+        lastMutationNanos = System.nanoTime();
+        uploadedSectionCount = 0L;
+        removedSectionCount = 0L;
+        activeVertexCount = 0;
+        activeTriangleCount = 0;
+        minecraft.levelExtractor.allChanged();
+    }
+
+    private boolean needsOriginRebase(Vec3 cameraPosition) {
+        if (level == null) {
+            return true;
+        }
+        return Math.abs(cameraPosition.x - sceneOriginX) > ORIGIN_REBASE_DISTANCE
+                || Math.abs(cameraPosition.y - sceneOriginY) > ORIGIN_REBASE_DISTANCE
+                || Math.abs(cameraPosition.z - sceneOriginZ) > ORIGIN_REBASE_DISTANCE;
+    }
+
+    private int drainCompiledSections(
+            ClientLevel currentLevel,
+            int cameraSectionX,
+            int cameraSectionY,
+            int cameraSectionZ,
+            int viewDistance) {
+        long deadline = System.nanoTime() + SECTION_UPLOAD_BUDGET_NANOS;
+        int accepted = 0;
+        while (accepted < MAX_SECTION_UPLOADS_PER_FRAME && System.nanoTime() < deadline) {
+            SectionGeometrySnapshot snapshot = SectionGeometryCollector.poll();
+            if (snapshot == null) {
+                break;
+            }
+            int sectionX = SectionPos.x(snapshot.sectionNode());
+            int sectionY = SectionPos.y(snapshot.sectionNode());
+            int sectionZ = SectionPos.z(snapshot.sectionNode());
+            if (!isInsideVanillaRange(
+                    currentLevel,
+                    cameraSectionX,
+                    cameraSectionY,
+                    cameraSectionZ,
+                    viewDistance,
+                    sectionX,
+                    sectionY,
+                    sectionZ)) {
+                continue;
+            }
+            CachedSection previous = sections.get(snapshot.sectionNode());
+            if (previous != null && previous.sequence() >= snapshot.sequence()) {
+                continue;
+            }
+
+            if (snapshot.empty()) {
+                CachedSection removed = sections.remove(snapshot.sectionNode());
+                if (removed != null) {
+                    subtractCounts(removed);
+                    NativeBridge.removeSection(snapshot.sectionNode());
+                    removedSectionCount++;
+                    markMutation();
+                }
+            } else {
+                sections.put(snapshot.sectionNode(), new CachedSection(
+                        snapshot.sequence(), snapshot.vertexCount(), snapshot.triangleCount()));
+                if (previous != null) {
+                    subtractCounts(previous);
+                }
+                activeVertexCount = Math.addExact(activeVertexCount, snapshot.vertexCount());
+                activeTriangleCount = Math.addExact(activeTriangleCount, snapshot.triangleCount());
+                NativeBridge.upsertSection(snapshot);
+                uploadedSectionCount++;
+                markMutation();
+            }
+            accepted++;
+        }
+        return accepted;
+    }
+
+    private void evictOutsideVanillaRange(
+            ClientLevel currentLevel,
+            int cameraSectionX,
+            int cameraSectionY,
+            int cameraSectionZ,
+            int viewDistance) {
+        Iterator<Map.Entry<Long, CachedSection>> iterator = sections.entrySet().iterator();
+        while (iterator.hasNext()) {
+            Map.Entry<Long, CachedSection> entry = iterator.next();
+            long sectionNode = entry.getKey();
+            if (isInsideVanillaRange(
+                    currentLevel,
+                    cameraSectionX,
+                    cameraSectionY,
+                    cameraSectionZ,
+                    viewDistance,
+                    SectionPos.x(sectionNode),
+                    SectionPos.y(sectionNode),
+                    SectionPos.z(sectionNode))) {
+                continue;
+            }
+            iterator.remove();
+            subtractCounts(entry.getValue());
+            NativeBridge.removeSection(sectionNode);
+            removedSectionCount++;
+            markMutation();
+        }
+    }
+
+    private void processChunkUnloads() {
+        Long packedChunk;
+        while ((packedChunk = unloadedChunks.poll()) != null) {
+            int chunkX = ChunkPos.getX(packedChunk);
+            int chunkZ = ChunkPos.getZ(packedChunk);
+            Iterator<Map.Entry<Long, CachedSection>> iterator = sections.entrySet().iterator();
+            while (iterator.hasNext()) {
+                Map.Entry<Long, CachedSection> entry = iterator.next();
+                long sectionNode = entry.getKey();
+                if (SectionPos.x(sectionNode) == chunkX && SectionPos.z(sectionNode) == chunkZ) {
+                    iterator.remove();
+                    subtractCounts(entry.getValue());
+                    NativeBridge.removeSection(sectionNode);
+                    removedSectionCount++;
+                    markMutation();
+                }
+            }
+        }
+    }
+
+    private void markMutation() {
+        pendingCommit = true;
+        lastMutationNanos = System.nanoTime();
+    }
+
+    private void subtractCounts(CachedSection snapshot) {
+        activeVertexCount = Math.subtractExact(activeVertexCount, snapshot.vertexCount());
+        activeTriangleCount = Math.subtractExact(activeTriangleCount, snapshot.triangleCount());
+    }
+
+    private static boolean isInsideVanillaRange(
+            ClientLevel level,
+            int cameraSectionX,
+            int cameraSectionY,
+            int cameraSectionZ,
+            int viewDistance,
+            int sectionX,
+            int sectionY,
+            int sectionZ) {
+        return sectionY >= level.getMinSectionY()
+                && sectionY <= level.getMaxSectionY()
+                && Math.abs(sectionY - cameraSectionY) <= viewDistance
+                && ChunkTrackingView.isInViewDistance(
+                        cameraSectionX,
+                        cameraSectionZ,
+                        viewDistance,
+                        sectionX,
+                        sectionZ);
+    }
+
+    private static int snapOrigin(int blockCoordinate) {
+        return Math.floorDiv(blockCoordinate, ORIGIN_GRANULARITY) * ORIGIN_GRANULARITY;
+    }
+
+    private static SectionGeometrySnapshot.SceneResources createResources(
+            Minecraft minecraft,
+            int originX,
+            int originY,
+            int originZ) {
+        Object texture = minecraft.getTextureManager().getTexture(TextureAtlas.LOCATION_BLOCKS);
+        if (!(texture instanceof TextureAtlas atlas)) {
+            throw new IllegalStateException("Minecraft block texture is not a TextureAtlas");
+        }
+        Map<Identifier, TextureAtlasSprite> sprites = atlas.getTextures();
+        if (sprites.isEmpty()) {
+            throw new IllegalStateException("Minecraft block texture atlas has no sprites");
+        }
+
+        int atlasWidth = 0;
+        int atlasHeight = 0;
+        for (TextureAtlasSprite sprite : sprites.values()) {
+            float widthFraction = sprite.getU1() - sprite.getU0();
+            float heightFraction = sprite.getV1() - sprite.getV0();
+            if (widthFraction > 0.0F) {
+                atlasWidth = Math.max(
+                        atlasWidth,
+                        Math.round(sprite.contents().width() / widthFraction));
+            }
+            if (heightFraction > 0.0F) {
+                atlasHeight = Math.max(
+                        atlasHeight,
+                        Math.round(sprite.contents().height() / heightFraction));
+            }
+        }
+        if (atlasWidth <= 0 || atlasHeight <= 0) {
+            throw new IllegalStateException("invalid Minecraft block atlas dimensions");
+        }
+
+        byte[] pixels = new byte[Math.multiplyExact(Math.multiplyExact(atlasWidth, atlasHeight), 4)];
+        for (TextureAtlasSprite sprite : sprites.values()) {
+            int startX = Math.round(sprite.getU0() * atlasWidth);
+            int startY = Math.round(sprite.getV0() * atlasHeight);
+            int width = sprite.contents().width();
+            int height = sprite.contents().height();
+            for (int y = 0; y < height; y++) {
+                int targetY = startY + y;
+                if (targetY < 0 || targetY >= atlasHeight) {
+                    continue;
+                }
+                for (int x = 0; x < width; x++) {
+                    int targetX = startX + x;
+                    if (targetX < 0 || targetX >= atlasWidth) {
+                        continue;
+                    }
+                    int argb = sprite.getPixelRGBA(0, x, y);
+                    int output = (targetY * atlasWidth + targetX) * 4;
+                    pixels[output] = (byte) ARGB.red(argb);
+                    pixels[output + 1] = (byte) ARGB.green(argb);
+                    pixels[output + 2] = (byte) ARGB.blue(argb);
+                    pixels[output + 3] = (byte) ARGB.alpha(argb);
+                }
+            }
+        }
+
+        SectionGeometrySnapshot.MaterialData[] materials = {
+                new SectionGeometrySnapshot.MaterialData(0, 0, 0.0F, 0.0F),
+                new SectionGeometrySnapshot.MaterialData(
+                        0,
+                        SectionGeometrySnapshot.MATERIAL_FLAG_CUTOUT,
+                        0.0F,
+                        0.5F),
+                new SectionGeometrySnapshot.MaterialData(
+                        0,
+                        SectionGeometrySnapshot.MATERIAL_FLAG_BLEND,
+                        0.0F,
+                        0.0F)
+        };
+        SectionGeometrySnapshot.TextureData[] textures = {
+                new SectionGeometrySnapshot.TextureData(
+                        TextureAtlas.LOCATION_BLOCKS,
+                        atlasWidth,
+                        atlasHeight,
+                        pixels)
+        };
+        return new SectionGeometrySnapshot.SceneResources(
+                originX, originY, originZ, materials, textures);
+    }
+
+    public record UpdateResult(
+            int activeSections,
+            int vertices,
+            int triangles,
+            int acceptedSections,
+            boolean committed,
+            long uploadedSections,
+            long removedSections,
+            int viewDistance,
+            boolean reset) {
+    }
+
+    private record CachedSection(long sequence, int vertexCount, int triangleCount) {
+    }
+}

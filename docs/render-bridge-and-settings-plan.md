@@ -1,7 +1,7 @@
 # 渲染数据桥与 Cycles 画面控制里程碑
 
-状态：已确认，实施中（单元 A 已验收并提交；单元 D 基础接入已收口，完整 DH 可见性延后）
-基线：Minecraft 26.2 / NeoForge 26.2.0.58 / Cycles 5.2 / C ABI v4
+状态：已确认，实施中（单元 A 已验收；单元 D 基础接入已收口；Section 流送与低分辨率 Vulkan 展示实现待游戏验收）
+基线：Minecraft 26.2 / NeoForge 26.2.0.58 / Cycles 5.2 / C ABI v5
 
 ## 1. 目标
 
@@ -137,19 +137,18 @@ Distant Horizons（可选）
 
 ### 4.4 缓存与更新
 
-第一版继续使用相机周围有限场景范围，以控制桥接风险。场景进入新的区域或资源重载时完整重建；区块和单方块增量更新留到通用桥验证之后。
+通用桥验证后，近景已改为复用 Minecraft 自己的 `SectionCompiler` 输出。缓存键是 16³ Section 的稳定坐标 ID，不按 `BlockState` 猜测几何，因此位置、邻居、随机模型、连接纹理、流体层和 NeoForge Section 追加几何都由原版重编译结果决定。
 
-允许缓存的内容：
+当前更新规则：
 
-- 资源代次内不依赖位置的模型几何。
-- Sprite 像素和材质定义。
-- 完全相同的纹理与材质组合。
+- `SectionCompiler` 返回后、`MeshData` 被关闭前，复制 Position、Color、UV0 并按 Quad 生成三角形和面法线。
+- 相同 Section 的待处理结果只保留最新 sequence，避免连续方块更新堆积旧网格。
+- 活跃范围使用 `Options#getEffectiveRenderDistance()`、原版水平区块距离规则、相机上下各 viewDistance 个 Section 和世界 min/max Section。
+- 方块/光照变化、区块装卸、视距移动和 `allChanged()` 触发的重编译进入同一条 upsert/remove 路径。
+- 每帧最多上传 24 个 Section，Java 侧预算约 4 ms；首批场景等待 750 ms 安静窗口，已有场景的更新等待 100 ms，不再按固定最大间隔强制提交半成品场景。
+- 资源包重载或相机离场景原点超过 1024 方块时重建共享资源/原点，并请求原版重新编译全部可见 Section。
 
-不能盲目按 BlockState 缓存的内容：
-
-- 依赖世界、位置、邻居、随机种子或模型扩展的动态 Quad。
-- 生物群系 Tint。
-- 连接纹理和其他位置相关模型结果。
+Native 为活动 Cycles Session 保存 `Section ID -> Mesh/Object` 映射。提交时通过共享不可变 Section 快照识别未变化节点；已有 Section 原地清空并重填 Mesh，新增或卸载 Section 才创建或删除节点。共享资源指针变化（资源包/图集、场景原点）以及设备回退仍会重建 Session。几何规模变化和节点增删仍可能触发 Cycles 设备几何及 OptiX 加速结构更新，因此不能把这条路径描述成零成本局部 BVH 更新。
 
 ### 4.5 兼容性目标
 
@@ -168,7 +167,7 @@ Distant Horizons（可选）
 
 第一批远景兼容只支持 Distant Horizons，Voxy 明确延后。DH 通过可选 Provider 隔离，主 MOD 不建立硬运行时依赖；没有安装 DH、版本不匹配或 Provider 初始化失败时，只关闭远景桥并保留近景 Cycles 与 F8 回退。
 
-Provider 必须读取 DH 对外提供或能够稳定适配的最终 LOD 网格/材质数据，不能从 Minecraft Vulkan 缓冲中反向抓取。DH 的远景网格转换成 ABI v4 的 Vertex/Triangle/Material/Texture 表，与近景方块共享 Native 上传和 Cycles 材质路径，但保持独立的 revision 与更新节奏。
+Provider 必须读取 DH 对外提供或能够稳定适配的最终 LOD 网格/材质数据，不能从 Minecraft Vulkan 缓冲中反向抓取。DH 的远景网格未来应转换成 ABI v5 的独立 Section/Object 记录，与近景方块共享 Native 材质路径，但保持独立的 revision 与更新节奏。
 
 近景 Minecraft 模型和远景 DH LOD 之间需要明确所有权边界、重叠带和接缝策略，避免重复几何与闪烁。实际 DH 26.2 API、事件线程和网格寿命必须以本地安装版本为准；在读取对应依赖/API 前不冻结 Provider 接口，也不承诺兼容其他 DH 版本。
 
@@ -176,7 +175,7 @@ Provider 必须读取 DH 对外提供或能够稳定适配的最终 LOD 网格/�
 
 场景格式和设置都会成为稳定契约，修改时必须同步升级 ABI。
 
-单元 A 已冻结 C ABI v4 的场景上传结构，使用扁平数组，避免 C++ 类型暴露给 Java：
+单元 A 冻结的 ABI v4 整场景入口继续保留；Section 流送阶段将协议升级为 ABI v5，并继续避免把 C++ 类型暴露给 Java：
 
 - `CyclesBridgeCamera`：80 字节，沿用已验证的相机坐标约定。
 - `CyclesBridgeScene`：48 字节，场景原点和各数组计数。
@@ -184,12 +183,15 @@ Provider 必须读取 DH 对外提供或能够稳定适配的最终 LOD 网格/�
 - `CyclesBridgeTriangle`：16 字节，三个顶点索引和材质索引。
 - `CyclesBridgeMaterial`：32 字节，纹理索引、Cutout 标记、发光强度和 Alpha 阈值。
 - `CyclesBridgeTexture`：32 字节，RGBA8 像素范围和尺寸。
+- `CyclesBridgeSceneResources`：48 字节，共享场景原点、材质、纹理和像素计数。
+- `CyclesBridgeSection`：48 字节，稳定 ID、局部原点和几何计数。
+- `CyclesBridgeFrame`：40 字节，低分辨率尺寸、generation、状态标记和实际 sample 数。
 - `CyclesBridgeRenderSettings`：由后续设置单元新增并升级 ABI。
 - Pass 使用稳定枚举/位掩码，不用 UI 显示字符串作为协议键。
 
 每个结构继续包含 `struct_size`、`struct_version` 和保留字段。Java FFM 布局、C 头、参数校验和 Native 冒烟测试必须同时更新。
 
-Java 25 FFM 与 MSVC 对上述字节布局均有静态/启动时断言。`cycles_bridge_upload_scene` 接受场景元数据和五组只读数组；C 层先验证尺寸、版本、索引、像素范围和有限浮点值，再复制给 Native 工作线程。对象/区块记录、动画 revision、PBR 材质扩展和设置快照都需要显式 ABI 升级，不能改变 v4 字段语义。
+Java 25 FFM 与 MSVC 对上述字节布局均有静态/启动时断言。v5 使用 `reset_scene` 设置共享资源、`upsert_section` / `remove_section` 修改暂存区、`commit_scene` 发布不可变请求；材质/图集通过共享所有权避免每次提交复制整张图集。`render_frame` 通过 generation 只复制变化后的低分辨率 RGBA。C 层先验证尺寸、版本、索引、像素范围和有限浮点值，再复制给 Native 工作线程。动画 revision、PBR 材质扩展和设置快照仍需要显式 ABI 升级。
 
 ## 6. Cycles 画面设置
 
@@ -331,7 +333,7 @@ Native 端维护 Pass registry 和 HDR Pass cache。Java 默认只获取已经�
 
 ## 8. 实施单元与提交边界
 
-整个里程碑涉及 Java、C ABI、Native、可选 MOD 集成、依赖部署和持久配置，不能作为一个不受控的大提交完成。计划使用四个有独立可见成果的实施单元。
+整个里程碑涉及 Java、C ABI、Native、可选 MOD 集成、依赖部署和持久配置，不能作为一个不受控的大提交完成。静态桥验收后增加了一个独立的 Section 流送/展示性能单元，其余设置单元继续分开提交。
 
 ### 单元 A：通用静态方块桥
 
@@ -349,15 +351,40 @@ Native 端维护 Pass registry 和 HDR Pass cache。Java 默认只获取已经�
 
 当前状态：代码、Java 构建、Native 构建、OptiX 纹理冒烟和游戏内模型/纹理验收已经通过，提交为 `d91e71e`。
 
+### 单元 A2：原版 Section 流送、动态更新与 Vulkan 展示
+
+结果：固定方块扫描替换为原版 16³ Section 编译网格；范围跟随游戏视距，方块/区块变化进入增量缓存并在现有 Cycles Session 内更新对应节点；上一帧在后台更新期间保留；低分辨率 Native 帧由 Vulkan 在 GPU 上放大。
+
+实现包括：
+
+- `SectionCompilerMixin`、线程安全的最新结果合并队列和世界身份隔离。
+- `SectionSceneManager` 的视距裁剪、区块卸载、资源重载、原点重定位、上传预算与批量提交。
+- ABI v5 的共享资源、Section upsert/remove/commit 和 frame generation。
+- Native Session 内的 `Section ID -> Mesh/Object` 映射、未变化节点复用、已有 Mesh 原地更新及节点增删。
+- 移动 1 sample、静止 150 ms 后 8 samples 的基础交互策略。
+- `CyclesFramePresenter` 的低分辨率 Vulkan 纹理和全屏三角形最近邻放大，以及“无已上传纹理则继续原版”的有效帧判定。
+- 纹理 V 坐标修正；Section 网格使用 Minecraft 编译结果中的原始 atlas UV。
+
+验收：
+
+- Java 构建、Native 构建和 ABI v5 OptiX 冒烟通过；Native 冒烟覆盖同一 Renderer 中的 Section 创建、修改和删除。
+- 游戏视距变化和跨区块移动会增加/移除对应 Section，不再限制为固定短视距盒。
+- 放置、破坏方块后对应 Section 可见更新。
+- 纹理上下方向、相机方向和移动方向正确。
+- 场景提交期间不显示蓝色占位帧；4K 窗口不再每帧执行 CPU 4K 放大和整帧上传。
+- F8 启用前及第一张 Cycles 帧准备前仍显示原版世界；F8 关闭恢复原版。
+
+当前状态：代码、自动验证和游戏内验收已经完成。方块/区块更新造成的约 0.4 秒停顿已大幅缓解；残余约 0.1 秒顿卡作为后续性能热点优化项，不阻塞基础框架收口。
+
 ### 单元 D：Distant Horizons LOD Provider
 
 结果：安装受支持 DH 版本时，Cycles 可以消费远景 LOD 快照；没有 DH 或兼容层失败时，近景桥和原版回退保持可用。Voxy 不在此单元。
 
 预计涉及：DH 版本/API 审计、可选依赖声明、隔离的 Provider、LOD 快照转换、近远景所有权/接缝策略、诊断和文档。若 DH 没有可稳定读取的公开或受支持接口，先停止并报告，而不是绑定不可靠的内部 Vulkan 资源。
 
-实现采用 DH 3.2.1-b-dev 的公开 API 7.1 Terrain Repo，不读取 DH 私有 Vulkan/OpenGL 缓冲。Provider 通过反射保持可选，校验 API major 7，并在独立守护线程中使用 `createSoftCache()` 读取地形列。首版把最上层非空气数据点重建为半径 256 方块、8 方块网格的彩色高度场；相机跨越 64 方块边界时异步刷新，完成后以独立 revision 合并进 ABI v4 场景。
+实现采用 DH 3.2.1-b-dev 的公开 API 7.1 Terrain Repo，不读取 DH 私有 Vulkan/OpenGL 缓冲。Provider 通过反射保持可选，校验 API major 7，并在独立守护线程中使用 `createSoftCache()` 读取地形列。旧实验路径曾把最上层非空气数据点重建为半径 256 方块、8 方块网格的彩色高度场，并合并进 ABI v4 整场景。
 
-近景 `64 × 32 × 64` 区域继续由 Minecraft 最终模型拥有；任何与该 X/Z 范围重叠的 DH 单元在合并时跳过。远景颜色首版使用对应 Minecraft `BlockState` 的 MapColor，几何包含顶面和相邻高度差形成的侧面。此路径是稳定公开地形数据的低模重建，不声称与 DH 私有最终渲染网格逐顶点一致。
+Section 流送切换到 ABI v5 后，旧高度场暂不再合并进活动场景。完整 DH 兼容需要重新定义近景 Section 与远景 LOD 的所有权/接缝，并让远景作为独立 v5 Object/Section 提交。旧远景颜色使用对应 Minecraft `BlockState` 的 MapColor，几何包含顶面和相邻高度差形成的侧面；它只是公开地形数据的低模重建，不声称与 DH 私有最终渲染网格逐顶点一致。
 
 验收：
 
@@ -366,7 +393,7 @@ Native 端维护 Pass registry 和 HDR Pass cache。Java 默认只获取已经�
 - 近远景没有明显重复表面、反向几何或持续闪烁。
 - 禁用 DH、禁用 Cycles以及 Provider 失败时均可安全回退。
 
-当前状态：API/版本审计、反射 Provider、异步软缓存读取、近远景所有权、彩色高度场、诊断和文档已经编码并通过构建。安装 DH 时游戏和 F8 回退正常，但本轮游戏测试没有看到可靠远景；此实现作为隔离的兼容骨架收口，最终网格、可见距离、接缝和质量优化延后，不宣称已经完成视觉兼容。
+当前状态：API/版本审计、反射 Provider、异步软缓存读取、彩色高度场、诊断和文档已经编码并通过构建。安装 DH 时游戏和 F8 回退正常，但游戏测试没有看到可靠远景；Provider 作为隔离的兼容骨架保留，当前 v5 活动场景不消费它，最终网格、可见距离、接缝和质量优化延后。
 
 ### 单元 B：HDR、采样、降噪与 OCIO 核心
 
@@ -396,7 +423,7 @@ Native 端维护 Pass registry 和 HDR Pass cache。Java 默认只获取已经�
 - Combined、Depth、Normal、Emission 等已启用 Pass 可以切换查看。
 - F8 关闭后原版渲染恢复，F9 设置界面不依赖 Cycles 已启用。
 
-单元 A、D、B、C 各自完成后创建一个本地 Git 提交。
+单元 A、D、A2、B、C 各自完成后创建一个本地 Git 提交。
 
 ## 9. 保持不动的范围
 
@@ -453,12 +480,12 @@ Native 端维护 Pass registry 和 HDR Pass cache。Java 默认只获取已经�
 
 开始实现前请确认以下产品选择：
 
-1. 接受单元 A、D、B、C 的提交边界，而不是把整个里程碑塞进一个提交。
+1. 接受单元 A、D、A2、B、C 的提交边界，而不是把整个里程碑塞进一个提交。
 2. 设置入口采用 F9，并同时接入 NeoForge MOD 配置入口。
 3. 第一版显示设备只提供 sRGB；AgX、Standard、Khronos PBR Neutral 和 Raw 作为查看变换。
 4. 第一版材质范围为 Opaque + Cutout + Tint + Emission；玻璃/水和 LabPBR 后续实现。
 5. 第一版多通道只开放 Combined、Depth、Normal、Diffuse Color、Emission、Roughness、Sample Count。
-6. 先保持当前有限场景范围完整重建，通用桥验证后再做区块增量更新。
+6. 通用静态桥验证后，以独立 A2 单元实施 Section 流送、区块增量缓存和现有 Cycles Session 内的 Mesh/Object 更新；更细粒度且低成本的设备 BVH 更新继续后移。
 7. 远景第一版只支持 Distant Horizons，Voxy 延后，并使用可选 Provider 而不是硬依赖。
 
-上述选择已经确认。当前按 A、D、B、C 的顺序实施，并在每个单元通过相应验收后创建本地提交。
+上述选择已经确认。A、D 已收口，A2 等待游戏验收；之后按 B、C 的顺序实施，并在每个单元通过相应验收后创建本地提交。

@@ -1,10 +1,11 @@
 package dev.cyclesrenderer;
 
 import com.mojang.blaze3d.platform.InputConstants;
-import com.mojang.blaze3d.systems.RenderSystem;
 import dev.cyclesrenderer.nativebridge.NativeBridge;
-import dev.cyclesrenderer.scene.ClientRenderSnapshot;
+import dev.cyclesrenderer.render.CyclesFramePresenter;
 import dev.cyclesrenderer.scene.DistantHorizonsSceneProvider;
+import dev.cyclesrenderer.scene.SectionGeometryCollector;
+import dev.cyclesrenderer.scene.SectionSceneManager;
 import net.minecraft.client.KeyMapping;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
@@ -22,10 +23,9 @@ import net.neoforged.neoforge.client.event.RegisterKeyMappingsEvent;
 import net.neoforged.neoforge.client.event.RenderGuiEvent;
 import net.neoforged.neoforge.client.event.RenderLevelStageEvent;
 import net.neoforged.neoforge.common.NeoForge;
+import net.neoforged.neoforge.event.level.ChunkEvent;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-
-import java.nio.ByteBuffer;
 
 @Mod(value = CyclesRendererMod.MOD_ID, dist = Dist.CLIENT)
 public final class CyclesRendererMod {
@@ -41,10 +41,12 @@ public final class CyclesRendererMod {
             KEY_CATEGORY);
 
     private static boolean testFrameEnabled;
+    private static boolean nativeBridgeReady;
     private static long nativeFrameId;
-    private static ClientRenderSnapshot renderSnapshot;
-    private static ClientLevel snapshotLevel;
+    private static long lastStatsLogNanos;
     private static volatile long resourceRevision;
+    private static final SectionSceneManager SCENE_MANAGER = new SectionSceneManager();
+    private static final CyclesFramePresenter FRAME_PRESENTER = new CyclesFramePresenter();
 
     public CyclesRendererMod(IEventBus modEventBus) {
         modEventBus.addListener(CyclesRendererMod::registerKeyMappings);
@@ -52,6 +54,7 @@ public final class CyclesRendererMod {
         NeoForge.EVENT_BUS.addListener(CyclesRendererMod::onClientTick);
         NeoForge.EVENT_BUS.addListener(CyclesRendererMod::onRenderLevelAfterLevel);
         NeoForge.EVENT_BUS.addListener(CyclesRendererMod::onRenderGui);
+        NeoForge.EVENT_BUS.addListener(CyclesRendererMod::onChunkUnload);
     }
 
     private static void registerKeyMappings(RegisterKeyMappingsEvent event) {
@@ -72,22 +75,32 @@ public final class CyclesRendererMod {
                 continue;
             }
 
-            NativeBridge.ProbeResult probe = NativeBridge.probe();
-            if (!probe.success()) {
-                LOGGER.error("Native renderer bridge probe failed: {}", probe.message());
-                continue;
+            if (!nativeBridgeReady) {
+                NativeBridge.ProbeResult probe = NativeBridge.probe();
+                if (!probe.success()) {
+                    LOGGER.error("Native renderer bridge probe failed: {}", probe.message());
+                    continue;
+                }
+                nativeBridgeReady = true;
+                LOGGER.info("Native renderer bridge ready: {}", probe.message());
             }
 
-            LOGGER.info("Native renderer bridge ready: {}", probe.message());
             nativeFrameId = 0L;
-            renderSnapshot = null;
-            snapshotLevel = null;
+            lastStatsLogNanos = 0L;
+            SCENE_MANAGER.reset();
+            FRAME_PRESENTER.reset();
+            SectionGeometryCollector.setEnabled(true);
             testFrameEnabled = true;
+            LOGGER.info("Experimental renderer enabled; building the streamed Cycles scene");
         }
     }
 
     public static boolean isExperimentalRendererEnabled() {
         return testFrameEnabled;
+    }
+
+    public static boolean shouldReplaceVanillaWorld() {
+        return testFrameEnabled && FRAME_PRESENTER.hasFrame();
     }
 
     private static void onRenderLevelAfterLevel(RenderLevelStageEvent.AfterLevel event) {
@@ -104,78 +117,49 @@ public final class CyclesRendererMod {
 
         var mainTarget = minecraft.gameRenderer.mainRenderTarget();
         try {
-            refreshSceneIfNeeded(level, camera);
+            SectionSceneManager.UpdateResult update = SCENE_MANAGER.update(
+                    minecraft,
+                    level,
+                    camera.pos,
+                    resourceRevision);
+            if (update.reset()) {
+                FRAME_PRESENTER.reset();
+            }
             long frameId = nativeFrameId++;
-            ByteBuffer pixels = NativeBridge.renderFrame(
+            NativeBridge.RenderedFrame frame = NativeBridge.renderFrame(
                     mainTarget.width,
                     mainTarget.height,
                     frameId,
                     createCameraInput(camera));
-            RenderSystem.getDevice()
-                    .createCommandEncoder()
-                    .writeToTexture(
-                            mainTarget.getColorTexture(),
-                            pixels,
-                            0,
-                            0,
-                            0,
-                            0,
-                            mainTarget.width,
-                            mainTarget.height);
-            if (frameId == 0L) {
-                LOGGER.info("Native RGBA frame upload active: {}x{}", mainTarget.width, mainTarget.height);
+            FRAME_PRESENTER.update(frame);
+            FRAME_PRESENTER.present(mainTarget);
+
+            long now = System.nanoTime();
+            if ((update.reset() || update.committed())
+                    && now - lastStatsLogNanos >= 2_000_000_000L) {
+                lastStatsLogNanos = now;
+                LOGGER.info(
+                        "Cycles streamed scene: sections={}, vertices={}, triangles={}, "
+                                + "viewDistance={}, accepted={}, uploaded={}, removed={}, "
+                                + "frame={}x{}@{} sample(s); {}",
+                        update.activeSections(),
+                        update.vertices(),
+                        update.triangles(),
+                        update.viewDistance(),
+                        update.acceptedSections(),
+                        update.uploadedSections(),
+                        update.removedSections(),
+                        frame.width(),
+                        frame.height(),
+                        frame.sampleCount(),
+                        NativeBridge.rendererInfo());
             }
         } catch (RuntimeException error) {
             LOGGER.error("Native frame rendering failed; restoring the vanilla renderer", error);
             disableExperimentalRenderer();
+            NativeBridge.close();
+            nativeBridgeReady = false;
         }
-    }
-
-    private static void refreshSceneIfNeeded(
-            ClientLevel level,
-            CameraRenderState camera) {
-        long currentResourceRevision = resourceRevision;
-        DistantHorizonsSceneProvider.SceneState distantHorizonsState =
-                DistantHorizonsSceneProvider.update(level, camera.pos);
-        if (snapshotLevel == level
-                && renderSnapshot != null
-                && renderSnapshot.isCurrentFor(
-                        camera.pos,
-                        currentResourceRevision,
-                        distantHorizonsState.revision())) {
-            return;
-        }
-
-        long captureStart = System.nanoTime();
-        ClientRenderSnapshot capturedSnapshot = ClientRenderSnapshot.capture(
-                level,
-                camera.pos,
-                currentResourceRevision,
-                distantHorizonsState);
-        NativeBridge.uploadScene(capturedSnapshot);
-        renderSnapshot = capturedSnapshot;
-        snapshotLevel = level;
-        long captureMilliseconds = (System.nanoTime() - captureStart) / 1_000_000L;
-        LOGGER.info(
-                "Uploaded model scene: origin=({}, {}, {}), vertices={}, triangles={}, "
-                        + "materials={}, textures={}, quads={}, skippedTranslucent={}, "
-                        + "unsupportedTints={}, skippedModelBlocks={}, dhCells={}, dhQuads={}, "
-                        + "dhStatus={}, capture={} ms",
-                capturedSnapshot.originX(),
-                capturedSnapshot.originY(),
-                capturedSnapshot.originZ(),
-                capturedSnapshot.vertexCount(),
-                capturedSnapshot.triangleCount(),
-                capturedSnapshot.materials().length,
-                capturedSnapshot.textures().length,
-                capturedSnapshot.quadCount(),
-                capturedSnapshot.skippedTranslucentQuadCount(),
-                capturedSnapshot.unsupportedTintQuadCount(),
-                capturedSnapshot.skippedModelBlockCount(),
-                capturedSnapshot.distantHorizonsCellCount(),
-                capturedSnapshot.distantHorizonsQuadCount(),
-                distantHorizonsState.status(),
-                captureMilliseconds);
     }
 
     private static NativeBridge.CameraInput createCameraInput(CameraRenderState camera) {
@@ -198,10 +182,17 @@ public final class CyclesRendererMod {
 
     private static void disableExperimentalRenderer() {
         testFrameEnabled = false;
-        renderSnapshot = null;
-        snapshotLevel = null;
+        SectionGeometryCollector.setEnabled(false);
+        SCENE_MANAGER.reset();
+        FRAME_PRESENTER.reset();
         DistantHorizonsSceneProvider.reset();
-        NativeBridge.close();
+        LOGGER.info("Experimental renderer suspended; native bridge kept warm");
+    }
+
+    private static void onChunkUnload(ChunkEvent.Unload event) {
+        if (testFrameEnabled && event.getLevel() instanceof ClientLevel level) {
+            SCENE_MANAGER.onChunkUnload(level, event.getChunk().getPos());
+        }
     }
 
     private static void onRenderGui(RenderGuiEvent.Pre event) {
@@ -211,9 +202,12 @@ public final class CyclesRendererMod {
         }
 
         GuiGraphicsExtractor graphics = event.getGuiGraphics();
+        Component status = FRAME_PRESENTER.hasFrame()
+                ? Component.translatable("message.cyclesrenderer.test_frame")
+                : Component.literal("Cycles 正在构建场景 — 按 F8 返回原版");
         graphics.centeredText(
                 minecraft.font,
-                Component.translatable("message.cyclesrenderer.test_frame"),
+                status,
                 graphics.guiWidth() / 2,
                 12,
                 0xFFFFFFFF);

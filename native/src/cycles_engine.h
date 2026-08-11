@@ -23,8 +23,32 @@ class CyclesEngine final {
         const std::uint8_t* texture_pixels,
         std::string& error);
 
+    bool reset_scene(
+        const CyclesBridgeSceneResources& resources,
+        const CyclesBridgeMaterial* materials,
+        const CyclesBridgeTexture* textures,
+        const std::uint8_t* texture_pixels,
+        std::string& error);
+
+    bool upsert_section(
+        const CyclesBridgeSection& section,
+        const CyclesBridgeVertex* vertices,
+        const CyclesBridgeTriangle* triangles,
+        std::string& error);
+
+    bool remove_section(std::int64_t section_id, std::string& error);
+
+    bool commit_scene(std::string& error);
+
     bool render(
         const CyclesBridgeCamera& camera,
+        std::uint8_t* rgba,
+        std::uint64_t rgba_capacity,
+        std::string& error);
+
+    bool render_frame(
+        const CyclesBridgeCamera& camera,
+        CyclesBridgeFrame& frame,
         std::uint8_t* rgba,
         std::uint64_t rgba_capacity,
         std::string& error);

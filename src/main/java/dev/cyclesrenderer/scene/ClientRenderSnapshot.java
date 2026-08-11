@@ -253,7 +253,7 @@ public record ClientRenderSnapshot(
                 float atlasU = UVPair.unpackU(quad.packedUV(corner));
                 float atlasV = UVPair.unpackV(quad.packedUV(corner));
                 float localU = inverseLerp(sprite.getU0(), sprite.getU1(), atlasU);
-                float localV = 1.0F - inverseLerp(sprite.getV0(), sprite.getV1(), atlasV);
+                float localV = inverseLerp(sprite.getV0(), sprite.getV1(), atlasV);
                 int dataOffset = vertexCount * VERTEX_FLOAT_STRIDE;
                 vertexData[dataOffset] = (float) (position.getX() - originX + offset.x)
                         + blockPosition.x();

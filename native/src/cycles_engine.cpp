@@ -18,6 +18,7 @@
 #include <stdexcept>
 #include <thread>
 #include <tuple>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -56,20 +57,48 @@ constexpr std::uint32_t kMaximumRenderHeight = 270;
 constexpr int kRenderSamples = 8;
 constexpr char kCombinedPass[] = "combined";
 
-struct SceneRequest {
-    CyclesBridgeScene scene{};
+struct SectionRequest {
+    CyclesBridgeSection section{};
     std::vector<CyclesBridgeVertex> vertices;
     std::vector<CyclesBridgeTriangle> triangles;
+};
+
+struct SceneResourcesData {
+    CyclesBridgeSceneResources resources{};
     std::vector<CyclesBridgeMaterial> materials;
     std::vector<CyclesBridgeTexture> textures;
     std::vector<std::uint8_t> texture_pixels;
+};
+
+struct SceneRequest {
+    std::shared_ptr<const SceneResourcesData> resources;
+    std::unordered_map<std::int64_t, std::shared_ptr<const SectionRequest>> sections;
     std::uint64_t revision = 0;
+};
+
+struct SectionSceneNodes {
+    ccl::Mesh* mesh = nullptr;
+    ccl::Object* object = nullptr;
+    std::shared_ptr<const SectionRequest> source;
+};
+
+struct SceneRuntime {
+    std::shared_ptr<const SceneResourcesData> resources;
+    std::vector<ccl::Shader*> shaders;
+    std::unordered_map<std::int64_t, SectionSceneNodes> sections;
+
+    void clear() {
+        resources.reset();
+        shaders.clear();
+        sections.clear();
+    }
 };
 
 struct CameraRequest {
     CyclesBridgeCamera camera{};
     std::uint32_t render_width = 0;
     std::uint32_t render_height = 0;
+    int sample_count = 1;
     std::uint64_t revision = 0;
 };
 
@@ -273,6 +302,42 @@ class FrameStore final {
         return true;
     }
 
+    void set_sample_count(int sample_count) {
+        std::lock_guard lock(mutex_);
+        sample_count_ = sample_count;
+    }
+
+    bool copy_native(
+        std::uint8_t* output,
+        std::uint64_t capacity,
+        std::uint64_t previous_generation,
+        CyclesBridgeFrame& frame,
+        std::string& error) const {
+        std::lock_guard lock(mutex_);
+        frame.width = width_;
+        frame.height = height_;
+        frame.generation = generation_;
+        frame.sample_count = static_cast<std::uint32_t>(std::max(0, sample_count_));
+        frame.pixel_byte_count = 0;
+        frame.flags = 0;
+        if (rgba_.empty() || width_ == 0 || height_ == 0) {
+            return true;
+        }
+
+        frame.flags |= CYCLES_BRIDGE_FRAME_READY;
+        if (generation_ == previous_generation) {
+            return true;
+        }
+        if (output == nullptr || capacity < rgba_.size()) {
+            error = "native frame output buffer is too small";
+            return false;
+        }
+        std::memcpy(output, rgba_.data(), rgba_.size());
+        frame.pixel_byte_count = static_cast<std::uint32_t>(rgba_.size());
+        frame.flags |= CYCLES_BRIDGE_FRAME_UPDATED;
+        return true;
+    }
+
     void copy_scaled(std::uint8_t* output, std::uint32_t width, std::uint32_t height) const {
         std::lock_guard lock(mutex_);
         if (rgba_.empty() || width_ == 0 || height_ == 0) {
@@ -308,6 +373,11 @@ class FrameStore final {
         return !rgba_.empty();
     }
 
+    [[nodiscard]] std::uint64_t generation() const {
+        std::lock_guard lock(mutex_);
+        return generation_;
+    }
+
     [[nodiscard]] std::pair<std::uint32_t, std::uint32_t> size() const {
         std::lock_guard lock(mutex_);
         return {width_, height_};
@@ -318,6 +388,7 @@ class FrameStore final {
     std::uint32_t width_ = 0;
     std::uint32_t height_ = 0;
     std::uint64_t generation_ = 0;
+    int sample_count_ = 0;
     std::vector<std::uint8_t> rgba_;
 };
 
@@ -343,8 +414,15 @@ class MemoryImageLoader final : public ccl::ImageLoader {
         std::string name,
         std::uint32_t width,
         std::uint32_t height,
-        std::vector<std::uint8_t> pixels)
-        : name_(std::move(name)), width_(width), height_(height), pixels_(std::move(pixels)) {}
+        std::shared_ptr<const SceneResourcesData> resources,
+        std::uint32_t pixel_offset,
+        std::uint32_t pixel_size)
+        : name_(std::move(name)),
+          width_(width),
+          height_(height),
+          resources_(std::move(resources)),
+          pixel_offset_(pixel_offset),
+          pixel_size_(pixel_size) {}
 
     bool load_metadata(
         ccl::ImageMetaData& metadata,
@@ -359,10 +437,13 @@ class MemoryImageLoader final : public ccl::ImageLoader {
     }
 
     bool load_pixels(const ccl::ImageMetaData& metadata, void* pixels) override {
-        if (metadata.memory_size() != pixels_.size()) {
+        if (metadata.memory_size() != pixel_size_) {
             return false;
         }
-        std::memcpy(pixels, pixels_.data(), pixels_.size());
+        std::memcpy(
+            pixels,
+            resources_->texture_pixels.data() + pixel_offset_,
+            pixel_size_);
         metadata.conform_pixels(pixels);
         return true;
     }
@@ -380,12 +461,15 @@ class MemoryImageLoader final : public ccl::ImageLoader {
     std::string name_;
     std::uint32_t width_;
     std::uint32_t height_;
-    std::vector<std::uint8_t> pixels_;
+    std::shared_ptr<const SceneResourcesData> resources_;
+    std::uint32_t pixel_offset_;
+    std::uint32_t pixel_size_;
 };
 
 std::vector<ccl::ImageHandle> create_images(
     ccl::Scene* scene,
     const SceneRequest& request) {
+    const SceneResourcesData& resources = *request.resources;
     ccl::ImageParams params;
     params.colorspace = ccl::u_colorspace_scene_linear_srgb;
     params.alpha_type = ccl::IMAGE_ALPHA_UNASSOCIATED;
@@ -393,16 +477,16 @@ std::vector<ccl::ImageHandle> create_images(
     params.extension = ccl::EXTENSION_REPEAT;
 
     std::vector<ccl::ImageHandle> images;
-    images.reserve(request.textures.size());
-    for (std::size_t index = 0; index < request.textures.size(); ++index) {
-        const CyclesBridgeTexture& texture = request.textures[index];
-        const auto begin = request.texture_pixels.begin() + texture.pixel_offset;
-        std::vector<std::uint8_t> pixels(begin, begin + texture.pixel_size);
+    images.reserve(resources.textures.size());
+    for (std::size_t index = 0; index < resources.textures.size(); ++index) {
+        const CyclesBridgeTexture& texture = resources.textures[index];
         auto loader = ccl::make_unique<MemoryImageLoader>(
             "minecraft_texture_" + std::to_string(index),
             texture.width,
             texture.height,
-            std::move(pixels));
+            request.resources,
+            texture.pixel_offset,
+            texture.pixel_size);
         images.push_back(scene->image_manager->add_image(std::move(loader), params));
     }
     return images;
@@ -446,7 +530,15 @@ ccl::Shader* create_material_shader(
     }
 
     ccl::ShaderOutput* surface = opaque_closure;
-    if ((material.flags & CYCLES_BRIDGE_MATERIAL_CUTOUT) != 0U) {
+    if ((material.flags & CYCLES_BRIDGE_MATERIAL_BLEND) != 0U) {
+        ccl::TransparentBsdfNode* transparent =
+            graph->create_node<ccl::TransparentBsdfNode>();
+        ccl::MixClosureNode* blend = graph->create_node<ccl::MixClosureNode>();
+        graph->connect(texture->output("Alpha"), blend->input("Fac"));
+        graph->connect(transparent->output("BSDF"), blend->input("Closure1"));
+        graph->connect(opaque_closure, blend->input("Closure2"));
+        surface = blend->output("Closure");
+    } else if ((material.flags & CYCLES_BRIDGE_MATERIAL_CUTOUT) != 0U) {
         ccl::MathNode* threshold = graph->create_node<ccl::MathNode>();
         threshold->set_math_type(ccl::NODE_MATH_GREATER_THAN);
         threshold->set_value2(material.alpha_cutoff);
@@ -482,36 +574,10 @@ void configure_background(ccl::Scene* scene) {
     scene->background->tag_update(scene);
 }
 
-void build_scene(ccl::Scene* scene, const SceneRequest& request) {
-    configure_background(scene);
-    scene->integrator->set_max_bounce(3);
-    scene->integrator->set_max_diffuse_bounce(2);
-    scene->integrator->set_max_glossy_bounce(1);
-    scene->integrator->set_max_transmission_bounce(0);
-    scene->integrator->set_max_volume_bounce(0);
-    scene->integrator->set_use_adaptive_sampling(false);
-
-    if (request.triangles.empty()) {
-        return;
-    }
-
-    const std::vector<ccl::ImageHandle> images = create_images(scene, request);
-    std::vector<ccl::Shader*> shaders(request.materials.size(), nullptr);
-    for (std::size_t index = 0; index < request.materials.size(); ++index) {
-        const CyclesBridgeMaterial& material = request.materials[index];
-        shaders[index] = create_material_shader(
-            scene, material, images[material.texture_index], index);
-    }
-
-    ccl::Mesh* mesh = scene->create_node<ccl::Mesh>();
-    ccl::array<ccl::Node*> used_shaders;
-    for (ccl::Shader* shader : shaders) {
-        used_shaders.push_back_slow(shader);
-    }
-    mesh->set_used_shaders(used_shaders);
+void populate_section_mesh(ccl::Mesh* mesh, const SectionRequest& section) {
     mesh->resize_mesh(
-        static_cast<int>(request.vertices.size()),
-        static_cast<int>(request.triangles.size()));
+        static_cast<int>(section.vertices.size()),
+        static_cast<int>(section.triangles.size()));
 
     ccl::packed_float3* positions = mesh->get_position_for_write();
     int* triangles = mesh->get_triangles().data();
@@ -524,8 +590,8 @@ void build_scene(ccl::Scene* scene, const SceneRequest& request) {
     ccl::Attribute* color_attribute = mesh->attributes.add(ccl::ATTR_STD_VERTEX_COLOR);
     ccl::uchar4* colors = color_attribute->data_for_write<ccl::uchar4>();
 
-    for (std::size_t index = 0; index < request.vertices.size(); ++index) {
-        const CyclesBridgeVertex& vertex = request.vertices[index];
+    for (std::size_t index = 0; index < section.vertices.size(); ++index) {
+        const CyclesBridgeVertex& vertex = section.vertices[index];
         positions[index] = ccl::make_float3(
             vertex.position_x, vertex.position_y, vertex.position_z);
         ccl::float3 normal = ccl::make_float3(
@@ -536,13 +602,13 @@ void build_scene(ccl::Scene* scene, const SceneRequest& request) {
             : normal / length;
         normals[index] = ccl::packed_normal(normal);
     }
-    for (std::size_t index = 0; index < request.triangles.size(); ++index) {
-        const CyclesBridgeTriangle& triangle = request.triangles[index];
+    for (std::size_t index = 0; index < section.triangles.size(); ++index) {
+        const CyclesBridgeTriangle& triangle = section.triangles[index];
         const std::uint32_t indices[3] = {
             triangle.vertex_0, triangle.vertex_1, triangle.vertex_2};
         for (std::size_t corner = 0; corner < 3; ++corner) {
             const std::size_t output_index = index * 3U + corner;
-            const CyclesBridgeVertex& vertex = request.vertices[indices[corner]];
+            const CyclesBridgeVertex& vertex = section.vertices[indices[corner]];
             triangles[output_index] = static_cast<int>(indices[corner]);
             uvs[output_index] = ccl::make_float2(vertex.texture_u, vertex.texture_v);
             const std::uint32_t rgba = vertex.packed_rgba;
@@ -553,16 +619,100 @@ void build_scene(ccl::Scene* scene, const SceneRequest& request) {
                 static_cast<std::uint8_t>((rgba >> 24U) & 0xFFU));
         }
         triangle_shaders[index] = static_cast<int>(triangle.material_index);
-        smooth[index] = true;
+        smooth[index] = false;
     }
 
     mesh->tag_position_modified();
     mesh->tag_triangles_modified();
     mesh->tag_shader_modified();
     mesh->tag_smooth_modified();
+}
+
+SectionSceneNodes create_section_nodes(
+    ccl::Scene* scene,
+    const SceneRequest& request,
+    const std::shared_ptr<const SectionRequest>& section,
+    const std::vector<ccl::Shader*>& shaders) {
+    ccl::Mesh* mesh = scene->create_node<ccl::Mesh>();
+    ccl::array<ccl::Node*> used_shaders;
+    for (ccl::Shader* shader : shaders) {
+        used_shaders.push_back_slow(shader);
+    }
+    mesh->set_used_shaders(used_shaders);
+    populate_section_mesh(mesh, *section);
+
     ccl::Object* object = scene->create_node<ccl::Object>();
     object->set_geometry(mesh);
-    object->set_tfm(ccl::transform_identity());
+    object->set_tfm(ccl::transform_translate(ccl::make_float3(
+        static_cast<float>(section->section.origin_x - request.resources->resources.origin_x),
+        static_cast<float>(section->section.origin_y - request.resources->resources.origin_y),
+        static_cast<float>(section->section.origin_z - request.resources->resources.origin_z))));
+    return {mesh, object, section};
+}
+
+void build_scene(ccl::Scene* scene, const SceneRequest& request, SceneRuntime& runtime) {
+    runtime.clear();
+    runtime.resources = request.resources;
+    configure_background(scene);
+    scene->integrator->set_max_bounce(3);
+    scene->integrator->set_max_diffuse_bounce(2);
+    scene->integrator->set_max_glossy_bounce(1);
+    scene->integrator->set_max_transmission_bounce(0);
+    scene->integrator->set_max_volume_bounce(0);
+    scene->integrator->set_use_adaptive_sampling(false);
+
+    const std::vector<ccl::ImageHandle> images = create_images(scene, request);
+    const SceneResourcesData& resources = *request.resources;
+    runtime.shaders.assign(resources.materials.size(), nullptr);
+    for (std::size_t index = 0; index < resources.materials.size(); ++index) {
+        const CyclesBridgeMaterial& material = resources.materials[index];
+        runtime.shaders[index] = create_material_shader(
+            scene, material, images[material.texture_index], index);
+    }
+
+    for (const auto& entry : request.sections) {
+        runtime.sections.emplace(
+            entry.first,
+            create_section_nodes(scene, request, entry.second, runtime.shaders));
+    }
+}
+
+void apply_scene_delta(
+    ccl::Scene* scene,
+    const SceneRequest& request,
+    SceneRuntime& runtime) {
+    if (runtime.resources != request.resources) {
+        throw std::logic_error("incremental scene update changed shared resources");
+    }
+
+    for (auto current = runtime.sections.begin(); current != runtime.sections.end();) {
+        if (request.sections.contains(current->first)) {
+            ++current;
+            continue;
+        }
+        scene->delete_node(current->second.object);
+        scene->delete_node(current->second.mesh);
+        current = runtime.sections.erase(current);
+    }
+
+    for (const auto& entry : request.sections) {
+        auto current = runtime.sections.find(entry.first);
+        if (current == runtime.sections.end()) {
+            runtime.sections.emplace(
+                entry.first,
+                create_section_nodes(scene, request, entry.second, runtime.shaders));
+            continue;
+        }
+        if (current->second.source == entry.second) {
+            continue;
+        }
+
+        ccl::Mesh* mesh = current->second.mesh;
+        mesh->clear(true);
+        populate_section_mesh(mesh, *entry.second);
+        mesh->tag_update(scene, true);
+        current->second.source = entry.second;
+    }
 }
 
 ccl::Transform camera_transform(
@@ -617,7 +767,12 @@ ccl::BufferParams configure_camera(
     camera->set_fov(camera_request.camera.vertical_fov_radians);
     camera->set_nearclip(0.05F);
     camera->set_farclip(std::max(1.0F, camera_request.camera.depth_far));
-    camera->set_matrix(camera_transform(camera_request.camera, scene_request.scene));
+    const CyclesBridgeSceneResources& resources = scene_request.resources->resources;
+    CyclesBridgeScene scene{};
+    scene.origin_x = resources.origin_x;
+    scene.origin_y = resources.origin_y;
+    scene.origin_z = resources.origin_z;
+    camera->set_matrix(camera_transform(camera_request.camera, scene));
     camera->compute_auto_viewplane();
     camera->need_flags_update = true;
     camera->need_device_update = true;
@@ -664,15 +819,41 @@ class CyclesEngine::Impl final {
         const CyclesBridgeTexture* textures,
         const std::uint8_t* texture_pixels,
         std::string& error) {
-        auto request = std::make_shared<SceneRequest>();
-        request->scene = scene;
-        if (scene.triangle_count != 0) {
-            request->vertices.assign(vertices, vertices + scene.vertex_count);
-            request->triangles.assign(triangles, triangles + scene.triangle_count);
-            request->materials.assign(materials, materials + scene.material_count);
-            request->textures.assign(textures, textures + scene.texture_count);
-            request->texture_pixels.assign(
+        auto resources = std::make_shared<SceneResourcesData>();
+        resources->resources.struct_size = sizeof(CyclesBridgeSceneResources);
+        resources->resources.struct_version = 1;
+        resources->resources.origin_x = scene.origin_x;
+        resources->resources.origin_y = scene.origin_y;
+        resources->resources.origin_z = scene.origin_z;
+        resources->resources.material_count = scene.material_count;
+        resources->resources.texture_count = scene.texture_count;
+        resources->resources.texture_byte_count = scene.texture_byte_count;
+        if (scene.material_count != 0) {
+            resources->materials.assign(materials, materials + scene.material_count);
+        }
+        if (scene.texture_count != 0) {
+            resources->textures.assign(textures, textures + scene.texture_count);
+        }
+        if (scene.texture_byte_count != 0) {
+            resources->texture_pixels.assign(
                 texture_pixels, texture_pixels + scene.texture_byte_count);
+        }
+
+        auto request = std::make_shared<SceneRequest>();
+        request->resources = resources;
+        if (scene.triangle_count != 0) {
+            auto section = std::make_shared<SectionRequest>();
+            section->section.struct_size = sizeof(CyclesBridgeSection);
+            section->section.struct_version = 1;
+            section->section.section_id = 0;
+            section->section.origin_x = scene.origin_x;
+            section->section.origin_y = scene.origin_y;
+            section->section.origin_z = scene.origin_z;
+            section->section.vertex_count = scene.vertex_count;
+            section->section.triangle_count = scene.triangle_count;
+            section->vertices.assign(vertices, vertices + scene.vertex_count);
+            section->triangles.assign(triangles, triangles + scene.triangle_count);
+            request->sections.emplace(0, std::move(section));
         }
         {
             std::lock_guard lock(request_mutex_);
@@ -680,10 +861,121 @@ class CyclesEngine::Impl final {
                 error = "Cycles worker is stopping";
                 return false;
             }
+            staging_resources_ = resources;
+            staging_sections_ = request->sections;
             request->revision = ++scene_revision_;
             requested_scene_ = std::move(request);
         }
+        set_state("scene-queued", {});
+        request_changed_.notify_all();
+        return true;
+    }
+
+    bool reset_scene(
+        const CyclesBridgeSceneResources& resources,
+        const CyclesBridgeMaterial* materials,
+        const CyclesBridgeTexture* textures,
+        const std::uint8_t* texture_pixels,
+        std::string& error) {
+        auto copied = std::make_shared<SceneResourcesData>();
+        copied->resources = resources;
+        if (resources.material_count != 0) {
+            copied->materials.assign(materials, materials + resources.material_count);
+        }
+        if (resources.texture_count != 0) {
+            copied->textures.assign(textures, textures + resources.texture_count);
+        }
+        if (resources.texture_byte_count != 0) {
+            copied->texture_pixels.assign(
+                texture_pixels, texture_pixels + resources.texture_byte_count);
+        }
+        {
+            std::lock_guard lock(request_mutex_);
+            if (stopping_) {
+                error = "Cycles worker is stopping";
+                return false;
+            }
+            staging_resources_ = std::move(copied);
+            staging_sections_.clear();
+            requested_scene_.reset();
+            requested_camera_.reset();
+            ++scene_reset_revision_;
+        }
         frames_.clear();
+        set_state("scene-staging", {});
+        request_changed_.notify_all();
+        return true;
+    }
+
+    bool upsert_section(
+        const CyclesBridgeSection& section,
+        const CyclesBridgeVertex* vertices,
+        const CyclesBridgeTriangle* triangles,
+        std::string& error) {
+        auto copied = std::make_shared<SectionRequest>();
+        copied->section = section;
+        if (section.vertex_count != 0) {
+            copied->vertices.assign(vertices, vertices + section.vertex_count);
+        }
+        if (section.triangle_count != 0) {
+            copied->triangles.assign(triangles, triangles + section.triangle_count);
+        }
+        std::lock_guard lock(request_mutex_);
+        if (stopping_) {
+            error = "Cycles worker is stopping";
+            return false;
+        }
+        if (!staging_resources_) {
+            error = "scene resources have not been reset";
+            return false;
+        }
+        for (const CyclesBridgeTriangle& triangle : copied->triangles) {
+            if (triangle.material_index >= staging_resources_->materials.size()) {
+                error = "section references an unknown material";
+                return false;
+            }
+        }
+        staging_sections_[section.section_id] = std::move(copied);
+        return true;
+    }
+
+    bool remove_section(std::int64_t section_id, std::string& error) {
+        std::lock_guard lock(request_mutex_);
+        if (stopping_) {
+            error = "Cycles worker is stopping";
+            return false;
+        }
+        if (!staging_resources_) {
+            error = "scene resources have not been reset";
+            return false;
+        }
+        staging_sections_.erase(section_id);
+        return true;
+    }
+
+    bool commit_scene(std::string& error) {
+        auto request = std::make_shared<SceneRequest>();
+        {
+            std::lock_guard lock(request_mutex_);
+            if (stopping_) {
+                error = "Cycles worker is stopping";
+                return false;
+            }
+            if (!staging_resources_) {
+                error = "scene resources have not been reset";
+                return false;
+            }
+            request->resources = staging_resources_;
+            request->sections = staging_sections_;
+            request->revision = ++scene_revision_;
+            requested_scene_ = request;
+            if (requested_camera_) {
+                requested_camera_->sample_count = 1;
+                requested_camera_->revision = ++camera_revision_;
+                last_camera_change_ = std::chrono::steady_clock::now();
+                last_camera_generation_ = frames_.generation();
+            }
+        }
         set_state("scene-queued", {});
         request_changed_.notify_all();
         return true;
@@ -710,37 +1002,26 @@ class CyclesEngine::Impl final {
             return false;
         }
 
-        CameraRequest request;
-        request.camera = camera;
-        std::tie(request.render_width, request.render_height) =
-            render_dimensions(camera.viewport_width, camera.viewport_height);
-        bool changed = false;
-        {
-            std::lock_guard lock(request_mutex_);
-            if (!requested_scene_) {
-                error = "scene has not been uploaded";
-                return false;
-            }
-            if (!requested_camera_ || !same_camera(*requested_camera_, request)) {
-                request.revision = ++camera_revision_;
-                requested_camera_ = request;
-                changed = true;
-            }
-        }
-        if (changed) {
-            set_state("camera-queued", {});
-            request_changed_.notify_all();
-        }
-
-        {
-            std::lock_guard lock(state_mutex_);
-            if (!terminal_error_.empty()) {
-                error = terminal_error_;
-                return false;
-            }
+        if (!queue_camera(camera, error)) {
+            return false;
         }
         frames_.copy_scaled(rgba, camera.viewport_width, camera.viewport_height);
         return true;
+    }
+
+    bool render_frame(
+        const CyclesBridgeCamera& camera,
+        CyclesBridgeFrame& frame,
+        std::uint8_t* rgba,
+        std::uint64_t rgba_capacity,
+        std::string& error) {
+        if (!valid_camera(camera, error)) {
+            return false;
+        }
+        if (!queue_camera(camera, error)) {
+            return false;
+        }
+        return frames_.copy_native(rgba, rgba_capacity, frame.generation, frame, error);
     }
 
     [[nodiscard]] std::string info() const {
@@ -767,6 +1048,63 @@ class CyclesEngine::Impl final {
     }
 
  private:
+    static bool valid_camera(const CyclesBridgeCamera& camera, std::string& error) {
+        if (camera.viewport_width == 0 || camera.viewport_height == 0
+            || !finite_camera(camera)
+            || camera.vertical_fov_radians <= 0.0F
+            || camera.vertical_fov_radians >= 3.14159265F
+            || camera.depth_far <= 0.0F) {
+            error = "invalid camera";
+            return false;
+        }
+        return true;
+    }
+
+    bool queue_camera(const CyclesBridgeCamera& camera, std::string& error) {
+        if (!valid_camera(camera, error)) {
+            return false;
+        }
+
+        CameraRequest request;
+        request.camera = camera;
+        std::tie(request.render_width, request.render_height) =
+            render_dimensions(camera.viewport_width, camera.viewport_height);
+        const auto now = std::chrono::steady_clock::now();
+        bool changed = false;
+        {
+            std::lock_guard lock(request_mutex_);
+            if (!requested_scene_) {
+                return true;
+            }
+            if (!requested_camera_ || !same_camera(*requested_camera_, request)) {
+                request.sample_count = 1;
+                request.revision = ++camera_revision_;
+                requested_camera_ = request;
+                last_camera_change_ = now;
+                last_camera_generation_ = frames_.generation();
+                changed = true;
+            } else if (requested_camera_->sample_count == 1
+                       && now - last_camera_change_ >= 150ms
+                       && frames_.generation() != last_camera_generation_) {
+                request.sample_count = kRenderSamples;
+                request.revision = ++camera_revision_;
+                requested_camera_ = request;
+                changed = true;
+            }
+        }
+        if (changed) {
+            set_state("camera-queued", {});
+            request_changed_.notify_all();
+        }
+
+        std::lock_guard lock(state_mutex_);
+        if (!terminal_error_.empty()) {
+            error = terminal_error_;
+            return false;
+        }
+        return true;
+    }
+
     void set_state(std::string state, std::string terminal_error) {
         std::lock_guard lock(state_mutex_);
         state_ = std::move(state);
@@ -789,7 +1127,7 @@ class CyclesEngine::Impl final {
         params.denoise_device = device;
         params.headless = true;
         params.background = false;
-        params.samples = kRenderSamples;
+        params.samples = 1;
         params.use_auto_tile = false;
         params.use_resolution_divider = false;
         return params;
@@ -798,7 +1136,8 @@ class CyclesEngine::Impl final {
     ccl::unique_ptr<ccl::Session> create_session(
         const ccl::DeviceInfo& device,
         const SceneRequest& scene_request,
-        ccl::SessionParams& session_params) {
+        ccl::SessionParams& session_params,
+        SceneRuntime& runtime) {
         session_params = make_session_params(device);
         ccl::SceneParams scene_params;
         scene_params.background = false;
@@ -807,7 +1146,7 @@ class CyclesEngine::Impl final {
         ccl::Pass* pass = session->scene->create_node<ccl::Pass>();
         pass->set_name(ccl::ustring(kCombinedPass));
         pass->set_type(ccl::PASS_COMBINED);
-        build_scene(session->scene.get(), scene_request);
+        build_scene(session->scene.get(), scene_request, runtime);
         return session;
     }
 
@@ -815,27 +1154,40 @@ class CyclesEngine::Impl final {
         ccl::unique_ptr<ccl::Session>& session,
         ccl::SessionParams& params,
         const SceneRequest& scene_request,
+        SceneRuntime& runtime,
         std::size_t& device_index) {
         if (session) {
             session->cancel(true);
             session.reset();
         }
+        runtime.clear();
         while (device_index < devices_.size()) {
             const ccl::DeviceInfo device = devices_[device_index];
             try {
                 set_device_state(device, "initializing");
-                session = create_session(device, scene_request, params);
+                session = create_session(device, scene_request, params, runtime);
                 set_device_state(device, "scene-ready");
                 return true;
             } catch (const std::exception& exception) {
                 set_device_state(device, "fallback", exception.what());
                 session.reset();
+                runtime.clear();
                 device_index++;
             }
         }
         const std::string message = "all Cycles backends failed during session creation";
         set_state("failed", message);
         return false;
+    }
+
+    void update_session_scene(
+        ccl::Session& session,
+        const SceneRequest& scene_request,
+        SceneRuntime& runtime) {
+        set_state("scene-updating", {});
+        const ccl::thread_scoped_lock scene_lock(session.scene->mutex);
+        apply_scene_delta(session.scene.get(), scene_request, runtime);
+        set_state("scene-ready", {});
     }
 
     void start_render(
@@ -848,7 +1200,10 @@ class CyclesEngine::Impl final {
             const ccl::thread_scoped_lock scene_lock(session.scene->mutex);
             buffer = configure_camera(session, scene_request, camera_request);
         }
-        session.reset(params, buffer);
+        ccl::SessionParams render_params = params;
+        render_params.samples = std::max(1, camera_request.sample_count);
+        frames_.set_sample_count(render_params.samples);
+        session.reset(render_params, buffer);
         session.start();
         set_state("rendering", {});
     }
@@ -856,38 +1211,70 @@ class CyclesEngine::Impl final {
     void worker_main() {
         ccl::unique_ptr<ccl::Session> session;
         ccl::SessionParams session_params;
+        SceneRuntime scene_runtime;
         std::shared_ptr<const SceneRequest> active_scene;
         std::uint64_t active_scene_revision = 0;
         std::uint64_t active_camera_revision = 0;
+        std::uint64_t active_reset_revision = 0;
+        std::uint64_t observed_scene_revision = 0;
+        std::uint64_t observed_camera_revision = 0;
+        std::uint64_t render_start_generation = 0;
+        bool render_in_flight = false;
         std::size_t device_index = 0;
 
         try {
             while (true) {
                 std::shared_ptr<const SceneRequest> requested_scene;
                 std::optional<CameraRequest> requested_camera;
+                std::uint64_t requested_reset_revision = 0;
                 {
                     std::unique_lock lock(request_mutex_);
-                    request_changed_.wait_for(lock, 100ms, [this, active_scene_revision, active_camera_revision] {
+                    request_changed_.wait_for(lock, 16ms, [this, observed_scene_revision,
+                                                           observed_camera_revision,
+                                                           active_reset_revision] {
                         return stopping_
+                            || scene_reset_revision_ != active_reset_revision
                             || (requested_scene_
-                                && requested_scene_->revision != active_scene_revision)
+                                && requested_scene_->revision != observed_scene_revision)
                             || (requested_camera_
-                                && requested_camera_->revision != active_camera_revision);
+                                && requested_camera_->revision != observed_camera_revision);
                     });
                     if (stopping_) {
                         break;
                     }
                     requested_scene = requested_scene_;
                     requested_camera = requested_camera_;
+                    requested_reset_revision = scene_reset_revision_;
+                }
+                observed_scene_revision = requested_scene ? requested_scene->revision : 0;
+                observed_camera_revision = requested_camera ? requested_camera->revision : 0;
+
+                if (requested_reset_revision != active_reset_revision) {
+                    if (session) {
+                        session->cancel(true);
+                        session.reset();
+                    }
+                    scene_runtime.clear();
+                    active_scene.reset();
+                    active_scene_revision = 0;
+                    active_camera_revision = 0;
+                    active_reset_revision = requested_reset_revision;
+                    render_in_flight = false;
+                    frames_.clear();
+                } else if (render_in_flight
+                           && frames_.generation() != render_start_generation) {
+                    render_in_flight = false;
                 }
 
                 if (session && session->progress.get_error()) {
                     const std::string backend_error = session->progress.get_error_message();
                     session->cancel(true);
                     session.reset();
+                    scene_runtime.clear();
                     device_index++;
                     active_scene_revision = 0;
                     active_camera_revision = 0;
+                    render_in_flight = false;
                     frames_.clear();
                     if (device_index >= devices_.size()) {
                         set_state("failed", "all Cycles backends failed; last error: " + backend_error);
@@ -896,19 +1283,34 @@ class CyclesEngine::Impl final {
                     set_device_state(devices_[device_index], "fallback");
                 }
 
-                if (requested_scene && requested_scene->revision != active_scene_revision) {
-                    active_scene = requested_scene;
-                    if (!rebuild_session(session, session_params, *active_scene, device_index)) {
-                        continue;
+                if (!render_in_flight && requested_scene
+                    && requested_scene->revision != active_scene_revision) {
+                    const bool resources_changed = !session
+                        || !active_scene
+                        || scene_runtime.resources != requested_scene->resources;
+                    if (resources_changed) {
+                        if (!rebuild_session(
+                                session,
+                                session_params,
+                                *requested_scene,
+                                scene_runtime,
+                                device_index)) {
+                            continue;
+                        }
+                    } else {
+                        update_session_scene(*session, *requested_scene, scene_runtime);
                     }
+                    active_scene = requested_scene;
                     active_scene_revision = active_scene->revision;
                     active_camera_revision = 0;
                 }
 
-                if (session && active_scene && requested_camera
+                if (!render_in_flight && session && active_scene && requested_camera
                     && requested_camera->revision != active_camera_revision) {
+                    render_start_generation = frames_.generation();
                     start_render(*session, session_params, *active_scene, *requested_camera);
                     active_camera_revision = requested_camera->revision;
+                    render_in_flight = true;
                 }
             }
         } catch (const std::exception& exception) {
@@ -921,6 +1323,7 @@ class CyclesEngine::Impl final {
             try {
                 session->cancel(true);
                 session.reset();
+                scene_runtime.clear();
             } catch (...) {
             }
         }
@@ -931,8 +1334,13 @@ class CyclesEngine::Impl final {
     bool stopping_ = false;
     std::uint64_t scene_revision_ = 0;
     std::uint64_t camera_revision_ = 0;
+    std::uint64_t scene_reset_revision_ = 0;
+    std::shared_ptr<const SceneResourcesData> staging_resources_;
+    std::unordered_map<std::int64_t, std::shared_ptr<const SectionRequest>> staging_sections_;
     std::shared_ptr<const SceneRequest> requested_scene_;
     std::optional<CameraRequest> requested_camera_;
+    std::chrono::steady_clock::time_point last_camera_change_{};
+    std::uint64_t last_camera_generation_ = 0;
 
     mutable std::mutex state_mutex_;
     ccl::DeviceInfo selected_device_;
@@ -960,12 +1368,46 @@ bool CyclesEngine::upload_scene(
         scene, vertices, triangles, materials, textures, texture_pixels, error);
 }
 
+bool CyclesEngine::reset_scene(
+    const CyclesBridgeSceneResources& resources,
+    const CyclesBridgeMaterial* materials,
+    const CyclesBridgeTexture* textures,
+    const std::uint8_t* texture_pixels,
+    std::string& error) {
+    return impl_->reset_scene(resources, materials, textures, texture_pixels, error);
+}
+
+bool CyclesEngine::upsert_section(
+    const CyclesBridgeSection& section,
+    const CyclesBridgeVertex* vertices,
+    const CyclesBridgeTriangle* triangles,
+    std::string& error) {
+    return impl_->upsert_section(section, vertices, triangles, error);
+}
+
+bool CyclesEngine::remove_section(std::int64_t section_id, std::string& error) {
+    return impl_->remove_section(section_id, error);
+}
+
+bool CyclesEngine::commit_scene(std::string& error) {
+    return impl_->commit_scene(error);
+}
+
 bool CyclesEngine::render(
     const CyclesBridgeCamera& camera,
     std::uint8_t* rgba,
     std::uint64_t rgba_capacity,
     std::string& error) {
     return impl_->render(camera, rgba, rgba_capacity, error);
+}
+
+bool CyclesEngine::render_frame(
+    const CyclesBridgeCamera& camera,
+    CyclesBridgeFrame& frame,
+    std::uint8_t* rgba,
+    std::uint64_t rgba_capacity,
+    std::string& error) {
+    return impl_->render_frame(camera, frame, rgba, rgba_capacity, error);
 }
 
 std::string CyclesEngine::renderer_info() const {

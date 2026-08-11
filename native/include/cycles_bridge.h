@@ -25,6 +25,12 @@ enum CyclesBridgeStatus : std::uint32_t {
 
 enum CyclesBridgeMaterialFlags : std::uint32_t {
     CYCLES_BRIDGE_MATERIAL_CUTOUT = 1U << 0U,
+    CYCLES_BRIDGE_MATERIAL_BLEND = 1U << 1U,
+};
+
+enum CyclesBridgeFrameFlags : std::uint32_t {
+    CYCLES_BRIDGE_FRAME_READY = 1U << 0U,
+    CYCLES_BRIDGE_FRAME_UPDATED = 1U << 1U,
 };
 
 struct CyclesBridgeCamera {
@@ -57,6 +63,42 @@ struct CyclesBridgeScene {
     std::uint32_t texture_count;
     std::uint32_t texture_byte_count;
     std::uint32_t reserved[2];
+};
+
+struct CyclesBridgeSceneResources {
+    std::uint32_t struct_size;
+    std::uint32_t struct_version;
+    std::int32_t origin_x;
+    std::int32_t origin_y;
+    std::int32_t origin_z;
+    std::uint32_t material_count;
+    std::uint32_t texture_count;
+    std::uint32_t texture_byte_count;
+    std::uint32_t reserved[4];
+};
+
+struct CyclesBridgeSection {
+    std::uint32_t struct_size;
+    std::uint32_t struct_version;
+    std::int64_t section_id;
+    std::int32_t origin_x;
+    std::int32_t origin_y;
+    std::int32_t origin_z;
+    std::uint32_t vertex_count;
+    std::uint32_t triangle_count;
+    std::uint32_t reserved[2];
+};
+
+struct CyclesBridgeFrame {
+    std::uint32_t struct_size;
+    std::uint32_t struct_version;
+    std::uint32_t width;
+    std::uint32_t height;
+    std::uint64_t generation;
+    std::uint32_t pixel_byte_count;
+    std::uint32_t flags;
+    std::uint32_t sample_count;
+    std::uint32_t reserved;
 };
 
 struct CyclesBridgeVertex {
@@ -129,9 +171,36 @@ CYCLES_BRIDGE_API std::uint32_t cycles_bridge_upload_scene(
     const CyclesBridgeTexture* textures,
     const std::uint8_t* texture_pixels);
 
+CYCLES_BRIDGE_API std::uint32_t cycles_bridge_reset_scene(
+    CyclesBridgeRenderer* renderer,
+    const CyclesBridgeSceneResources* resources,
+    const CyclesBridgeMaterial* materials,
+    const CyclesBridgeTexture* textures,
+    const std::uint8_t* texture_pixels);
+
+CYCLES_BRIDGE_API std::uint32_t cycles_bridge_upsert_section(
+    CyclesBridgeRenderer* renderer,
+    const CyclesBridgeSection* section,
+    const CyclesBridgeVertex* vertices,
+    const CyclesBridgeTriangle* triangles);
+
+CYCLES_BRIDGE_API std::uint32_t cycles_bridge_remove_section(
+    CyclesBridgeRenderer* renderer,
+    std::int64_t section_id);
+
+CYCLES_BRIDGE_API std::uint32_t cycles_bridge_commit_scene(
+    CyclesBridgeRenderer* renderer);
+
 CYCLES_BRIDGE_API std::uint32_t cycles_bridge_render(
     CyclesBridgeRenderer* renderer,
     const CyclesBridgeCamera* camera,
+    std::uint8_t* rgba,
+    std::uint64_t rgba_capacity);
+
+CYCLES_BRIDGE_API std::uint32_t cycles_bridge_render_frame(
+    CyclesBridgeRenderer* renderer,
+    const CyclesBridgeCamera* camera,
+    CyclesBridgeFrame* frame,
     std::uint8_t* rgba,
     std::uint64_t rgba_capacity);
 

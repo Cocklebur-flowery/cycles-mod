@@ -3,7 +3,8 @@
   "minVersion": "0.8.7",
   "package": "dev.cyclesrenderer.mixin",
   "client": [
-    "LevelRendererMixin"
+    "LevelRendererMixin",
+    "SectionCompilerMixin"
   ],
   "injectors": {
     "defaultRequire": 1

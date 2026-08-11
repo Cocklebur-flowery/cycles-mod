@@ -1,6 +1,6 @@
 package dev.cyclesrenderer.nativebridge;
 
-import dev.cyclesrenderer.scene.ClientRenderSnapshot;
+import dev.cyclesrenderer.scene.SectionGeometrySnapshot;
 
 import java.lang.foreign.Arena;
 import java.lang.foreign.FunctionDescriptor;
@@ -22,16 +22,19 @@ import static java.lang.foreign.ValueLayout.JAVA_INT;
 import static java.lang.foreign.ValueLayout.JAVA_LONG;
 
 public final class NativeBridge {
-    public static final int ABI_VERSION = 4;
+    public static final int ABI_VERSION = 5;
 
     private static final String LIBRARY_PATH_PROPERTY = "cyclesrenderer.nativeLibrary";
     private static final int STRUCT_VERSION = 1;
     private static final int STATUS_OK = 0;
+    private static final int FRAME_READY = 1;
+    private static final int FRAME_UPDATED = 2;
     private static final int TEST_WIDTH = 16;
     private static final int TEST_HEIGHT = 16;
     private static final long TEST_FRAME_ID = 7L;
     private static final int BUILD_INFO_BYTES = 128;
     private static final int RENDERER_INFO_BYTES = 512;
+    private static final int MAX_NATIVE_FRAME_BYTES = 480 * 270 * 4;
 
     private static final MemoryLayout CAMERA_LAYOUT = MemoryLayout.structLayout(
             JAVA_INT.withName("struct_size"),
@@ -50,19 +53,41 @@ public final class NativeBridge {
             JAVA_FLOAT.withName("depth_far"),
             JAVA_INT.withName("reserved_0"),
             JAVA_INT.withName("reserved_1"));
-    private static final MemoryLayout SCENE_LAYOUT = MemoryLayout.structLayout(
+    private static final MemoryLayout RESOURCES_LAYOUT = MemoryLayout.structLayout(
             JAVA_INT.withName("struct_size"),
             JAVA_INT.withName("struct_version"),
             JAVA_INT.withName("origin_x"),
             JAVA_INT.withName("origin_y"),
             JAVA_INT.withName("origin_z"),
-            JAVA_INT.withName("vertex_count"),
-            JAVA_INT.withName("triangle_count"),
             JAVA_INT.withName("material_count"),
             JAVA_INT.withName("texture_count"),
             JAVA_INT.withName("texture_byte_count"),
             JAVA_INT.withName("reserved_0"),
-            JAVA_INT.withName("reserved_1"));
+            JAVA_INT.withName("reserved_1"),
+            JAVA_INT.withName("reserved_2"),
+            JAVA_INT.withName("reserved_3"));
+    private static final MemoryLayout SECTION_LAYOUT = MemoryLayout.structLayout(
+            JAVA_INT.withName("struct_size"),
+            JAVA_INT.withName("struct_version"),
+            JAVA_LONG.withName("section_id"),
+            JAVA_INT.withName("origin_x"),
+            JAVA_INT.withName("origin_y"),
+            JAVA_INT.withName("origin_z"),
+            JAVA_INT.withName("vertex_count"),
+            JAVA_INT.withName("triangle_count"),
+            JAVA_INT.withName("reserved_0"),
+            JAVA_INT.withName("reserved_1"),
+            JAVA_INT.withName("tail_padding"));
+    private static final MemoryLayout FRAME_LAYOUT = MemoryLayout.structLayout(
+            JAVA_INT.withName("struct_size"),
+            JAVA_INT.withName("struct_version"),
+            JAVA_INT.withName("width"),
+            JAVA_INT.withName("height"),
+            JAVA_LONG.withName("generation"),
+            JAVA_INT.withName("pixel_byte_count"),
+            JAVA_INT.withName("flags"),
+            JAVA_INT.withName("sample_count"),
+            JAVA_INT.withName("reserved"));
     private static final MemoryLayout VERTEX_LAYOUT = MemoryLayout.structLayout(
             JAVA_FLOAT.withName("position_x"),
             JAVA_FLOAT.withName("position_y"),
@@ -102,7 +127,9 @@ public final class NativeBridge {
 
     static {
         if (CAMERA_LAYOUT.byteSize() != 80L
-                || SCENE_LAYOUT.byteSize() != 48L
+                || RESOURCES_LAYOUT.byteSize() != 48L
+                || SECTION_LAYOUT.byteSize() != 48L
+                || FRAME_LAYOUT.byteSize() != 40L
                 || VERTEX_LAYOUT.byteSize() != 40L
                 || TRIANGLE_LAYOUT.byteSize() != 16L
                 || MATERIAL_LAYOUT.byteSize() != 32L
@@ -116,12 +143,10 @@ public final class NativeBridge {
 
     public static ProbeResult probe() {
         close();
-
         String configuredPath = System.getProperty(LIBRARY_PATH_PROPERTY);
         if (configuredPath == null || configuredPath.isBlank()) {
             return ProbeResult.failure("missing system property " + LIBRARY_PATH_PROPERTY);
         }
-
         Path libraryPath = Path.of(configuredPath).toAbsolutePath().normalize();
         if (!Files.isRegularFile(libraryPath)) {
             return ProbeResult.failure("native library not found at " + libraryPath);
@@ -130,8 +155,8 @@ public final class NativeBridge {
         BridgeState loadedState = null;
         try {
             loadedState = BridgeState.open(libraryPath);
-            ByteBuffer testFrame = loadedState.fillTestFrame(TEST_WIDTH, TEST_HEIGHT, TEST_FRAME_ID);
-            long checksum = verifyTestFrame(testFrame);
+            long checksum = verifyTestFrame(
+                    loadedState.fillTestFrame(TEST_WIDTH, TEST_HEIGHT, TEST_FRAME_ID));
             bridgeState = loadedState;
             return ProbeResult.success(
                     loadedState.buildInfo() + ", " + loadedState.rendererInfo()
@@ -146,17 +171,23 @@ public final class NativeBridge {
         }
     }
 
-    public static void uploadScene(ClientRenderSnapshot snapshot) {
-        BridgeState state = requireState();
-        try {
-            state.uploadScene(snapshot);
-        } catch (Throwable error) {
-            rethrowFatalError(error);
-            throw new IllegalStateException("native scene upload failed: " + describe(error), error);
-        }
+    public static void resetScene(SectionGeometrySnapshot.SceneResources resources) {
+        invoke("native scene reset", state -> state.resetScene(resources));
     }
 
-    public static ByteBuffer renderFrame(
+    public static void upsertSection(SectionGeometrySnapshot snapshot) {
+        invoke("native section upsert", state -> state.upsertSection(snapshot));
+    }
+
+    public static void removeSection(long sectionId) {
+        invoke("native section removal", state -> state.removeSection(sectionId));
+    }
+
+    public static void commitScene() {
+        invoke("native scene commit", BridgeState::commitScene);
+    }
+
+    public static RenderedFrame renderFrame(
             int width,
             int height,
             long frameId,
@@ -170,11 +201,31 @@ public final class NativeBridge {
         }
     }
 
+    public static String rendererInfo() {
+        BridgeState state = requireState();
+        try {
+            return state.rendererInfo();
+        } catch (Throwable error) {
+            rethrowFatalError(error);
+            throw new IllegalStateException("native renderer info failed: " + describe(error), error);
+        }
+    }
+
     public static void close() {
         BridgeState state = bridgeState;
         bridgeState = null;
         if (state != null) {
             state.close();
+        }
+    }
+
+    private static void invoke(String operation, BridgeCall call) {
+        BridgeState state = requireState();
+        try {
+            call.run(state);
+        } catch (Throwable error) {
+            rethrowFatalError(error);
+            throw new IllegalStateException(operation + " failed: " + describe(error), error);
         }
     }
 
@@ -191,17 +242,17 @@ public final class NativeBridge {
         for (int y = 0; y < TEST_HEIGHT; y++) {
             for (int x = 0; x < TEST_WIDTH; x++) {
                 int offset = (y * TEST_WIDTH + x) * 4;
-                int expectedRed = (x * 17 + (int) TEST_FRAME_ID) & 0xFF;
-                int expectedGreen = (y * 17 + (int) (TEST_FRAME_ID * 3)) & 0xFF;
-                int expectedBlue = ((x ^ y) * 15 + (int) (TEST_FRAME_ID * 5)) & 0xFF;
-                int[] expected = {expectedRed, expectedGreen, expectedBlue, 0xFF};
-
+                int[] expected = {
+                        (x * 17 + (int) TEST_FRAME_ID) & 0xFF,
+                        (y * 17 + (int) (TEST_FRAME_ID * 3)) & 0xFF,
+                        ((x ^ y) * 15 + (int) (TEST_FRAME_ID * 5)) & 0xFF,
+                        0xFF
+                };
                 for (int channel = 0; channel < expected.length; channel++) {
                     int actual = Byte.toUnsignedInt(pixels.get(offset + channel));
                     if (actual != expected[channel]) {
                         throw new IllegalStateException(
-                                "test frame mismatch at (" + x + "," + y + ") channel " + channel
-                                        + ": expected " + expected[channel] + ", got " + actual);
+                                "test frame mismatch at (" + x + "," + y + ") channel " + channel);
                     }
                     checksum = (checksum * 31 + actual) & 0xFFFFFFFFL;
                 }
@@ -227,21 +278,29 @@ public final class NativeBridge {
         return error.getClass().getSimpleName() + (detail == null ? "" : ": " + detail);
     }
 
+    @FunctionalInterface
+    private interface BridgeCall {
+        void run(BridgeState state) throws Throwable;
+    }
+
     private static final class BridgeState implements AutoCloseable {
         private final Arena libraryArena;
         private final MethodHandle fillTestFrame;
         private final MethodHandle destroyRenderer;
         private final MethodHandle writeRendererInfo;
-        private final MethodHandle uploadScene;
-        private final MethodHandle render;
+        private final MethodHandle resetScene;
+        private final MethodHandle upsertSection;
+        private final MethodHandle removeSection;
+        private final MethodHandle commitScene;
+        private final MethodHandle renderFrame;
         private final MemorySegment renderer;
         private final MemorySegment cameraSegment;
+        private final MemorySegment frameInfoSegment;
+        private final MemorySegment framePixelsSegment;
+        private final ByteBuffer framePixels;
         private final String buildInfo;
 
-        private Arena frameArena;
-        private MemorySegment frameSegment;
-        private ByteBuffer framePixels;
-        private int frameBytes;
+        private long generation;
         private boolean closed;
 
         private BridgeState(
@@ -249,18 +308,27 @@ public final class NativeBridge {
                 MethodHandle fillTestFrame,
                 MethodHandle destroyRenderer,
                 MethodHandle writeRendererInfo,
-                MethodHandle uploadScene,
-                MethodHandle render,
+                MethodHandle resetScene,
+                MethodHandle upsertSection,
+                MethodHandle removeSection,
+                MethodHandle commitScene,
+                MethodHandle renderFrame,
                 MemorySegment renderer,
                 String buildInfo) {
             this.libraryArena = libraryArena;
             this.fillTestFrame = fillTestFrame;
             this.destroyRenderer = destroyRenderer;
             this.writeRendererInfo = writeRendererInfo;
-            this.uploadScene = uploadScene;
-            this.render = render;
+            this.resetScene = resetScene;
+            this.upsertSection = upsertSection;
+            this.removeSection = removeSection;
+            this.commitScene = commitScene;
+            this.renderFrame = renderFrame;
             this.renderer = renderer;
             this.cameraSegment = libraryArena.allocate(CAMERA_LAYOUT);
+            this.frameInfoSegment = libraryArena.allocate(FRAME_LAYOUT);
+            this.framePixelsSegment = libraryArena.allocate(MAX_NATIVE_FRAME_BYTES, 16);
+            this.framePixels = framePixelsSegment.asByteBuffer();
             this.buildInfo = buildInfo;
         }
 
@@ -271,38 +339,38 @@ public final class NativeBridge {
             try {
                 Linker linker = Linker.nativeLinker();
                 SymbolLookup symbols = SymbolLookup.libraryLookup(libraryPath, libraryArena);
-                MethodHandle abiVersion = linker.downcallHandle(
-                        symbols.findOrThrow("cycles_bridge_abi_version"),
+                MethodHandle abiVersion = downcall(linker, symbols, "cycles_bridge_abi_version",
                         FunctionDescriptor.of(JAVA_INT));
-                MethodHandle writeBuildInfo = linker.downcallHandle(
-                        symbols.findOrThrow("cycles_bridge_write_build_info"),
+                MethodHandle writeBuildInfo = downcall(linker, symbols,
+                        "cycles_bridge_write_build_info",
                         FunctionDescriptor.of(JAVA_INT, ADDRESS, JAVA_INT));
-                MethodHandle fillTestFrame = linker.downcallHandle(
-                        symbols.findOrThrow("cycles_bridge_fill_test_frame"),
+                MethodHandle fillTestFrame = downcall(linker, symbols,
+                        "cycles_bridge_fill_test_frame",
                         FunctionDescriptor.of(JAVA_INT, ADDRESS, JAVA_INT, JAVA_INT, JAVA_LONG));
-                MethodHandle createRenderer = linker.downcallHandle(
-                        symbols.findOrThrow("cycles_bridge_create_renderer"),
+                MethodHandle createRenderer = downcall(linker, symbols,
+                        "cycles_bridge_create_renderer",
                         FunctionDescriptor.of(JAVA_INT, ADDRESS));
-                destroyRenderer = linker.downcallHandle(
-                        symbols.findOrThrow("cycles_bridge_destroy_renderer"),
-                        FunctionDescriptor.ofVoid(ADDRESS));
-                MethodHandle writeRendererInfo = linker.downcallHandle(
-                        symbols.findOrThrow("cycles_bridge_write_renderer_info"),
+                destroyRenderer = downcall(linker, symbols,
+                        "cycles_bridge_destroy_renderer", FunctionDescriptor.ofVoid(ADDRESS));
+                MethodHandle writeRendererInfo = downcall(linker, symbols,
+                        "cycles_bridge_write_renderer_info",
                         FunctionDescriptor.of(JAVA_INT, ADDRESS, ADDRESS, JAVA_INT));
-                MethodHandle uploadScene = linker.downcallHandle(
-                        symbols.findOrThrow("cycles_bridge_upload_scene"),
+                MethodHandle resetScene = downcall(linker, symbols,
+                        "cycles_bridge_reset_scene",
                         FunctionDescriptor.of(
-                                JAVA_INT,
-                                ADDRESS,
-                                ADDRESS,
-                                ADDRESS,
-                                ADDRESS,
-                                ADDRESS,
-                                ADDRESS,
-                                ADDRESS));
-                MethodHandle render = linker.downcallHandle(
-                        symbols.findOrThrow("cycles_bridge_render"),
-                        FunctionDescriptor.of(JAVA_INT, ADDRESS, ADDRESS, ADDRESS, JAVA_LONG));
+                                JAVA_INT, ADDRESS, ADDRESS, ADDRESS, ADDRESS, ADDRESS));
+                MethodHandle upsertSection = downcall(linker, symbols,
+                        "cycles_bridge_upsert_section",
+                        FunctionDescriptor.of(JAVA_INT, ADDRESS, ADDRESS, ADDRESS, ADDRESS));
+                MethodHandle removeSection = downcall(linker, symbols,
+                        "cycles_bridge_remove_section",
+                        FunctionDescriptor.of(JAVA_INT, ADDRESS, JAVA_LONG));
+                MethodHandle commitScene = downcall(linker, symbols,
+                        "cycles_bridge_commit_scene", FunctionDescriptor.of(JAVA_INT, ADDRESS));
+                MethodHandle renderFrame = downcall(linker, symbols,
+                        "cycles_bridge_render_frame",
+                        FunctionDescriptor.of(
+                                JAVA_INT, ADDRESS, ADDRESS, ADDRESS, ADDRESS, JAVA_LONG));
 
                 int actualAbiVersion = (int) abiVersion.invokeExact();
                 if (actualAbiVersion != ABI_VERSION) {
@@ -311,29 +379,29 @@ public final class NativeBridge {
                 }
 
                 String buildInfo;
-                try (Arena dataArena = Arena.ofConfined()) {
-                    MemorySegment buildInfoBuffer = dataArena.allocate(BUILD_INFO_BYTES);
-                    int buildInfoStatus = (int) writeBuildInfo.invokeExact(
-                            buildInfoBuffer, BUILD_INFO_BYTES);
-                    checkStatus(buildInfoStatus, "build info call");
-                    buildInfo = buildInfoBuffer.getString(0, StandardCharsets.UTF_8);
+                try (Arena arena = Arena.ofConfined()) {
+                    MemorySegment buffer = arena.allocate(BUILD_INFO_BYTES);
+                    checkStatus((int) writeBuildInfo.invokeExact(buffer, BUILD_INFO_BYTES),
+                            "build info call");
+                    buildInfo = buffer.getString(0, StandardCharsets.UTF_8);
                 }
 
                 MemorySegment rendererOutput = libraryArena.allocate(ADDRESS);
-                int createStatus = (int) createRenderer.invokeExact(rendererOutput);
-                checkStatus(createStatus, "renderer creation");
+                checkStatus((int) createRenderer.invokeExact(rendererOutput), "renderer creation");
                 renderer = rendererOutput.get(ADDRESS, 0L);
                 if (renderer.address() == 0L) {
                     throw new IllegalStateException("renderer creation returned a null handle");
                 }
-
                 return new BridgeState(
                         libraryArena,
                         fillTestFrame,
                         destroyRenderer,
                         writeRendererInfo,
-                        uploadScene,
-                        render,
+                        resetScene,
+                        upsertSection,
+                        removeSection,
+                        commitScene,
+                        renderFrame,
                         renderer,
                         buildInfo);
             } catch (Throwable error) {
@@ -349,178 +417,209 @@ public final class NativeBridge {
             }
         }
 
-        private void uploadScene(ClientRenderSnapshot snapshot) throws Throwable {
-            int vertexCount = snapshot.vertexCount();
-            int triangleCount = snapshot.triangleCount();
-            if (triangleCount == 0) {
-                if (vertexCount != 0 || snapshot.materials().length != 0
-                        || snapshot.textures().length != 0) {
-                    throw new IllegalArgumentException("empty snapshot contains partial geometry");
-                }
-            } else if (vertexCount == 0
-                    || snapshot.materials().length == 0 || snapshot.textures().length == 0) {
-                throw new IllegalArgumentException("render snapshot contains incomplete geometry");
+        private static MethodHandle downcall(
+                Linker linker,
+                SymbolLookup symbols,
+                String name,
+                FunctionDescriptor descriptor) {
+            return linker.downcallHandle(symbols.findOrThrow(name), descriptor);
+        }
+
+        private void resetScene(SectionGeometrySnapshot.SceneResources resources) throws Throwable {
+            int textureByteCount = validateResources(resources);
+            try (Arena arena = Arena.ofConfined()) {
+                MemorySegment resourceData = arena.allocate(RESOURCES_LAYOUT);
+                resourceData.set(JAVA_INT, 0L, Math.toIntExact(RESOURCES_LAYOUT.byteSize()));
+                resourceData.set(JAVA_INT, 4L, STRUCT_VERSION);
+                resourceData.set(JAVA_INT, 8L, resources.originX());
+                resourceData.set(JAVA_INT, 12L, resources.originY());
+                resourceData.set(JAVA_INT, 16L, resources.originZ());
+                resourceData.set(JAVA_INT, 20L, resources.materials().length);
+                resourceData.set(JAVA_INT, 24L, resources.textures().length);
+                resourceData.set(JAVA_INT, 28L, textureByteCount);
+
+                MemorySegment materials = writeMaterials(arena, resources.materials());
+                TextureSegments textureData = writeTextures(arena, resources.textures(), textureByteCount);
+                int status = (int) resetScene.invokeExact(
+                        renderer, resourceData, materials, textureData.descriptors(), textureData.pixels());
+                checkRendererStatus(status, "scene reset");
+                generation = 0L;
             }
-            if (snapshot.vertexData().length
-                    != Math.multiplyExact(vertexCount, ClientRenderSnapshot.VERTEX_FLOAT_STRIDE)
-                    || snapshot.triangleData().length
-                    != Math.multiplyExact(
-                            triangleCount, ClientRenderSnapshot.TRIANGLE_INT_STRIDE)) {
-                throw new IllegalArgumentException("render snapshot array length mismatch");
+        }
+
+        private void upsertSection(SectionGeometrySnapshot snapshot) throws Throwable {
+            if (snapshot.empty()) {
+                removeSection(snapshot.sectionNode());
+                return;
             }
-
-            int textureByteCount = 0;
-            for (ClientRenderSnapshot.TextureData texture : snapshot.textures()) {
-                int expectedBytes = Math.multiplyExact(
-                        Math.multiplyExact(texture.width(), texture.height()), 4);
-                if (texture.rgbaPixels().length != expectedBytes) {
-                    throw new IllegalArgumentException(
-                            "texture byte length mismatch for " + texture.sprite());
-                }
-                textureByteCount = Math.addExact(textureByteCount, expectedBytes);
+            if (snapshot.vertexData().length != Math.multiplyExact(
+                    snapshot.vertexCount(), SectionGeometrySnapshot.VERTEX_FLOAT_STRIDE)
+                    || snapshot.vertexColors().length != snapshot.vertexCount()
+                    || snapshot.triangleData().length != Math.multiplyExact(
+                            snapshot.triangleCount(), SectionGeometrySnapshot.TRIANGLE_INT_STRIDE)) {
+                throw new IllegalArgumentException("section geometry array length mismatch");
             }
-
-            try (Arena uploadArena = Arena.ofConfined()) {
-                MemorySegment sceneSegment = uploadArena.allocate(SCENE_LAYOUT);
-                sceneSegment.set(JAVA_INT, 0L, Math.toIntExact(SCENE_LAYOUT.byteSize()));
-                sceneSegment.set(JAVA_INT, 4L, STRUCT_VERSION);
-                sceneSegment.set(JAVA_INT, 8L, snapshot.originX());
-                sceneSegment.set(JAVA_INT, 12L, snapshot.originY());
-                sceneSegment.set(JAVA_INT, 16L, snapshot.originZ());
-                sceneSegment.set(JAVA_INT, 20L, vertexCount);
-                sceneSegment.set(JAVA_INT, 24L, triangleCount);
-                sceneSegment.set(JAVA_INT, 28L, snapshot.materials().length);
-                sceneSegment.set(JAVA_INT, 32L, snapshot.textures().length);
-                sceneSegment.set(JAVA_INT, 36L, textureByteCount);
-
-                if (triangleCount == 0) {
-                    int uploadStatus = (int) uploadScene.invokeExact(
-                            renderer,
-                            sceneSegment,
-                            MemorySegment.NULL,
-                            MemorySegment.NULL,
-                            MemorySegment.NULL,
-                            MemorySegment.NULL,
-                            MemorySegment.NULL);
-                    checkRendererStatus(uploadStatus, "empty scene upload");
-                    return;
-                }
-
-                MemorySegment vertices = uploadArena.allocate(
-                        Math.multiplyExact((long) vertexCount, VERTEX_LAYOUT.byteSize()),
-                        VERTEX_LAYOUT.byteAlignment());
-                for (int index = 0; index < vertexCount; index++) {
-                    long base = Math.multiplyExact((long) index, VERTEX_LAYOUT.byteSize());
-                    int input = index * ClientRenderSnapshot.VERTEX_FLOAT_STRIDE;
-                    for (int component = 0; component < 8; component++) {
-                        vertices.set(
-                                JAVA_FLOAT,
-                                base + (long) component * Float.BYTES,
-                                snapshot.vertexData()[input + component]);
-                    }
-                    vertices.set(JAVA_INT, base + 32L, snapshot.vertexColors()[index]);
-                }
-
-                MemorySegment triangles = uploadArena.allocate(
-                        Math.multiplyExact((long) triangleCount, TRIANGLE_LAYOUT.byteSize()),
+            try (Arena arena = Arena.ofConfined()) {
+                MemorySegment section = arena.allocate(SECTION_LAYOUT);
+                section.set(JAVA_INT, 0L, Math.toIntExact(SECTION_LAYOUT.byteSize()));
+                section.set(JAVA_INT, 4L, STRUCT_VERSION);
+                section.set(JAVA_LONG, 8L, snapshot.sectionNode());
+                section.set(JAVA_INT, 16L, snapshot.originX());
+                section.set(JAVA_INT, 20L, snapshot.originY());
+                section.set(JAVA_INT, 24L, snapshot.originZ());
+                section.set(JAVA_INT, 28L, snapshot.vertexCount());
+                section.set(JAVA_INT, 32L, snapshot.triangleCount());
+                MemorySegment vertices = writeVertices(arena, snapshot);
+                MemorySegment triangles = arena.allocate(
+                        Math.multiplyExact((long) snapshot.triangleCount(), TRIANGLE_LAYOUT.byteSize()),
                         TRIANGLE_LAYOUT.byteAlignment());
-                triangles.asByteBuffer()
-                        .order(ByteOrder.nativeOrder())
-                        .asIntBuffer()
+                triangles.asByteBuffer().order(ByteOrder.nativeOrder()).asIntBuffer()
                         .put(snapshot.triangleData());
-
-                MemorySegment materials = uploadArena.allocate(
-                        Math.multiplyExact(
-                                (long) snapshot.materials().length, MATERIAL_LAYOUT.byteSize()),
-                        MATERIAL_LAYOUT.byteAlignment());
-                for (int index = 0; index < snapshot.materials().length; index++) {
-                    ClientRenderSnapshot.MaterialData material = snapshot.materials()[index];
-                    long base = Math.multiplyExact((long) index, MATERIAL_LAYOUT.byteSize());
-                    materials.set(JAVA_INT, base, material.textureIndex());
-                    materials.set(JAVA_INT, base + 4L, material.flags());
-                    materials.set(JAVA_FLOAT, base + 8L, material.emissionStrength());
-                    materials.set(JAVA_FLOAT, base + 12L, material.alphaCutoff());
-                }
-
-                MemorySegment textures = uploadArena.allocate(
-                        Math.multiplyExact(
-                                (long) snapshot.textures().length, TEXTURE_LAYOUT.byteSize()),
-                        TEXTURE_LAYOUT.byteAlignment());
-                MemorySegment texturePixels = uploadArena.allocate(textureByteCount, 4L);
-                int pixelOffset = 0;
-                for (int index = 0; index < snapshot.textures().length; index++) {
-                    ClientRenderSnapshot.TextureData texture = snapshot.textures()[index];
-                    long base = Math.multiplyExact((long) index, TEXTURE_LAYOUT.byteSize());
-                    textures.set(JAVA_INT, base, texture.width());
-                    textures.set(JAVA_INT, base + 4L, texture.height());
-                    textures.set(JAVA_INT, base + 8L, pixelOffset);
-                    textures.set(JAVA_INT, base + 12L, texture.rgbaPixels().length);
-                    texturePixels
-                            .asSlice(pixelOffset, texture.rgbaPixels().length)
-                            .asByteBuffer()
-                            .put(texture.rgbaPixels());
-                    pixelOffset += texture.rgbaPixels().length;
-                }
-
-                int uploadStatus = (int) uploadScene.invokeExact(
-                        renderer,
-                        sceneSegment,
-                        vertices,
-                        triangles,
-                        materials,
-                        textures,
-                        texturePixels);
-                checkRendererStatus(uploadStatus, "scene upload");
+                int status = (int) upsertSection.invokeExact(
+                        renderer, section, vertices, triangles);
+                checkRendererStatus(status, "section upsert");
             }
         }
 
-        private ByteBuffer fillTestFrame(int width, int height, long frameId) throws Throwable {
-            MemorySegment output = ensureFrameBuffer(width, height);
-            int status = (int) fillTestFrame.invokeExact(output, width, height, frameId);
-            checkStatus(status, "test frame call");
-            framePixels.clear();
-            return framePixels;
+        private void removeSection(long sectionId) throws Throwable {
+            checkRendererStatus(
+                    (int) removeSection.invokeExact(renderer, sectionId), "section removal");
         }
 
-        private ByteBuffer renderFrame(
+        private void commitScene() throws Throwable {
+            checkRendererStatus((int) commitScene.invokeExact(renderer), "scene commit");
+        }
+
+        private RenderedFrame renderFrame(
                 int width,
                 int height,
                 long frameId,
-                CameraInput cameraInput) throws Throwable {
-            MemorySegment output = ensureFrameBuffer(width, height);
-            writeCamera(cameraSegment, width, height, frameId, cameraInput);
-            int status = (int) render.invokeExact(
+                CameraInput input) throws Throwable {
+            if (width <= 0 || height <= 0) {
+                throw new IllegalArgumentException("invalid viewport " + width + "x" + height);
+            }
+            writeCamera(cameraSegment, width, height, frameId, input);
+            frameInfoSegment.set(JAVA_INT, 0L, Math.toIntExact(FRAME_LAYOUT.byteSize()));
+            frameInfoSegment.set(JAVA_INT, 4L, STRUCT_VERSION);
+            frameInfoSegment.set(JAVA_LONG, 16L, generation);
+            int status = (int) renderFrame.invokeExact(
                     renderer,
                     cameraSegment,
-                    output,
-                    (long) frameBytes);
+                    frameInfoSegment,
+                    framePixelsSegment,
+                    (long) MAX_NATIVE_FRAME_BYTES);
             checkRendererStatus(status, "renderer frame call");
-            framePixels.clear();
-            return framePixels;
+
+            int frameWidth = frameInfoSegment.get(JAVA_INT, 8L);
+            int frameHeight = frameInfoSegment.get(JAVA_INT, 12L);
+            generation = frameInfoSegment.get(JAVA_LONG, 16L);
+            int pixelBytes = frameInfoSegment.get(JAVA_INT, 24L);
+            int flags = frameInfoSegment.get(JAVA_INT, 28L);
+            int sampleCount = frameInfoSegment.get(JAVA_INT, 32L);
+            ByteBuffer pixels = null;
+            if ((flags & FRAME_UPDATED) != 0) {
+                int expected = Math.multiplyExact(Math.multiplyExact(frameWidth, frameHeight), 4);
+                if (pixelBytes != expected || pixelBytes < 0 || pixelBytes > MAX_NATIVE_FRAME_BYTES) {
+                    throw new IllegalStateException("native frame byte count mismatch: " + pixelBytes);
+                }
+                pixels = framePixels.duplicate();
+                pixels.clear();
+                pixels.limit(pixelBytes);
+            }
+            return new RenderedFrame(
+                    (flags & FRAME_READY) != 0,
+                    (flags & FRAME_UPDATED) != 0,
+                    frameWidth,
+                    frameHeight,
+                    generation,
+                    sampleCount,
+                    pixels);
         }
 
-        private MemorySegment ensureFrameBuffer(int width, int height) {
-            if (width <= 0 || height <= 0) {
-                throw new IllegalArgumentException(
-                        "frame dimensions must be positive, got " + width + "x" + height);
+        private ByteBuffer fillTestFrame(int width, int height, long frameId) throws Throwable {
+            int bytes = Math.multiplyExact(Math.multiplyExact(width, height), 4);
+            try (Arena arena = Arena.ofConfined()) {
+                MemorySegment output = arena.allocate(bytes, 16);
+                checkStatus((int) fillTestFrame.invokeExact(output, width, height, frameId),
+                        "test frame call");
+                ByteBuffer copied = ByteBuffer.allocate(bytes);
+                copied.put(output.asByteBuffer()).flip();
+                return copied;
             }
+        }
 
-            long byteCount = Math.multiplyExact(Math.multiplyExact((long) width, height), 4L);
-            if (byteCount > Integer.MAX_VALUE) {
-                throw new IllegalArgumentException("frame is too large: " + width + "x" + height);
+        private static int validateResources(SectionGeometrySnapshot.SceneResources resources) {
+            if (resources.materials().length == 0 || resources.textures().length == 0) {
+                throw new IllegalArgumentException("scene resources cannot be empty");
             }
-
-            int requiredBytes = (int) byteCount;
-            if (frameSegment == null || frameBytes != requiredBytes) {
-                if (frameArena != null) {
-                    frameArena.close();
+            int total = 0;
+            for (SectionGeometrySnapshot.TextureData texture : resources.textures()) {
+                int expected = Math.multiplyExact(Math.multiplyExact(texture.width(), texture.height()), 4);
+                if (texture.rgbaPixels().length != expected) {
+                    throw new IllegalArgumentException("texture byte length mismatch for " + texture.atlas());
                 }
-                frameArena = Arena.ofConfined();
-                frameSegment = frameArena.allocate(requiredBytes, 16);
-                framePixels = frameSegment.asByteBuffer();
-                frameBytes = requiredBytes;
+                total = Math.addExact(total, expected);
             }
-            return frameSegment;
+            return total;
+        }
+
+        private static MemorySegment writeMaterials(
+                Arena arena,
+                SectionGeometrySnapshot.MaterialData[] source) {
+            MemorySegment output = arena.allocate(
+                    Math.multiplyExact((long) source.length, MATERIAL_LAYOUT.byteSize()),
+                    MATERIAL_LAYOUT.byteAlignment());
+            for (int index = 0; index < source.length; index++) {
+                SectionGeometrySnapshot.MaterialData material = source[index];
+                long base = index * MATERIAL_LAYOUT.byteSize();
+                output.set(JAVA_INT, base, material.textureIndex());
+                output.set(JAVA_INT, base + 4L, material.flags());
+                output.set(JAVA_FLOAT, base + 8L, material.emissionStrength());
+                output.set(JAVA_FLOAT, base + 12L, material.alphaCutoff());
+            }
+            return output;
+        }
+
+        private static TextureSegments writeTextures(
+                Arena arena,
+                SectionGeometrySnapshot.TextureData[] source,
+                int totalBytes) {
+            MemorySegment descriptors = arena.allocate(
+                    Math.multiplyExact((long) source.length, TEXTURE_LAYOUT.byteSize()),
+                    TEXTURE_LAYOUT.byteAlignment());
+            MemorySegment pixels = arena.allocate(totalBytes, 4);
+            int pixelOffset = 0;
+            for (int index = 0; index < source.length; index++) {
+                SectionGeometrySnapshot.TextureData texture = source[index];
+                long base = index * TEXTURE_LAYOUT.byteSize();
+                descriptors.set(JAVA_INT, base, texture.width());
+                descriptors.set(JAVA_INT, base + 4L, texture.height());
+                descriptors.set(JAVA_INT, base + 8L, pixelOffset);
+                descriptors.set(JAVA_INT, base + 12L, texture.rgbaPixels().length);
+                pixels.asSlice(pixelOffset, texture.rgbaPixels().length)
+                        .asByteBuffer().put(texture.rgbaPixels());
+                pixelOffset += texture.rgbaPixels().length;
+            }
+            return new TextureSegments(descriptors, pixels);
+        }
+
+        private static MemorySegment writeVertices(
+                Arena arena,
+                SectionGeometrySnapshot snapshot) {
+            MemorySegment output = arena.allocate(
+                    Math.multiplyExact((long) snapshot.vertexCount(), VERTEX_LAYOUT.byteSize()),
+                    VERTEX_LAYOUT.byteAlignment());
+            for (int index = 0; index < snapshot.vertexCount(); index++) {
+                long base = index * VERTEX_LAYOUT.byteSize();
+                int input = index * SectionGeometrySnapshot.VERTEX_FLOAT_STRIDE;
+                for (int component = 0; component < SectionGeometrySnapshot.VERTEX_FLOAT_STRIDE;
+                     component++) {
+                    output.set(JAVA_FLOAT, base + (long) component * Float.BYTES,
+                            snapshot.vertexData()[input + component]);
+                }
+                output.set(JAVA_INT, base + 32L, snapshot.vertexColors()[index]);
+            }
+            return output;
         }
 
         private static void writeCamera(
@@ -550,11 +649,10 @@ public final class NativeBridge {
         }
 
         private String rendererInfo() throws Throwable {
-            try (Arena infoArena = Arena.ofConfined()) {
-                MemorySegment buffer = infoArena.allocate(RENDERER_INFO_BYTES);
-                int status = (int) writeRendererInfo.invokeExact(
-                        renderer, buffer, RENDERER_INFO_BYTES);
-                checkStatus(status, "renderer info call");
+            try (Arena arena = Arena.ofConfined()) {
+                MemorySegment buffer = arena.allocate(RENDERER_INFO_BYTES);
+                checkStatus((int) writeRendererInfo.invokeExact(
+                        renderer, buffer, RENDERER_INFO_BYTES), "renderer info call");
                 return buffer.getString(0, StandardCharsets.UTF_8);
             }
         }
@@ -572,13 +670,6 @@ public final class NativeBridge {
                 return;
             }
             closed = true;
-            if (frameArena != null) {
-                frameArena.close();
-                frameArena = null;
-                frameSegment = null;
-                framePixels = null;
-                frameBytes = 0;
-            }
             try {
                 destroyRenderer.invokeExact(renderer);
             } catch (Throwable error) {
@@ -586,6 +677,9 @@ public final class NativeBridge {
             } finally {
                 libraryArena.close();
             }
+        }
+
+        private record TextureSegments(MemorySegment descriptors, MemorySegment pixels) {
         }
     }
 
@@ -599,6 +693,16 @@ public final class NativeBridge {
             float rotationW,
             float verticalFovRadians,
             float depthFar) {
+    }
+
+    public record RenderedFrame(
+            boolean ready,
+            boolean updated,
+            int width,
+            int height,
+            long generation,
+            int sampleCount,
+            ByteBuffer pixels) {
     }
 
     public record ProbeResult(boolean success, String message) {

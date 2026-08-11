@@ -29,7 +29,7 @@ abstract class LevelRendererMixin {
             FrameGraphBuilder frameGraph,
             GraphicsResourceAllocator resourceAllocator,
             FrameGraphBuilder.Inspector inspector) {
-        if (CyclesRendererMod.isExperimentalRendererEnabled()) {
+        if (CyclesRendererMod.shouldReplaceVanillaWorld()) {
             if (!cyclesrenderer$wasSkippingFrameGraph) {
                 cyclesrenderer$logger.info("Experimental renderer active: skipping the vanilla world FrameGraph");
                 cyclesrenderer$wasSkippingFrameGraph = true;

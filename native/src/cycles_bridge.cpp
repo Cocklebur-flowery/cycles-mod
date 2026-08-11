@@ -16,9 +16,9 @@ struct CyclesBridgeRenderer {
 
 namespace {
 
-constexpr std::uint32_t kAbiVersion = 4;
+constexpr std::uint32_t kAbiVersion = 5;
 constexpr std::uint32_t kStructVersion = 1;
-constexpr char kBuildInfo[] = "cyclesrenderer-native/cycles-5.2;abi=4";
+constexpr char kBuildInfo[] = "cyclesrenderer-native/cycles-5.2;abi=5";
 
 static_assert(sizeof(CyclesBridgeCamera) == 80);
 static_assert(offsetof(CyclesBridgeCamera, frame_id) == 8);
@@ -28,6 +28,9 @@ static_assert(offsetof(CyclesBridgeCamera, vertical_fov_radians) == 64);
 static_assert(sizeof(CyclesBridgeScene) == 48);
 static_assert(offsetof(CyclesBridgeScene, origin_x) == 8);
 static_assert(offsetof(CyclesBridgeScene, vertex_count) == 20);
+static_assert(sizeof(CyclesBridgeSceneResources) == 48);
+static_assert(sizeof(CyclesBridgeSection) == 48);
+static_assert(sizeof(CyclesBridgeFrame) == 40);
 static_assert(sizeof(CyclesBridgeVertex) == 40);
 static_assert(offsetof(CyclesBridgeVertex, packed_rgba) == 32);
 static_assert(sizeof(CyclesBridgeTriangle) == 16);
@@ -90,7 +93,8 @@ bool valid_scene_data(
     for (std::uint32_t index = 0; index < scene.material_count; ++index) {
         const CyclesBridgeMaterial& material = materials[index];
         if (material.texture_index >= scene.texture_count
-            || (material.flags & ~CYCLES_BRIDGE_MATERIAL_CUTOUT) != 0U
+            || (material.flags
+                & ~(CYCLES_BRIDGE_MATERIAL_CUTOUT | CYCLES_BRIDGE_MATERIAL_BLEND)) != 0U
             || !std::isfinite(material.emission_strength)
             || !std::isfinite(material.alpha_cutoff)
             || material.emission_strength < 0.0F
@@ -106,6 +110,57 @@ bool valid_scene_data(
             static_cast<std::uint64_t>(texture.pixel_offset) + texture.pixel_size;
         if (texture.width == 0 || texture.height == 0
             || expected_size != texture.pixel_size || end > scene.texture_byte_count) {
+            return false;
+        }
+    }
+    return true;
+}
+
+bool valid_resources_data(
+    const CyclesBridgeSceneResources& resources,
+    const CyclesBridgeMaterial* materials,
+    const CyclesBridgeTexture* textures,
+    const std::uint8_t* texture_pixels) {
+    CyclesBridgeScene scene{};
+    scene.material_count = resources.material_count;
+    scene.texture_count = resources.texture_count;
+    scene.texture_byte_count = resources.texture_byte_count;
+    scene.vertex_count = 1;
+    scene.triangle_count = 1;
+    CyclesBridgeVertex vertex{};
+    CyclesBridgeTriangle triangle{};
+    return resources.material_count != 0 && resources.texture_count != 0
+        && resources.texture_byte_count != 0
+        && valid_scene_data(
+            scene, &vertex, &triangle, materials, textures, texture_pixels);
+}
+
+bool valid_section_data(
+    const CyclesBridgeSection& section,
+    const CyclesBridgeVertex* vertices,
+    const CyclesBridgeTriangle* triangles) {
+    if (section.triangle_count == 0) {
+        return section.vertex_count == 0;
+    }
+    if (section.vertex_count == 0 || vertices == nullptr || triangles == nullptr
+        || section.vertex_count > static_cast<std::uint32_t>(std::numeric_limits<int>::max())
+        || section.triangle_count > static_cast<std::uint32_t>(std::numeric_limits<int>::max())) {
+        return false;
+    }
+    for (std::uint32_t index = 0; index < section.vertex_count; ++index) {
+        const CyclesBridgeVertex& vertex = vertices[index];
+        if (!std::isfinite(vertex.position_x) || !std::isfinite(vertex.position_y)
+            || !std::isfinite(vertex.position_z) || !std::isfinite(vertex.normal_x)
+            || !std::isfinite(vertex.normal_y) || !std::isfinite(vertex.normal_z)
+            || !std::isfinite(vertex.texture_u) || !std::isfinite(vertex.texture_v)) {
+            return false;
+        }
+    }
+    for (std::uint32_t index = 0; index < section.triangle_count; ++index) {
+        const CyclesBridgeTriangle& triangle = triangles[index];
+        if (triangle.vertex_0 >= section.vertex_count
+            || triangle.vertex_1 >= section.vertex_count
+            || triangle.vertex_2 >= section.vertex_count) {
             return false;
         }
     }
@@ -190,6 +245,86 @@ std::uint32_t cycles_bridge_upload_scene(
     }
 }
 
+std::uint32_t cycles_bridge_reset_scene(
+    CyclesBridgeRenderer* renderer,
+    const CyclesBridgeSceneResources* resources,
+    const CyclesBridgeMaterial* materials,
+    const CyclesBridgeTexture* textures,
+    const std::uint8_t* texture_pixels) {
+    if (renderer == nullptr || renderer->engine == nullptr || resources == nullptr
+        || resources->struct_size < sizeof(CyclesBridgeSceneResources)
+        || resources->struct_version != kStructVersion
+        || !valid_resources_data(*resources, materials, textures, texture_pixels)) {
+        return CYCLES_BRIDGE_STATUS_INVALID_ARGUMENT;
+    }
+    try {
+        std::string error;
+        return renderer->engine->reset_scene(
+                   *resources, materials, textures, texture_pixels, error)
+            ? CYCLES_BRIDGE_STATUS_OK
+            : CYCLES_BRIDGE_STATUS_RENDER_ERROR;
+    } catch (const std::bad_alloc&) {
+        return CYCLES_BRIDGE_STATUS_OUT_OF_MEMORY;
+    } catch (...) {
+        return CYCLES_BRIDGE_STATUS_RENDER_ERROR;
+    }
+}
+
+std::uint32_t cycles_bridge_upsert_section(
+    CyclesBridgeRenderer* renderer,
+    const CyclesBridgeSection* section,
+    const CyclesBridgeVertex* vertices,
+    const CyclesBridgeTriangle* triangles) {
+    if (renderer == nullptr || renderer->engine == nullptr || section == nullptr
+        || section->struct_size < sizeof(CyclesBridgeSection)
+        || section->struct_version != kStructVersion
+        || !valid_section_data(*section, vertices, triangles)) {
+        return CYCLES_BRIDGE_STATUS_INVALID_ARGUMENT;
+    }
+    try {
+        std::string error;
+        return renderer->engine->upsert_section(*section, vertices, triangles, error)
+            ? CYCLES_BRIDGE_STATUS_OK
+            : CYCLES_BRIDGE_STATUS_RENDER_ERROR;
+    } catch (const std::bad_alloc&) {
+        return CYCLES_BRIDGE_STATUS_OUT_OF_MEMORY;
+    } catch (...) {
+        return CYCLES_BRIDGE_STATUS_RENDER_ERROR;
+    }
+}
+
+std::uint32_t cycles_bridge_remove_section(
+    CyclesBridgeRenderer* renderer,
+    std::int64_t section_id) {
+    if (renderer == nullptr || renderer->engine == nullptr) {
+        return CYCLES_BRIDGE_STATUS_INVALID_ARGUMENT;
+    }
+    try {
+        std::string error;
+        return renderer->engine->remove_section(section_id, error)
+            ? CYCLES_BRIDGE_STATUS_OK
+            : CYCLES_BRIDGE_STATUS_RENDER_ERROR;
+    } catch (...) {
+        return CYCLES_BRIDGE_STATUS_RENDER_ERROR;
+    }
+}
+
+std::uint32_t cycles_bridge_commit_scene(CyclesBridgeRenderer* renderer) {
+    if (renderer == nullptr || renderer->engine == nullptr) {
+        return CYCLES_BRIDGE_STATUS_INVALID_ARGUMENT;
+    }
+    try {
+        std::string error;
+        return renderer->engine->commit_scene(error)
+            ? CYCLES_BRIDGE_STATUS_OK
+            : CYCLES_BRIDGE_STATUS_RENDER_ERROR;
+    } catch (const std::bad_alloc&) {
+        return CYCLES_BRIDGE_STATUS_OUT_OF_MEMORY;
+    } catch (...) {
+        return CYCLES_BRIDGE_STATUS_RENDER_ERROR;
+    }
+}
+
 std::uint32_t cycles_bridge_render(
     CyclesBridgeRenderer* renderer,
     const CyclesBridgeCamera* camera,
@@ -204,6 +339,32 @@ std::uint32_t cycles_bridge_render(
     try {
         std::string error;
         return renderer->engine->render(*camera, rgba, rgba_capacity, error)
+            ? CYCLES_BRIDGE_STATUS_OK
+            : CYCLES_BRIDGE_STATUS_RENDER_ERROR;
+    } catch (const std::bad_alloc&) {
+        return CYCLES_BRIDGE_STATUS_OUT_OF_MEMORY;
+    } catch (...) {
+        return CYCLES_BRIDGE_STATUS_RENDER_ERROR;
+    }
+}
+
+std::uint32_t cycles_bridge_render_frame(
+    CyclesBridgeRenderer* renderer,
+    const CyclesBridgeCamera* camera,
+    CyclesBridgeFrame* frame,
+    std::uint8_t* rgba,
+    std::uint64_t rgba_capacity) {
+    if (renderer == nullptr || renderer->engine == nullptr || camera == nullptr
+        || frame == nullptr
+        || camera->struct_size < sizeof(CyclesBridgeCamera)
+        || camera->struct_version != kStructVersion
+        || frame->struct_size < sizeof(CyclesBridgeFrame)
+        || frame->struct_version != kStructVersion) {
+        return CYCLES_BRIDGE_STATUS_INVALID_ARGUMENT;
+    }
+    try {
+        std::string error;
+        return renderer->engine->render_frame(*camera, *frame, rgba, rgba_capacity, error)
             ? CYCLES_BRIDGE_STATUS_OK
             : CYCLES_BRIDGE_STATUS_RENDER_ERROR;
     } catch (const std::bad_alloc&) {
