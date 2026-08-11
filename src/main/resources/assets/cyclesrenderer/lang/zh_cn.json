@@ -27,6 +27,8 @@
   "config.cyclesrenderer.output.width": "内部分辨率宽度",
   "config.cyclesrenderer.output.height": "内部分辨率高度",
   "config.cyclesrenderer.output.percentage": "分辨率百分比",
+  "config.cyclesrenderer.output.dynamicResolution": "动态分辨率",
+  "config.cyclesrenderer.output.interactivePercentage": "交互分辨率百分比",
   "config.cyclesrenderer.sampling.interactiveSamples": "交互采样",
   "config.cyclesrenderer.sampling.stillSamples": "静止采样",
   "config.cyclesrenderer.sampling.stationaryDelay": "进入静止模式延迟（毫秒）",

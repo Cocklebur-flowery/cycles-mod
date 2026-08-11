@@ -211,7 +211,9 @@ struct CyclesBridgeRenderSettings {
     std::uint32_t view_transform;
     std::uint32_t active_pass;
     std::uint32_t debug_overlay;
-    std::uint32_t reserved[9];
+    std::uint32_t dynamic_resolution;
+    std::uint32_t interactive_resolution_percentage;
+    std::uint32_t reserved[7];
 };
 
 struct CyclesBridgeCapabilities {

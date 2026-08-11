@@ -167,6 +167,39 @@ bool wait_for_background_frame(
     return false;
 }
 
+bool wait_for_frame_dimensions(
+    CyclesBridgeRenderer* renderer,
+    CyclesBridgeCamera& camera,
+    CyclesBridgeFrame& frame,
+    std::vector<std::uint8_t>& pixels,
+    std::uint32_t expected_width,
+    std::uint32_t expected_height,
+    const char* stage,
+    std::string& info) {
+    for (int attempt = 0; attempt < 400; ++attempt) {
+        camera.frame_id++;
+        if (!require_ok(
+                cycles_bridge_render_frame(
+                    renderer, &camera, &frame, pixels.data(), pixels.size()),
+                "frame render")) {
+            info = renderer_info(renderer);
+            std::cerr << info << '\n';
+            return false;
+        }
+        info = renderer_info(renderer);
+        if ((frame.flags & CYCLES_BRIDGE_FRAME_UPDATED) != 0U
+            && frame.width == expected_width
+            && frame.height == expected_height) {
+            return true;
+        }
+        Sleep(10);
+    }
+    std::cerr << stage << " did not produce " << expected_width << 'x'
+              << expected_height << ";actual=" << frame.width << 'x'
+              << frame.height << ";info=" << info << '\n';
+    return false;
+}
+
 CyclesBridgeRenderSettings default_settings() {
     CyclesBridgeRenderSettings settings{};
     settings.struct_size = sizeof(settings);
@@ -175,6 +208,7 @@ CyclesBridgeRenderSettings default_settings() {
     settings.render_width = 480;
     settings.render_height = 270;
     settings.resolution_percentage = 100;
+    settings.interactive_resolution_percentage = 50;
     settings.interactive_samples = 1;
     settings.still_samples = 1;
     settings.stationary_delay_millis = 150;
@@ -645,6 +679,25 @@ int main(int argc, char** argv) {
                   << diagnostics.scene_commit_count
                   << ";deltas=" << diagnostics.scene_delta_count
                   << ";starts=" << diagnostics.render_start_count << '\n';
+        cycles_bridge_destroy_renderer(renderer);
+        return 1;
+    }
+
+    std::cerr << "[smoke] Verifying interactive dynamic resolution\n";
+    settings.dynamic_resolution = 1U;
+    settings.interactive_resolution_percentage = 50U;
+    settings.revision++;
+    camera.position_x += 0.125;
+    if (!require_ok(
+            cycles_bridge_apply_settings(renderer, &settings),
+            "dynamic resolution settings")
+        || !wait_for_settings(renderer, settings.revision)
+        || !wait_for_frame_dimensions(
+            renderer, camera, frame, pixels, 240U, 135U,
+            "interactive dynamic resolution", info)
+        || !wait_for_frame_dimensions(
+            renderer, camera, frame, pixels, kWidth, kHeight,
+            "still full resolution", info)) {
         cycles_bridge_destroy_renderer(renderer);
         return 1;
     }

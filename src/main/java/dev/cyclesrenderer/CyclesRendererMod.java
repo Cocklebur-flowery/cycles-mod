@@ -405,6 +405,13 @@ public final class CyclesRendererMod {
             y += 10;
             graphics.text(
                     minecraft.font,
+                    "resolution=" + settings.resolutionPercentage() + "%"
+                            + " interactive=" + settings.interactiveResolutionPercentage() + "%"
+                            + " dynamic=" + settings.dynamicResolution(),
+                    6, y, 0xFFE0E0E0);
+            y += 10;
+            graphics.text(
+                    minecraft.font,
                     "sampling=" + diagnostics.samplingStateName()
                             + "  rate=" + Math.round(diagnostics.sampleRate() * 10.0F) / 10.0F
                             + " sample/s"

@@ -96,7 +96,7 @@ F10 叠加层采用“当前值 + 最近窗口统计”，不把目标值伪装�
 | P5 | `perf: adopt cycles half-float display driver` | Cycles DisplayDriver、RGBA16F、移除热路径 CPU `pow` | 已完成（本提交） |
 | P6 | `perf: add acquired frame ring buffers` | Native 三缓冲、FFM acquire/release | 已完成（本提交） |
 | P7 | `feat: present scene-linear rgba16f frames` | Vulkan RGBA16F 与最小显示 Shader | 已完成（P7a/P7b） |
-| P8 | `feat: add progressive interaction states` | Interactive/Settling/Still 和动态分辨率 | 待开始 |
+| P8 | `feat: add progressive interaction states` | Interactive/Settling/Still 和动态分辨率 | 已完成（P8a/P8b） |
 | P9 | `feat: add typed pass cache` | Pass 注册表、内存预算、raw/denoised 分离 | 待开始 |
 | P10 | `feat: schedule cycles denoisers` | OptiX/OIDN 能力、调度与 OIDN 构建 | 待开始 |
 | P11 | `feat: integrate ocio color management` | OCIO Vulkan、AgX、ACES 2、工作/显示空间 | 待开始 |
@@ -191,3 +191,9 @@ P1 至 P4 完成后进行一次 1080p 游戏人工里程碑：观察实际 sampl
 - 相机变化后进入 `Interactive`；首个交互帧产生后，在 stationary delay 内报告 `Settling`，到期后进入 `Still` 并使用 still samples/time limit。
 - 即使 interactive/still sample 数相同也会完成状态切换，保证静止阶段的时间限制与后续降噪调度仍能生效。
 - F10 新增 settling 剩余毫秒数和状态切换计数；native smoke 主动移动相机并验证 `Interactive -> Settling -> Still`。
+
+### P8b：可选动态分辨率
+
+- 输出设置新增动态分辨率开关和交互分辨率百分比；默认关闭，保持现有画质和配置行为。开启后 `Interactive`/`Settling` 使用不高于基础输出百分比的交互比例，`Still` 恢复基础输出尺寸。
+- 分辨率切换沿用同一套渐进状态机，新尺寸准备期间 Minecraft 继续展示上一张有效纹理，不主动清屏。两个字段占用设置结构原有保留位，`CyclesBridgeRenderSettings` 仍为 208 字节，ABI 版本保持 v12。
+- F10 同时显示基础比例、交互比例与动态开关。Native smoke 在 320×180 视口中验证交互帧切换到 240×135，并在静止延迟后恢复 320×180，防止状态/尺寸振荡回归。

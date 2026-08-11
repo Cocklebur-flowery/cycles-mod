@@ -16,6 +16,8 @@ public final class CyclesClientConfig {
     private static final ModConfigSpec.IntValue RENDER_WIDTH;
     private static final ModConfigSpec.IntValue RENDER_HEIGHT;
     private static final ModConfigSpec.IntValue RESOLUTION_PERCENTAGE;
+    private static final ModConfigSpec.BooleanValue DYNAMIC_RESOLUTION;
+    private static final ModConfigSpec.IntValue INTERACTIVE_RESOLUTION_PERCENTAGE;
     private static final ModConfigSpec.IntValue INTERACTIVE_SAMPLES;
     private static final ModConfigSpec.IntValue STILL_SAMPLES;
     private static final ModConfigSpec.IntValue STATIONARY_DELAY;
@@ -73,6 +75,13 @@ public final class CyclesClientConfig {
                 .defineInRange("height", 270, 90, 2160);
         RESOLUTION_PERCENTAGE = builder.translation("config.cyclesrenderer.output.percentage")
                 .defineInRange("percentage", 100, 25, 100);
+        DYNAMIC_RESOLUTION = builder.translation("config.cyclesrenderer.output.dynamicResolution")
+                .comment("Use a lower internal resolution while the camera or scene is changing.")
+                .define("dynamicResolution", false);
+        INTERACTIVE_RESOLUTION_PERCENTAGE = builder.translation(
+                        "config.cyclesrenderer.output.interactivePercentage")
+                .comment("Interactive percentage of the configured internal width and height.")
+                .defineInRange("interactivePercentage", 50, 25, 100);
         builder.pop();
 
         builder.push("sampling");
@@ -176,6 +185,7 @@ public final class CyclesClientConfig {
                 REVISION.get(),
                 DEVICE_POLICY.get(), RESOLUTION_MODE.get(),
                 RENDER_WIDTH.get(), RENDER_HEIGHT.get(), RESOLUTION_PERCENTAGE.get(),
+                DYNAMIC_RESOLUTION.get(), INTERACTIVE_RESOLUTION_PERCENTAGE.get(),
                 INTERACTIVE_SAMPLES.get(), STILL_SAMPLES.get(), STATIONARY_DELAY.get(),
                 ADAPTIVE_SAMPLING.get(), MINIMUM_SAMPLES.get(), NOISE_THRESHOLD.get().floatValue(),
                 INTERACTIVE_TIME_LIMIT.get(), STILL_TIME_LIMIT.get(),

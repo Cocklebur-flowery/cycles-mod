@@ -212,6 +212,8 @@ Java 25 FFM 与 MSVC 对上述字节布局均有静态/启动时断言。v5 使�
 
 当前实现状态：NeoForge `CLIENT` 配置已经落到 `config/cyclesrenderer-client.toml`，带 schema version 和运行时 revision。F9 打开专用总览页，模组列表 Config 按钮进入同一页面；总览页再打开 NeoForge 自动生成的完整字段编辑器。F10 切换诊断叠加层。默认值继续保持 Fit Inside `480 × 270`、交互 1 sample、静止 8 samples 和 150 ms 静止延迟，用户可选择 Fixed `1920 × 1080`，native 上限为 `3840 × 2160`。
 
+动态分辨率作为可选输出设置，默认关闭。开启后相机或场景变化期间使用独立的交互分辨率百分比，进入 `Still` 后恢复基础分辨率百分比；切换期间继续展示上一张已完成帧。该功能复用 ABI v12 设置结构的保留位，没有改变 208 字节布局。
+
 ### 6.2 交互与静止双配置
 
 Minecraft 相机持续运动，不能直接照搬 Blender 离线渲染的单一最大采样。设置包含两个质量配置：

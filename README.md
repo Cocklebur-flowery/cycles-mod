@@ -15,7 +15,7 @@
 - 资源包重载会重建共享图集并让原版渲染器重新编译 Section，不复用旧 Sprite 像素。
 - Distant Horizons 3.2.1 / API 7 的可选 Provider 骨架仍保留，但当前活动 Section 流送路径不合并其高度场；可靠远景、接缝和质量留待后续兼容阶段。
 - Cycles 在自己的会话线程中渐进渲染；普通 Section 变化在现有 Session 内更新对应 Mesh/Object，并在更新期间继续显示上一张可用帧，不再主动回填蓝色测试帧。
-- NeoForge CLIENT 配置持久化到 `config/cyclesrenderer-client.toml`。默认仍为 Fit Inside `480 × 270`、移动 1 sample、静止 150 ms 后 8 samples；可以在 F9/模组配置页改成固定分辨率，最高 `3840 × 2160`，包括 `1920 × 1080`。
+- NeoForge CLIENT 配置持久化到 `config/cyclesrenderer-client.toml`。默认仍为 Fit Inside `480 × 270`、移动 1 sample、静止 150 ms 后 8 samples；可以在 F9/模组配置页改成固定分辨率，最高 `3840 × 2160`，包括 `1920 × 1080`。可选动态分辨率默认关闭；开启后交互/Settling 阶段使用独立百分比，静止阶段恢复基础输出尺寸。
 - 设置页开放设备策略、分辨率、交互/静止采样、自适应采样、时间限制、光程反弹、Clamp、像素过滤、种子、降噪、EV、Gamma、查看变换、活动 Pass 和诊断开关。设置按 revision 异步提交给 Cycles 工作线程。
 - Pass 查看器按需创建并显示 `Combined`、`Depth`、`Normal`、`Diffuse Color`、`Emission`、`Roughness` 和 `Sample Count`，不会同时把所有 Pass 复制到 Java/Vulkan。
 - 运行时能力查询会报告实际设备、可用 Pass 和降噪器。当前构建已验证 RTX 5080 上的 OptiX 降噪；OpenImageDenoise 仍未编入 Cycles 静态库，因此会报告不可用。
@@ -92,7 +92,7 @@ run-client.cmd runClient
 
 `buildNative` 会构建 native DLL 和冒烟程序，并把 `.deps/cycles-install` 中的运行时 DLL 与 `lib/kernel_*.zst` 自动部署到 `build/native/bin/`。不需要手工复制 JAR、DLL 或 GPU 内核。
 
-`runNativeSmoke` 会构造一个带 UV、彩色纹理与 Alpha Clip 的小型网格场景，验证 ABI v12 的 RGBA16F DisplayDriver、帧租约 acquire/release、独立相机更新、能力/诊断、实际/目标 sample、全部 7 个 Pass、OptiX 降噪，以及 Section 创建、修改和删除，然后输出实际后端、设备、分辨率和帧校验和。
+`runNativeSmoke` 会构造一个带 UV、彩色纹理与 Alpha Clip 的小型网格场景，验证 ABI v12 的 RGBA16F DisplayDriver、帧租约 acquire/release、独立相机更新、能力/诊断、实际/目标 sample、Interactive/Settling/Still、动态分辨率尺寸跃迁、全部 7 个 Pass、OptiX 降噪，以及 Section 创建、修改和删除，然后输出实际后端、设备、分辨率和帧校验和。
 
 `runClient` 只会为启动出的 Minecraft 进程把 `build/native/bin/` 加入 `PATH`，使 Windows 能找到 Cycles 的二级 DLL 依赖；它不会修改系统或用户环境变量。修改 native 运行时文件后必须重新启动客户端。
 

@@ -66,6 +66,8 @@ CyclesBridgeRenderSettings default_settings() {
     settings.render_width = 480;
     settings.render_height = 270;
     settings.resolution_percentage = 100;
+    settings.dynamic_resolution = 0;
+    settings.interactive_resolution_percentage = 50;
     settings.interactive_samples = 1;
     settings.still_samples = 8;
     settings.stationary_delay_millis = 150;
@@ -284,8 +286,15 @@ bool finite_camera(const CyclesBridgeCamera& camera) {
 std::pair<std::uint32_t, std::uint32_t> render_dimensions(
     std::uint32_t viewport_width,
     std::uint32_t viewport_height,
-    const CyclesBridgeRenderSettings& settings) {
-    const double percentage = static_cast<double>(settings.resolution_percentage) / 100.0;
+    const CyclesBridgeRenderSettings& settings,
+    std::uint32_t sampling_state) {
+    const std::uint32_t percentage_value = settings.dynamic_resolution != 0U
+            && sampling_state != CYCLES_BRIDGE_SAMPLING_STILL
+        ? std::min(
+            settings.resolution_percentage,
+            std::clamp(settings.interactive_resolution_percentage, 1U, 100U))
+        : settings.resolution_percentage;
+    const double percentage = static_cast<double>(percentage_value) / 100.0;
     const std::uint32_t requested_width = std::clamp(
         static_cast<std::uint32_t>(std::floor(settings.render_width * percentage)),
         1U,
@@ -1493,7 +1502,11 @@ class CyclesEngine::Impl final {
                            || settings.render_width != requested_settings_.render_width
                            || settings.render_height != requested_settings_.render_height
                            || settings.resolution_percentage
-                               != requested_settings_.resolution_percentage) {
+                               != requested_settings_.resolution_percentage
+                           || settings.dynamic_resolution
+                               != requested_settings_.dynamic_resolution
+                           || settings.interactive_resolution_percentage
+                               != requested_settings_.interactive_resolution_percentage) {
                     reset_level = CYCLES_BRIDGE_RESET_BUFFER;
                 } else if (!same_render_settings(settings, requested_settings_)) {
                     reset_level = CYCLES_BRIDGE_RESET_ACCUMULATION;
@@ -1509,7 +1522,8 @@ class CyclesEngine::Impl final {
                         render_dimensions(
                             requested_camera_->camera.viewport_width,
                             requested_camera_->camera.viewport_height,
-                            requested_settings_);
+                            requested_settings_,
+                            CYCLES_BRIDGE_SAMPLING_INTERACTIVE);
                     requested_camera_->sample_count =
                         static_cast<int>(requested_settings_.interactive_samples);
                     requested_camera_->sampling_state =
@@ -1728,11 +1742,20 @@ class CyclesEngine::Impl final {
             if (!requested_scene_) {
                 return true;
             }
+            const std::uint32_t current_sampling_state = requested_camera_
+                ? requested_camera_->sampling_state
+                : CYCLES_BRIDGE_SAMPLING_INTERACTIVE;
             std::tie(request.render_width, request.render_height) = render_dimensions(
                 camera.viewport_width,
                 camera.viewport_height,
-                requested_settings_);
+                requested_settings_,
+                current_sampling_state);
             if (!requested_camera_ || !same_camera(*requested_camera_, request)) {
+                std::tie(request.render_width, request.render_height) = render_dimensions(
+                    camera.viewport_width,
+                    camera.viewport_height,
+                    requested_settings_,
+                    CYCLES_BRIDGE_SAMPLING_INTERACTIVE);
                 request.sample_count =
                     static_cast<int>(requested_settings_.interactive_samples);
                 request.sampling_state = CYCLES_BRIDGE_SAMPLING_INTERACTIVE;
@@ -1753,6 +1776,11 @@ class CyclesEngine::Impl final {
                     requested_settings_.stationary_delay_millis);
                 update_sampling_phase = true;
                 if (elapsed >= delay) {
+                    std::tie(request.render_width, request.render_height) = render_dimensions(
+                        camera.viewport_width,
+                        camera.viewport_height,
+                        requested_settings_,
+                        CYCLES_BRIDGE_SAMPLING_STILL);
                     request.sample_count = static_cast<int>(requested_settings_.still_samples);
                     request.sampling_state = CYCLES_BRIDGE_SAMPLING_STILL;
                     request.revision = ++camera_revision_;

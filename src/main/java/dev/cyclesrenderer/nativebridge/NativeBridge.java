@@ -155,7 +155,9 @@ public final class NativeBridge {
             JAVA_INT.withName("view_transform"),
             JAVA_INT.withName("active_pass"),
             JAVA_INT.withName("debug_overlay"),
-            MemoryLayout.sequenceLayout(9, JAVA_INT).withName("reserved"));
+            JAVA_INT.withName("dynamic_resolution"),
+            JAVA_INT.withName("interactive_resolution_percentage"),
+            MemoryLayout.sequenceLayout(7, JAVA_INT).withName("reserved"));
     private static final MemoryLayout CAPABILITIES_LAYOUT = MemoryLayout.structLayout(
             JAVA_INT.withName("struct_size"),
             JAVA_INT.withName("struct_version"),
@@ -769,6 +771,9 @@ public final class NativeBridge {
             settingsSegment.set(JAVA_INT, 160L, settings.viewTransform().nativeId());
             settingsSegment.set(JAVA_INT, 164L, settings.activePass().nativeId());
             settingsSegment.set(JAVA_INT, 168L, settings.debugOverlay() ? 1 : 0);
+            settingsSegment.set(JAVA_INT, 172L, settings.dynamicResolution() ? 1 : 0);
+            settingsSegment.set(
+                    JAVA_INT, 176L, settings.interactiveResolutionPercentage());
             checkRendererStatus(
                     (int) applySettings.invokeExact(renderer, settingsSegment),
                     "settings update");

@@ -13,6 +13,8 @@ public record CyclesRenderSettings(
         int renderWidth,
         int renderHeight,
         int resolutionPercentage,
+        boolean dynamicResolution,
+        int interactiveResolutionPercentage,
         int interactiveSamples,
         int stillSamples,
         int stationaryDelayMillis,
