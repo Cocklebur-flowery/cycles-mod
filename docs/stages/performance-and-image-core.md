@@ -98,7 +98,7 @@ F10 叠加层采用“当前值 + 最近窗口统计”，不把目标值伪装�
 | P7 | `feat: present scene-linear rgba16f frames` | Vulkan RGBA16F 与最小显示 Shader | 已完成（P7a/P7b） |
 | P8 | `feat: add progressive interaction states` | Interactive/Settling/Still 和动态分辨率 | 已完成（P8a/P8b） |
 | P9 | `feat: add typed pass cache` | Pass 注册表、内存预算、raw/denoised 分离 | 已完成（P9a/P9b，待游戏内人工验收） |
-| P10 | `feat: schedule cycles denoisers` | OptiX/OIDN 能力、调度与 OIDN 构建 | 待开始 |
+| P10 | `feat: schedule cycles denoisers` | OptiX/OIDN 能力、调度与 OIDN 构建 | P10a 调度已完成；P10b/P10c 待开始 |
 | P11 | `feat: integrate ocio color management` | OCIO Vulkan、AgX、ACES 2、工作/显示空间 | 待开始 |
 | P12 | `feat: expose sampling and physical camera controls` | 原生蓝噪声、镜头、裁剪、景深 | 待开始 |
 | P13 | `spike: evaluate hdr and vulkan interop` | Windows HDR 与 CUDA/Vulkan 互操作报告 | 待开始 |
@@ -213,3 +213,10 @@ P1 至 P4 完成后进行一次 1080p 游戏人工里程碑：观察实际 sampl
 - Native Pass registry 以 Combined 起步，第一次访问其他 Pass 时增长；注册 mask 跨 Session 重建保留，诊断记录注册增长重建和已注册命中。
 - Cycles 5.2 的当前 DisplayDriver 路径在同一 Session 原地切换 Film display pass 会停在 `0/1` sample。为保证输出正确，当前每次 Pass 切换仍重建 Session；Pass cache 在等待期间提供旧帧。该限制已写入稳定运行时契约，后续优化不得绕过回归测试。
 - Native smoke 查询全部描述符、遍历 7 个 Pass、切回已注册 Combined，并继续覆盖 OptiX、Raw/Denoised cache、Section 增删和动态分辨率。
+
+### P10a：交互/静止降噪调度
+
+- 降噪器选择不再意味着每个渲染请求都实际运行：Interactive Combined 明确关闭 Cycles denoising 并发布 Raw，Settling 沿用该帧，Still Combined 才按配置启用 OptiX/OIDN 并发布 Denoised。
+- 调试 Pass 始终保持 Raw；`effective_denoiser` 只报告当前渲染实际启用的降噪器，不把配置选择或设备能力冒充成生效状态。
+- Cycles 在 sampling state 切换时更新 Integrator denoise topology；OptiX Smoke 已验证同一 Renderer 中 `Interactive Raw -> Still Denoised`、Combined Denoised/Depth Raw 分键缓存及后续状态机回归。
+- 调度契约、OIDN 构建边界和人工验证见 [Cycles 降噪调度](denoising.md)。

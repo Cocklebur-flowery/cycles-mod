@@ -19,7 +19,7 @@
 - 设置页开放设备策略、分辨率、交互/静止采样、自适应采样、时间限制、光程反弹、Clamp、像素过滤、种子、降噪、EV、Gamma、查看变换、活动 Pass 和诊断开关。设置按 revision 异步提交给 Cycles 工作线程。
 - Pass 查看器按需创建并显示 `Combined`、`Depth`、`Normal`、`Diffuse Color`、`Emission`、`Roughness` 和 `Sample Count`，不会同时把所有 Pass 复制到 Java/Vulkan。
 - Native 以 `(Pass ID, Raw/Denoised)` 缓存最近查看过的 RGBA16F Pass，默认 LRU 预算为 256 MiB；F10 显示条目、占用、命中、淘汰、注册表和活动 descriptor。Pass 只在首次访问时加入注册 mask；当前每次切换仍重建 Cycles Session，以规避 Cycles 5.2 DisplayDriver 原地切换停在 `0/1` sample 的问题。
-- 运行时能力查询会报告实际设备、可用 Pass 和降噪器。当前构建已验证 RTX 5080 上的 OptiX 降噪；OpenImageDenoise 仍未编入 Cycles 静态库，因此会报告不可用。
+- 运行时能力查询会报告实际设备、可用 Pass 和降噪器。当前构建已验证 RTX 5080 上的 OptiX 降噪；移动/Settling 阶段输出 Raw，只有静止 Combined 才实际调度降噪并写入 Denoised cache。OpenImageDenoise 仍未编入 Cycles 静态库，因此会报告不可用。
 - Java 每次只租用并上传 Native 的低分辨率 RGBA16F 新帧；Minecraft Vulkan 使用专用全屏 pipeline 在 GPU 上完成基础显示变换并最近邻放大到主渲染目标，不再在 CPU 上生成 4K RGBA 临时帧。
 - Minecraft 的 Vulkan swapchain、纹理和命令编码器仍由 Minecraft 管理；Cycles 不使用 Vulkan。
 

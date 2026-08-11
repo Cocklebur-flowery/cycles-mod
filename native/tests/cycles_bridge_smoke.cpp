@@ -284,6 +284,41 @@ bool wait_for_actual_sample(
     return false;
 }
 
+bool wait_for_denoised_still(
+    CyclesBridgeRenderer* renderer,
+    CyclesBridgeCamera& camera,
+    CyclesBridgeFrame& frame,
+    std::vector<std::uint8_t>& pixels,
+    CyclesBridgeDiagnostics& diagnostics,
+    std::string& info) {
+    for (int attempt = 0; attempt < 400; ++attempt) {
+        camera.frame_id++;
+        if (!require_ok(
+                cycles_bridge_render_frame(
+                    renderer, &camera, &frame, pixels.data(), pixels.size()),
+                "denoised still frame")
+            || !require_ok(
+                cycles_bridge_query_diagnostics(renderer, &diagnostics),
+                "denoised still diagnostics")) {
+            return false;
+        }
+        info = renderer_info(renderer);
+        if (diagnostics.sampling_state == CYCLES_BRIDGE_SAMPLING_STILL
+            && diagnostics.effective_denoiser == 1U
+            && diagnostics.active_frame_variant
+                == CYCLES_BRIDGE_FRAME_VARIANT_DENOISED
+            && (frame.flags & CYCLES_BRIDGE_FRAME_UPDATED) != 0U) {
+            return true;
+        }
+        Sleep(10);
+    }
+    std::cerr << "OptiX denoiser never produced a Still frame: " << info
+              << ";state=" << diagnostics.sampling_state
+              << ";effective=" << diagnostics.effective_denoiser
+              << ";variant=" << diagnostics.active_frame_variant << '\n';
+    return false;
+}
+
 bool verify_progressive_sampling(
     CyclesBridgeRenderer* renderer,
     CyclesBridgeCamera& camera,
@@ -546,6 +581,7 @@ int main(int argc, char** argv) {
     if ((capabilities.denoiser_mask & CYCLES_BRIDGE_DENOISER_OPTIX) != 0U) {
         std::cerr << "[smoke] Enabling the detected OptiX denoiser\n";
         settings.denoiser_mode = 2U;
+        settings.stationary_delay_millis = 500U;
         settings.revision++;
         if (!require_ok(
                 cycles_bridge_apply_settings(renderer, &settings),
@@ -556,8 +592,14 @@ int main(int argc, char** argv) {
             || !require_ok(
                 cycles_bridge_query_diagnostics(renderer, &diagnostics),
                 "OptiX diagnostics")
-            || diagnostics.effective_denoiser != 1U) {
-            std::cerr << "detected OptiX denoiser was not activated\n";
+            || diagnostics.effective_denoiser != 0U
+            || diagnostics.active_frame_variant != CYCLES_BRIDGE_FRAME_VARIANT_RAW
+            || !wait_for_denoised_still(
+                renderer, camera, frame, pixels, diagnostics, info)) {
+            std::cerr << "detected OptiX denoiser did not follow Interactive Raw -> Still Denoised: "
+                      << "state=" << diagnostics.sampling_state
+                      << ";effective=" << diagnostics.effective_denoiser
+                      << ";variant=" << diagnostics.active_frame_variant << '\n';
             cycles_bridge_destroy_renderer(renderer);
             return 1;
         }
@@ -585,6 +627,8 @@ int main(int argc, char** argv) {
             || !wait_for_updated_frame(
                 renderer, camera, frame, pixels, "denoised cache combined", info, true,
                 CYCLES_BRIDGE_PASS_COMBINED)
+            || !wait_for_denoised_still(
+                renderer, camera, frame, pixels, diagnostics, info)
             || !require_ok(
                 cycles_bridge_query_diagnostics(renderer, &diagnostics),
                 "denoised pass cache diagnostics")
@@ -600,6 +644,7 @@ int main(int argc, char** argv) {
         }
 
         settings.denoiser_mode = 0U;
+        settings.stationary_delay_millis = 150U;
         settings.revision++;
         if (!require_ok(
                 cycles_bridge_apply_settings(renderer, &settings),

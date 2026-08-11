@@ -1397,7 +1397,8 @@ ccl::BufferParams configure_camera(
 std::uint32_t configure_scene_settings(
     ccl::Scene* scene,
     const ccl::DeviceInfo& device,
-    const CyclesBridgeRenderSettings& settings) {
+    const CyclesBridgeRenderSettings& settings,
+    bool schedule_denoise) {
     ccl::Integrator* integrator = scene->integrator;
     integrator->set_min_bounce(static_cast<int>(settings.minimum_bounce));
     integrator->set_max_bounce(static_cast<int>(settings.maximum_bounce));
@@ -1428,7 +1429,9 @@ std::uint32_t configure_scene_settings(
         effective_denoiser = 2U;
         integrator->set_denoiser_type(ccl::DENOISER_OPENIMAGEDENOISE);
     }
-    integrator->set_use_denoise(effective_denoiser != 0U);
+    const bool denoise_active = schedule_denoise && effective_denoiser != 0U
+        && settings.active_pass == CYCLES_BRIDGE_PASS_COMBINED;
+    integrator->set_use_denoise(denoise_active);
     integrator->set_denoise_start_sample(static_cast<int>(settings.denoiser_start_sample));
     int denoiser_passes = ccl::DENOISER_PASS_NONE;
     if (settings.denoiser_input >= 1U) {
@@ -1464,7 +1467,7 @@ std::uint32_t configure_scene_settings(
     film->set_use_sample_count(
         settings.adaptive_sampling != 0U
         || settings.active_pass == CYCLES_BRIDGE_PASS_SAMPLE_COUNT);
-    return effective_denoiser;
+    return denoise_active ? effective_denoiser : 0U;
 }
 
 void create_output_passes(ccl::Scene* scene, std::uint64_t registered_pass_mask) {
@@ -2107,7 +2110,7 @@ class CyclesEngine::Impl final {
         create_output_passes(session->scene.get(), registered_pass_mask);
         build_scene(session->scene.get(), scene_request, runtime);
         const std::uint32_t effective_denoiser =
-            configure_scene_settings(session->scene.get(), device, settings);
+            configure_scene_settings(session->scene.get(), device, settings, false);
         {
             std::lock_guard lock(state_mutex_);
             effective_denoiser_ = effective_denoiser;
@@ -2185,8 +2188,9 @@ class CyclesEngine::Impl final {
         {
             const ccl::thread_scoped_lock scene_lock(session.scene->mutex);
             buffer = configure_camera(session, scene_request, camera_request);
-            effective_denoiser =
-                configure_scene_settings(session.scene.get(), params.device, settings);
+            effective_denoiser = configure_scene_settings(
+                session.scene.get(), params.device, settings,
+                camera_request.sampling_state == CYCLES_BRIDGE_SAMPLING_STILL);
         }
         ccl::SessionParams render_params = params;
         render_params.samples = std::max(1, camera_request.sample_count);
