@@ -62,6 +62,10 @@ public final class CyclesRendererMod {
     private static long nativeFrameId;
     private static long lastStatsLogNanos;
     private static long appliedSettingsRevision = -1L;
+    private static long bridgeCallCount;
+    private static long lastBridgeCallMicros;
+    private static long emaBridgeCallMicros;
+    private static long maxBridgeCallMicros;
     private static volatile long resourceRevision;
     private static ModContainer modContainer;
     private static final SectionSceneManager SCENE_MANAGER = new SectionSceneManager();
@@ -122,6 +126,10 @@ public final class CyclesRendererMod {
 
             nativeFrameId = 0L;
             lastStatsLogNanos = 0L;
+            bridgeCallCount = 0L;
+            lastBridgeCallMicros = 0L;
+            emaBridgeCallMicros = 0L;
+            maxBridgeCallMicros = 0L;
             SCENE_MANAGER.reset();
             FRAME_PRESENTER.reset();
             SectionGeometryCollector.setEnabled(true);
@@ -212,11 +220,13 @@ public final class CyclesRendererMod {
                 FRAME_PRESENTER.reset();
             }
             long frameId = nativeFrameId++;
+            long bridgeStart = System.nanoTime();
             NativeBridge.RenderedFrame frame = NativeBridge.renderFrame(
                     mainTarget.width,
                     mainTarget.height,
                     frameId,
                     createCameraInput(camera));
+            recordBridgeCall(System.nanoTime() - bridgeStart);
             FRAME_PRESENTER.update(frame);
             FRAME_PRESENTER.present(mainTarget);
 
@@ -265,6 +275,16 @@ public final class CyclesRendererMod {
                 camera.orientation.w(),
                 verticalFovRadians,
                 Math.max(camera.depthFar, 1.0F));
+    }
+
+    private static void recordBridgeCall(long elapsedNanos) {
+        long micros = Math.max(0L, (elapsedNanos + 999L) / 1_000L);
+        lastBridgeCallMicros = micros;
+        emaBridgeCallMicros = emaBridgeCallMicros == 0L
+                ? micros
+                : (emaBridgeCallMicros * 7L + micros) / 8L;
+        maxBridgeCallMicros = Math.max(maxBridgeCallMicros, micros);
+        bridgeCallCount++;
     }
 
     private static void disableExperimentalRenderer() {
@@ -318,6 +338,7 @@ public final class CyclesRendererMod {
         try {
             NativeBridge.Diagnostics diagnostics = NativeBridge.diagnostics();
             CyclesRenderSettings settings = CyclesClientConfig.snapshot();
+            CyclesFramePresenter.Telemetry presentation = FRAME_PRESENTER.telemetry();
             graphics.text(
                     minecraft.font,
                     diagnostics.deviceName() + " / denoise " + diagnostics.denoiserName()
@@ -352,11 +373,56 @@ public final class CyclesRendererMod {
                     "settings=" + diagnostics.settingsRevision()
                             + " reset=" + diagnostics.resetName(),
                     6, y, 0xFFE0E0E0);
+            y += 10;
+            graphics.text(
+                    minecraft.font,
+                    "native convert us=" + diagnostics.lastConvertMicros()
+                            + "/" + diagnostics.emaConvertMicros()
+                            + "/" + diagnostics.maxConvertMicros()
+                            + " age=" + diagnostics.frameAgeMicros(),
+                    6, y, 0xFFE0E0E0);
+            y += 10;
+            graphics.text(
+                    minecraft.font,
+                    "native copy us=" + diagnostics.lastCopyMicros()
+                            + "/" + diagnostics.emaCopyMicros()
+                            + "/" + diagnostics.maxCopyMicros()
+                            + "  MiB=" + oneDecimalMebibytes(diagnostics.copiedByteCount()),
+                    6, y, 0xFFE0E0E0);
+            y += 10;
+            graphics.text(
+                    minecraft.font,
+                    "frames produced/copied/poll=" + diagnostics.producedFrameCount()
+                            + "/" + diagnostics.copiedFrameCount()
+                            + "/" + diagnostics.unchangedPollCount(),
+                    6, y, 0xFFE0E0E0);
+            y += 10;
+            graphics.text(
+                    minecraft.font,
+                    "bridge us=" + lastBridgeCallMicros
+                            + "/" + emaBridgeCallMicros
+                            + "/" + maxBridgeCallMicros
+                            + " calls=" + bridgeCallCount,
+                    6, y, 0xFFE0E0E0);
+            y += 10;
+            graphics.text(
+                    minecraft.font,
+                    "upload us=" + presentation.lastUploadMicros()
+                            + "/" + presentation.emaUploadMicros()
+                            + "/" + presentation.maxUploadMicros()
+                            + " count=" + presentation.uploadCount()
+                            + " gaps=" + presentation.generationGaps()
+                            + " MiB=" + oneDecimalMebibytes(presentation.uploadedBytes()),
+                    6, y, 0xFFE0E0E0);
         } catch (RuntimeException error) {
             graphics.text(
                     minecraft.font,
                     "Native diagnostics failed: " + error.getMessage(),
                     6, y, 0xFFFF5555);
         }
+    }
+
+    private static double oneDecimalMebibytes(long bytes) {
+        return Math.round(bytes / 104_857.6D) / 10.0D;
     }
 }

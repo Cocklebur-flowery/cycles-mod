@@ -366,6 +366,22 @@ std::uint8_t to_unorm(float value) {
     return static_cast<std::uint8_t>(std::lround(clamped * 255.0F));
 }
 
+std::uint32_t elapsed_micros(
+    std::chrono::steady_clock::time_point start,
+    std::chrono::steady_clock::time_point end) {
+    const auto value = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
+    return static_cast<std::uint32_t>(std::clamp<std::int64_t>(
+        value, 0, std::numeric_limits<std::uint32_t>::max()));
+}
+
+std::uint32_t update_ema(std::uint32_t previous, std::uint32_t value) {
+    if (previous == 0U) {
+        return value;
+    }
+    return static_cast<std::uint32_t>(
+        (static_cast<std::uint64_t>(previous) * 7U + value) / 8U);
+}
+
 class FrameStore final {
  public:
     void clear() {
@@ -373,6 +389,7 @@ class FrameStore final {
         width_ = 0;
         height_ = 0;
         sample_count_ = 0;
+        last_frame_completed_ = {};
         rgba_.clear();
         generation_++;
     }
@@ -391,6 +408,7 @@ class FrameStore final {
     }
 
     bool update(const ccl::OutputDriver::Tile& tile) {
+        const auto convert_start = std::chrono::steady_clock::now();
         if (tile.size.x <= 0 || tile.size.y <= 0
             || tile.full_size.x <= 0 || tile.full_size.y <= 0) {
             return false;
@@ -487,6 +505,12 @@ class FrameStore final {
                 rgba_[target + 3U] = to_unorm(alpha);
             }
         }
+        const auto completed = std::chrono::steady_clock::now();
+        last_convert_micros_ = elapsed_micros(convert_start, completed);
+        ema_convert_micros_ = update_ema(ema_convert_micros_, last_convert_micros_);
+        max_convert_micros_ = std::max(max_convert_micros_, last_convert_micros_);
+        produced_frame_count_++;
+        last_frame_completed_ = completed;
         generation_++;
         return true;
     }
@@ -501,7 +525,7 @@ class FrameStore final {
         std::uint64_t capacity,
         std::uint64_t previous_generation,
         CyclesBridgeFrame& frame,
-        std::string& error) const {
+        std::string& error) {
         std::lock_guard lock(mutex_);
         frame.width = width_;
         frame.height = height_;
@@ -515,13 +539,21 @@ class FrameStore final {
 
         frame.flags |= CYCLES_BRIDGE_FRAME_READY;
         if (generation_ == previous_generation) {
+            unchanged_poll_count_++;
             return true;
         }
         if (output == nullptr || capacity < rgba_.size()) {
             error = "native frame output buffer is too small";
             return false;
         }
+        const auto copy_start = std::chrono::steady_clock::now();
         std::memcpy(output, rgba_.data(), rgba_.size());
+        const auto copy_end = std::chrono::steady_clock::now();
+        last_copy_micros_ = elapsed_micros(copy_start, copy_end);
+        ema_copy_micros_ = update_ema(ema_copy_micros_, last_copy_micros_);
+        max_copy_micros_ = std::max(max_copy_micros_, last_copy_micros_);
+        copied_frame_count_++;
+        copied_byte_count_ += rgba_.size();
         frame.pixel_byte_count = static_cast<std::uint32_t>(rgba_.size());
         frame.flags |= CYCLES_BRIDGE_FRAME_UPDATED;
         return true;
@@ -577,6 +609,29 @@ class FrameStore final {
         return sample_count_;
     }
 
+    void fill_diagnostics(CyclesBridgeDiagnostics& diagnostics) const {
+        std::lock_guard lock(mutex_);
+        diagnostics.frame_generation = generation_;
+        diagnostics.width = width_;
+        diagnostics.height = height_;
+        diagnostics.sample_count = static_cast<std::uint32_t>(std::max(0, sample_count_));
+        diagnostics.frame_ready = rgba_.empty() ? 0U : 1U;
+        diagnostics.produced_frame_count = produced_frame_count_;
+        diagnostics.copied_frame_count = copied_frame_count_;
+        diagnostics.copied_byte_count = copied_byte_count_;
+        diagnostics.unchanged_poll_count = unchanged_poll_count_;
+        diagnostics.last_convert_micros = last_convert_micros_;
+        diagnostics.ema_convert_micros = ema_convert_micros_;
+        diagnostics.max_convert_micros = max_convert_micros_;
+        diagnostics.last_copy_micros = last_copy_micros_;
+        diagnostics.ema_copy_micros = ema_copy_micros_;
+        diagnostics.max_copy_micros = max_copy_micros_;
+        diagnostics.frame_age_micros = last_frame_completed_ ==
+                std::chrono::steady_clock::time_point{}
+            ? 0U
+            : elapsed_micros(last_frame_completed_, std::chrono::steady_clock::now());
+    }
+
  private:
     mutable std::mutex mutex_;
     std::uint32_t width_ = 0;
@@ -590,6 +645,17 @@ class FrameStore final {
     float depth_far_ = 1.0F;
     int target_samples_ = 1;
     std::vector<std::uint8_t> rgba_;
+    std::uint64_t produced_frame_count_ = 0;
+    std::uint64_t copied_frame_count_ = 0;
+    std::uint64_t copied_byte_count_ = 0;
+    std::uint64_t unchanged_poll_count_ = 0;
+    std::uint32_t last_convert_micros_ = 0;
+    std::uint32_t ema_convert_micros_ = 0;
+    std::uint32_t max_convert_micros_ = 0;
+    std::uint32_t last_copy_micros_ = 0;
+    std::uint32_t ema_copy_micros_ = 0;
+    std::uint32_t max_copy_micros_ = 0;
+    std::chrono::steady_clock::time_point last_frame_completed_{};
 };
 
 class FrameOutputDriver final : public ccl::OutputDriver {
@@ -1395,13 +1461,7 @@ class CyclesEngine::Impl final {
             diagnostics.sampling_state = sampling_state_diagnostic_;
             diagnostics.sample_rate = sample_rate_diagnostic_;
         }
-        const auto [width, height] = frames_.size();
-        diagnostics.frame_generation = frames_.generation();
-        diagnostics.width = width;
-        diagnostics.height = height;
-        diagnostics.sample_count = static_cast<std::uint32_t>(
-            std::max(0, frames_.sample_count()));
-        diagnostics.frame_ready = frames_.ready() ? 1U : 0U;
+        frames_.fill_diagnostics(diagnostics);
     }
 
     bool render(

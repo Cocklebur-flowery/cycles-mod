@@ -23,7 +23,7 @@ import static java.lang.foreign.ValueLayout.JAVA_INT;
 import static java.lang.foreign.ValueLayout.JAVA_LONG;
 
 public final class NativeBridge {
-    public static final int ABI_VERSION = 7;
+    public static final int ABI_VERSION = 8;
 
     private static final String LIBRARY_PATH_PROPERTY = "cyclesrenderer.nativeLibrary";
     private static final int STRUCT_VERSION = 1;
@@ -172,7 +172,19 @@ public final class NativeBridge {
             JAVA_INT.withName("target_sample_count"),
             JAVA_INT.withName("sampling_state"),
             JAVA_FLOAT.withName("sample_rate"),
-            JAVA_INT.withName("reserved_v7"));
+            JAVA_INT.withName("reserved_v7"),
+            JAVA_LONG.withName("produced_frame_count"),
+            JAVA_LONG.withName("copied_frame_count"),
+            JAVA_LONG.withName("copied_byte_count"),
+            JAVA_LONG.withName("unchanged_poll_count"),
+            JAVA_INT.withName("last_convert_micros"),
+            JAVA_INT.withName("ema_convert_micros"),
+            JAVA_INT.withName("max_convert_micros"),
+            JAVA_INT.withName("last_copy_micros"),
+            JAVA_INT.withName("ema_copy_micros"),
+            JAVA_INT.withName("max_copy_micros"),
+            JAVA_INT.withName("frame_age_micros"),
+            JAVA_INT.withName("reserved_v8"));
     private static final MemoryLayout VERTEX_LAYOUT = MemoryLayout.structLayout(
             JAVA_FLOAT.withName("position_x"),
             JAVA_FLOAT.withName("position_y"),
@@ -217,7 +229,7 @@ public final class NativeBridge {
                 || FRAME_LAYOUT.byteSize() != 40L
                 || SETTINGS_LAYOUT.byteSize() != 208L
                 || CAPABILITIES_LAYOUT.byteSize() != 64L
-                || DIAGNOSTICS_LAYOUT.byteSize() != 112L
+                || DIAGNOSTICS_LAYOUT.byteSize() != 176L
                 || VERTEX_LAYOUT.byteSize() != 40L
                 || TRIANGLE_LAYOUT.byteSize() != 16L
                 || MATERIAL_LAYOUT.byteSize() != 32L
@@ -725,7 +737,18 @@ public final class NativeBridge {
                     diagnosticsSegment.get(JAVA_INT, 76L) != 0,
                     diagnosticsSegment.get(JAVA_INT, 96L),
                     diagnosticsSegment.get(JAVA_INT, 100L),
-                    diagnosticsSegment.get(JAVA_FLOAT, 104L));
+                    diagnosticsSegment.get(JAVA_FLOAT, 104L),
+                    diagnosticsSegment.get(JAVA_LONG, 112L),
+                    diagnosticsSegment.get(JAVA_LONG, 120L),
+                    diagnosticsSegment.get(JAVA_LONG, 128L),
+                    diagnosticsSegment.get(JAVA_LONG, 136L),
+                    diagnosticsSegment.get(JAVA_INT, 144L),
+                    diagnosticsSegment.get(JAVA_INT, 148L),
+                    diagnosticsSegment.get(JAVA_INT, 152L),
+                    diagnosticsSegment.get(JAVA_INT, 156L),
+                    diagnosticsSegment.get(JAVA_INT, 160L),
+                    diagnosticsSegment.get(JAVA_INT, 164L),
+                    diagnosticsSegment.get(JAVA_INT, 168L));
         }
 
         private RenderedFrame renderFrame(
@@ -994,7 +1017,18 @@ public final class NativeBridge {
             boolean frameReady,
             int targetSampleCount,
             int samplingState,
-            float sampleRate) {
+            float sampleRate,
+            long producedFrameCount,
+            long copiedFrameCount,
+            long copiedByteCount,
+            long unchangedPollCount,
+            int lastConvertMicros,
+            int emaConvertMicros,
+            int maxConvertMicros,
+            int lastCopyMicros,
+            int emaCopyMicros,
+            int maxCopyMicros,
+            int frameAgeMicros) {
         public String stateName() {
             return switch (stateCode) {
                 case 1 -> "scene-staging";

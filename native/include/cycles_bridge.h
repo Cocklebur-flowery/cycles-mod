@@ -228,6 +228,18 @@ struct CyclesBridgeDiagnostics {
     std::uint32_t sampling_state;
     float sample_rate;
     std::uint32_t reserved_v7;
+    std::uint64_t produced_frame_count;
+    std::uint64_t copied_frame_count;
+    std::uint64_t copied_byte_count;
+    std::uint64_t unchanged_poll_count;
+    std::uint32_t last_convert_micros;
+    std::uint32_t ema_convert_micros;
+    std::uint32_t max_convert_micros;
+    std::uint32_t last_copy_micros;
+    std::uint32_t ema_copy_micros;
+    std::uint32_t max_copy_micros;
+    std::uint32_t frame_age_micros;
+    std::uint32_t reserved_v8;
 };
 
 struct CyclesBridgeVertex {

@@ -16,9 +16,9 @@ struct CyclesBridgeRenderer {
 
 namespace {
 
-constexpr std::uint32_t kAbiVersion = 7;
+constexpr std::uint32_t kAbiVersion = 8;
 constexpr std::uint32_t kStructVersion = 1;
-constexpr char kBuildInfo[] = "cyclesrenderer-native/cycles-5.2;abi=7";
+constexpr char kBuildInfo[] = "cyclesrenderer-native/cycles-5.2;abi=8";
 
 static_assert(sizeof(CyclesBridgeCamera) == 80);
 static_assert(offsetof(CyclesBridgeCamera, frame_id) == 8);
@@ -33,7 +33,7 @@ static_assert(sizeof(CyclesBridgeSection) == 48);
 static_assert(sizeof(CyclesBridgeFrame) == 40);
 static_assert(sizeof(CyclesBridgeRenderSettings) == 208);
 static_assert(sizeof(CyclesBridgeCapabilities) == 64);
-static_assert(sizeof(CyclesBridgeDiagnostics) == 112);
+static_assert(sizeof(CyclesBridgeDiagnostics) == 176);
 static_assert(sizeof(CyclesBridgeVertex) == 40);
 static_assert(offsetof(CyclesBridgeVertex, packed_rgba) == 32);
 static_assert(sizeof(CyclesBridgeTriangle) == 16);

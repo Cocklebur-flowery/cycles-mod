@@ -235,7 +235,7 @@ bool wait_for_actual_sample(
 int main(int argc, char** argv) {
     const bool require_optix = argc > 1 && std::strcmp(argv[1], "--require-optix") == 0;
     std::cerr << "[smoke] ABI check\n";
-    if (cycles_bridge_abi_version() != 7U) {
+    if (cycles_bridge_abi_version() != 8U) {
         std::cerr << "unexpected native ABI " << cycles_bridge_abi_version() << '\n';
         return 1;
     }
@@ -438,13 +438,20 @@ int main(int argc, char** argv) {
         || diagnostics.sample_count > diagnostics.target_sample_count
         || !std::isfinite(diagnostics.sample_rate)
         || diagnostics.sample_rate < 0.0F
+        || diagnostics.produced_frame_count == 0U
+        || diagnostics.copied_frame_count == 0U
+        || diagnostics.copied_byte_count
+            < static_cast<std::uint64_t>(kWidth) * kHeight * 4U
         || diagnostics.sampling_state == CYCLES_BRIDGE_SAMPLING_IDLE) {
         std::cerr << "unexpected diagnostics after Combined restore: revision="
                   << diagnostics.settings_revision << ";pass=" << diagnostics.active_pass
                   << ";resolution=" << diagnostics.width << 'x' << diagnostics.height
                   << ";samples=" << diagnostics.sample_count << '/'
                   << diagnostics.target_sample_count
-                  << ";sampling_state=" << diagnostics.sampling_state << '\n';
+                  << ";sampling_state=" << diagnostics.sampling_state
+                  << ";produced=" << diagnostics.produced_frame_count
+                  << ";copied=" << diagnostics.copied_frame_count
+                  << ";bytes=" << diagnostics.copied_byte_count << '\n';
         cycles_bridge_destroy_renderer(renderer);
         return 1;
     }

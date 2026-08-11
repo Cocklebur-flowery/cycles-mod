@@ -89,7 +89,7 @@ F10 叠加层采用“当前值 + 最近窗口统计”，不把目标值伪装�
 | --- | --- | --- | --- |
 | P0 | `docs: record performance and image pipeline stage` | 本文档、指标字典、瓶颈假设 | 已完成（`7afa984`） |
 | P1 | `feat: report actual render sampling` | ABI v7、实际/目标 sample、sample state/rate、F10 | 已完成（本提交） |
-| P2 | `perf: add frame pipeline telemetry` | Native convert/copy、Java/Vulkan upload、帧计数 | 待开始 |
+| P2 | `perf: add frame pipeline telemetry` | Native convert/copy、Java/Vulkan upload、帧计数 | 已完成（本提交） |
 | P3 | `perf: trace section update latency` | 捕获/upsert/commit/队列与卡顿热点 | 待开始 |
 | P4 | `perf: throttle display frame delivery` | 上传限频、latest-only、保留上一有效帧 | 待开始 |
 | P5 | `perf: adopt cycles half-float display driver` | Cycles DisplayDriver、RGBA16F、移除 CPU RGBA8/pow | 待开始 |
@@ -132,3 +132,10 @@ P1 至 P4 完成后进行一次 1080p 游戏人工里程碑：观察实际 sampl
 - 原有 `sample_count` 修正为 Cycles `Progress.get_current_sample()` 报告的实际完成值；目标值不再写入该字段。
 - 首次相机/场景变更标记为 Interactive，达到静止延迟后切换为 Still；Settling ID 已保留给后续渐进策略。
 - F10 和 F9 状态摘要使用 `actual/target`，不再只显示配置目标。
+
+### P2：帧管线遥测
+
+- ABI v8 在 v7 字段之后追加 Native Pass/显示转换与帧复制的 last/EMA/max 微秒值。
+- Native 统计成功产生的显示更新、复制到 FFM 的帧、复制字节和 generation 未变化的轮询；帧龄在查询时计算。
+- Java 统计整个 NativeBridge 帧调用的 CPU 时间，以及 Minecraft Vulkan `writeToTexture` 入队的 CPU 时间、上传次数/字节和 generation 间隙。
+- 这些数值描述 CPU 提交与内存搬运，不冒充 GPU 执行时间；GPU 时间需要后续 Vulkan timestamp query 才能确认。
