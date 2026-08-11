@@ -1,6 +1,6 @@
 # OCIO 色彩管理（P11）
 
-状态：P11a/P11b 已完成自动验证，P11c 待开始
+状态：P11a/P11b 已完成自动验证；P11c 已实现并通过构建，等待游戏内 shader 验收
 目标平台：Blender 5.2.0 / OpenColorIO 2.5 / Minecraft Vulkan sRGB SDR swapchain
 
 ## 1. 固定来源
@@ -27,7 +27,7 @@ Minecraft 26.2 的图形封装目前不开放 3D 纹理，因此 P11 的 GPU LUT
 
 - P11a：固定 Blender 5.2 OCIO 资产来源、稀疏获取和运行时部署（已完成）。
 - P11b：增加色彩处理器能力/错误诊断与可复现的 GPU LUT 数据契约（已完成）。
-- P11c：Vulkan presenter 绑定扁平 LUT，使 AgX 和 Khronos PBR Neutral 真正生效。
+- P11c：Vulkan presenter 绑定扁平 LUT，使 AgX 和 Khronos PBR Neutral 真正生效（已实现，等待游戏内验收）。
 - P11d：增加 ACES 2.0 SDR 查看变换，并明确 Rec.2020/PQ/HLG 与真 HDR swapchain 的边界。
 
 ## 4. 稳定边界
@@ -52,3 +52,11 @@ Minecraft 26.2 的图形封装目前不开放 3D 纹理，因此 P11 的 GPU LUT
 - 原生能力结构保留 64 字节大小，并把原保留槽定义为色彩变换掩码、LUT 边长、像素格式和配置状态。`cycles_bridge_write_color_management_info` 返回实际配置路径、状态、显示设备、边长和错误原因。
 - LUT 按视图惰性生成并缓存。AgX、Khronos PBR Neutral 与 ACES 2.0 都调用固定 Blender 配置中的官方 OCIO CPU processor，不使用手写近似曲线。
 - Java FFM 已同步 ABI v16，可取得能力掩码、配置状态、原生配置说明和只读 RGBA32F LUT。F10 显示当前 View Transform 是否受支持、OCIO 状态、LUT 规格和实际配置路径。
+
+## 7. P11c Vulkan 显示绑定
+
+- Presenter 在第一次选择 AgX 或 Khronos PBR Neutral 时，通过 FFM 取得对应 RGBA32F LUT，创建 `4096 x 64` 的 Vulkan sampled texture 并上传一次。Standard/Raw 使用 1 x 1 占位纹理，避免不需要 OCIO 时生成约 4 MiB LUT。
+- Shader 先在 scene-linear 中应用 EV，再使用描述符中的 log2 shaper；扁平纹理通过 8 次 `texelFetch` 恢复三线性 3D 插值。OCIO 输出之后才应用用户 Gamma。
+- LUT 只在 View Transform 第一次选择或切换到另一高级变换时构建和上传；相机移动、新 sample、场景更新和 Pass cache 不会重新上传 LUT，也不会因显示变换清空 Cycles 累积。
+- F10 增加 LUT 构建加上传的 last/EMA/max、次数、当前 View ID 和累计 MiB。该耗时是切换色彩变换的一次性成本，不参与逐帧热点判断。
+- 自动验证覆盖 Java 编译、资源打包、Native OCIO 基准与完整构建。当前环境没有独立 GLSL 编译器，因此 pipeline layout、shader 编译及游戏内高光梯度仍需下一次客户端启动验收。

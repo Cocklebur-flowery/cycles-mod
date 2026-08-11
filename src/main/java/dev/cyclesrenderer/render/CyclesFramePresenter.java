@@ -7,6 +7,8 @@ import com.mojang.blaze3d.pipeline.TextureTarget;
 import com.mojang.blaze3d.systems.RenderPass;
 import com.mojang.blaze3d.systems.RenderSystem;
 import com.mojang.blaze3d.textures.FilterMode;
+import com.mojang.blaze3d.textures.GpuTexture;
+import com.mojang.blaze3d.textures.GpuTextureView;
 import dev.cyclesrenderer.config.CyclesRenderSettings;
 import dev.cyclesrenderer.nativebridge.NativeBridge;
 
@@ -25,8 +27,19 @@ public final class CyclesFramePresenter {
     private long lastUploadMicros;
     private long emaUploadMicros;
     private long maxUploadMicros;
+    private GpuTexture fallbackColorLut;
+    private GpuTextureView fallbackColorLutView;
+    private GpuTexture colorLutTexture;
+    private GpuTextureView colorLutView;
+    private NativeBridge.ColorLutDescriptor colorLutDescriptor;
+    private int colorLutViewTransform = -1;
+    private long colorLutUploadCount;
+    private long colorLutUploadedBytes;
+    private long lastColorLutUploadMicros;
+    private long emaColorLutUploadMicros;
+    private long maxColorLutUploadMicros;
     private GpuBuffer displayUniformBuffer;
-    private final ByteBuffer displayUniformData = ByteBuffer.allocateDirect(32)
+    private final ByteBuffer displayUniformData = ByteBuffer.allocateDirect(48)
             .order(ByteOrder.nativeOrder());
     private long displaySettingsRevision = Long.MIN_VALUE;
     private int displayDepthFarBits;
@@ -86,6 +99,7 @@ public final class CyclesFramePresenter {
         if (!ready || nativeFrameTarget == null) {
             return;
         }
+        GpuTextureView activeColorLut = updateColorLut(settings.viewTransform());
         updateDisplayUniforms(settings, depthFar);
         try (RenderPass renderPass = RenderSystem.getDevice()
                 .createCommandEncoder()
@@ -98,6 +112,10 @@ public final class CyclesFramePresenter {
             renderPass.bindTexture(
                     "InSampler",
                     Objects.requireNonNull(nativeFrameTarget.getColorTextureView()),
+                    RenderSystem.getSamplerCache().getClampToEdge(FilterMode.NEAREST));
+            renderPass.bindTexture(
+                    CyclesRenderPipelines.COLOR_LUT_SAMPLER,
+                    activeColorLut,
                     RenderSystem.getSamplerCache().getClampToEdge(FilterMode.NEAREST));
             renderPass.setUniform(
                     CyclesRenderPipelines.DISPLAY_UNIFORM,
@@ -121,7 +139,13 @@ public final class CyclesFramePresenter {
                 generationGaps,
                 lastUploadMicros,
                 emaUploadMicros,
-                maxUploadMicros);
+                maxUploadMicros,
+                colorLutUploadCount,
+                colorLutUploadedBytes,
+                lastColorLutUploadMicros,
+                emaColorLutUploadMicros,
+                maxColorLutUploadMicros,
+                colorLutViewTransform);
     }
 
     public void reset() {
@@ -134,6 +158,13 @@ public final class CyclesFramePresenter {
         lastUploadMicros = 0L;
         emaUploadMicros = 0L;
         maxUploadMicros = 0L;
+        colorLutUploadCount = 0L;
+        colorLutUploadedBytes = 0L;
+        lastColorLutUploadMicros = 0L;
+        emaColorLutUploadMicros = 0L;
+        maxColorLutUploadMicros = 0L;
+        colorLutViewTransform = -1;
+        colorLutDescriptor = null;
         displaySettingsRevision = Long.MIN_VALUE;
         displayDepthFarBits = 0;
         if (nativeFrameTarget != null) {
@@ -143,6 +174,136 @@ public final class CyclesFramePresenter {
         if (displayUniformBuffer != null) {
             displayUniformBuffer.close();
             displayUniformBuffer = null;
+        }
+        closeColorLut();
+        if (fallbackColorLutView != null) {
+            fallbackColorLutView.close();
+            fallbackColorLutView = null;
+        }
+        if (fallbackColorLut != null) {
+            fallbackColorLut.close();
+            fallbackColorLut = null;
+        }
+    }
+
+    private GpuTextureView updateColorLut(
+            CyclesRenderSettings.ViewTransform viewTransform) {
+        ensureFallbackColorLut();
+        if (viewTransform.nativeId() < 2) {
+            return Objects.requireNonNull(fallbackColorLutView);
+        }
+        if (colorLutView != null && colorLutViewTransform == viewTransform.nativeId()) {
+            return colorLutView;
+        }
+        NativeBridge.Capabilities capabilities = NativeBridge.capabilities();
+        if (!capabilities.supportsViewTransform(viewTransform)) {
+            throw new IllegalStateException(
+                    "native OCIO view transform is unavailable: " + viewTransform);
+        }
+
+        long uploadStart = System.nanoTime();
+        NativeBridge.ColorLut colorLut = NativeBridge.colorLut(viewTransform);
+        NativeBridge.ColorLutDescriptor descriptor = colorLut.descriptor();
+        validateColorLut(descriptor);
+        if (descriptor.viewTransform() != viewTransform.nativeId()) {
+            throw new IllegalStateException(
+                    "native color LUT view mismatch: " + descriptor.viewTransform()
+                            + " != " + viewTransform.nativeId());
+        }
+        GpuTexture nextTexture = RenderSystem.getDevice().createTexture(
+                "Cycles " + viewTransform + " color LUT",
+                GpuTexture.USAGE_COPY_DST | GpuTexture.USAGE_TEXTURE_BINDING,
+                GpuFormat.RGBA32_FLOAT,
+                descriptor.width(),
+                descriptor.height(),
+                1,
+                1);
+        GpuTextureView nextView = null;
+        try {
+            nextView = RenderSystem.getDevice().createTextureView(nextTexture);
+            RenderSystem.getDevice().createCommandEncoder().writeToTexture(
+                    nextTexture,
+                    colorLut.pixels(),
+                    0,
+                    0,
+                    0,
+                    0,
+                    descriptor.width(),
+                    descriptor.height());
+        } catch (RuntimeException error) {
+            if (nextView != null) {
+                nextView.close();
+            }
+            nextTexture.close();
+            throw error;
+        }
+        closeColorLut();
+        colorLutTexture = nextTexture;
+        colorLutView = nextView;
+        colorLutDescriptor = descriptor;
+        colorLutViewTransform = viewTransform.nativeId();
+        lastColorLutUploadMicros = nanosToMicros(System.nanoTime() - uploadStart);
+        emaColorLutUploadMicros = updateEma(
+                emaColorLutUploadMicros, lastColorLutUploadMicros);
+        maxColorLutUploadMicros = Math.max(
+                maxColorLutUploadMicros, lastColorLutUploadMicros);
+        colorLutUploadCount++;
+        colorLutUploadedBytes += descriptor.pixelByteCount();
+        return Objects.requireNonNull(colorLutView);
+    }
+
+    private void ensureFallbackColorLut() {
+        if (fallbackColorLutView != null) {
+            return;
+        }
+        ByteBuffer fallback = ByteBuffer.allocateDirect(16).order(ByteOrder.nativeOrder());
+        fallback.putFloat(0.0F).putFloat(0.0F).putFloat(0.0F).putFloat(1.0F).flip();
+        GpuTexture nextTexture = RenderSystem.getDevice().createTexture(
+                "Cycles fallback color LUT",
+                GpuTexture.USAGE_COPY_DST | GpuTexture.USAGE_TEXTURE_BINDING,
+                GpuFormat.RGBA32_FLOAT,
+                1,
+                1,
+                1,
+                1);
+        GpuTextureView nextView = null;
+        try {
+            nextView = RenderSystem.getDevice().createTextureView(nextTexture);
+            RenderSystem.getDevice().createCommandEncoder().writeToTexture(
+                    nextTexture, fallback, 0, 0, 0, 0, 1, 1);
+        } catch (RuntimeException error) {
+            if (nextView != null) {
+                nextView.close();
+            }
+            nextTexture.close();
+            throw error;
+        }
+        fallbackColorLut = nextTexture;
+        fallbackColorLutView = nextView;
+    }
+
+    private static void validateColorLut(NativeBridge.ColorLutDescriptor descriptor) {
+        long expectedBytes = Math.multiplyExact(
+                Math.multiplyExact((long) descriptor.width(), descriptor.height()), 16L);
+        if (descriptor.edgeLength() < 2
+                || descriptor.width() != descriptor.edgeLength() * descriptor.edgeLength()
+                || descriptor.height() != descriptor.edgeLength()
+                || descriptor.pixelFormat() != NativeBridge.PIXEL_FORMAT_RGBA32_FLOAT
+                || descriptor.pixelByteCount() != expectedBytes
+                || descriptor.shaperLog2Max() <= descriptor.shaperLog2Min()
+                || descriptor.shaperEpsilon() <= 0.0F) {
+            throw new IllegalStateException("invalid native color LUT descriptor: " + descriptor);
+        }
+    }
+
+    private void closeColorLut() {
+        if (colorLutView != null) {
+            colorLutView.close();
+            colorLutView = null;
+        }
+        if (colorLutTexture != null) {
+            colorLutTexture.close();
+            colorLutTexture = null;
         }
     }
 
@@ -159,7 +320,7 @@ public final class CyclesFramePresenter {
             displayUniformBuffer = RenderSystem.getDevice().createBuffer(
                     () -> "Cycles display settings",
                     GpuBuffer.USAGE_COPY_DST | GpuBuffer.USAGE_UNIFORM,
-                    32L);
+                    48L);
         }
         displayUniformData.clear();
         displayUniformData.putFloat((float) Math.pow(2.0, settings.exposureEv()));
@@ -170,6 +331,19 @@ public final class CyclesFramePresenter {
         displayUniformData.putInt(settings.viewTransform().nativeId());
         displayUniformData.putInt(0);
         displayUniformData.putInt(0);
+        NativeBridge.ColorLutDescriptor descriptor = colorLutDescriptor;
+        if (settings.viewTransform().nativeId() >= 2 && descriptor != null) {
+            displayUniformData.putFloat(descriptor.edgeLength());
+            displayUniformData.putFloat(descriptor.shaperLog2Min());
+            displayUniformData.putFloat(
+                    1.0F / (descriptor.shaperLog2Max() - descriptor.shaperLog2Min()));
+            displayUniformData.putFloat(descriptor.shaperEpsilon());
+        } else {
+            displayUniformData.putFloat(1.0F);
+            displayUniformData.putFloat(0.0F);
+            displayUniformData.putFloat(1.0F);
+            displayUniformData.putFloat(1.0F);
+        }
         displayUniformData.flip();
         RenderSystem.getDevice().createCommandEncoder().writeToBuffer(
                 displayUniformBuffer.slice(),
@@ -192,6 +366,12 @@ public final class CyclesFramePresenter {
             long generationGaps,
             long lastUploadMicros,
             long emaUploadMicros,
-            long maxUploadMicros) {
+            long maxUploadMicros,
+            long colorLutUploadCount,
+            long colorLutUploadedBytes,
+            long lastColorLutUploadMicros,
+            long emaColorLutUploadMicros,
+            long maxColorLutUploadMicros,
+            int colorLutViewTransform) {
     }
 }

@@ -12,8 +12,10 @@ import net.neoforged.neoforge.client.event.RegisterRenderPipelinesEvent;
 
 public final class CyclesRenderPipelines {
     public static final String DISPLAY_UNIFORM = "CyclesDisplay";
+    public static final String COLOR_LUT_SAMPLER = "ColorLutSampler";
 
     private static final BindGroupLayout DISPLAY_LAYOUT = BindGroupLayout.builder()
+            .withSampler(COLOR_LUT_SAMPLER)
             .withUniform(DISPLAY_UNIFORM, UniformType.UNIFORM_BUFFER)
             .build();
 

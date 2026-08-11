@@ -568,6 +568,17 @@ public final class CyclesRendererMod {
             y += 10;
             graphics.text(
                     minecraft.font,
+                    "ocio LUT build+upload us=" + presentation.lastColorLutUploadMicros()
+                            + "/" + presentation.emaColorLutUploadMicros()
+                            + "/" + presentation.maxColorLutUploadMicros()
+                            + " count=" + presentation.colorLutUploadCount()
+                            + " view=" + presentation.colorLutViewTransform()
+                            + " MiB="
+                            + oneDecimalMebibytes(presentation.colorLutUploadedBytes()),
+                    6, y, 0xFFE0E0E0);
+            y += 10;
+            graphics.text(
+                    minecraft.font,
                     "capture us=" + capture.lastCaptureMicros()
                             + "/" + capture.emaCaptureMicros()
                             + "/" + capture.maxCaptureMicros()
