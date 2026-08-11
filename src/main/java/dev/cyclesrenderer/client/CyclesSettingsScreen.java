@@ -31,7 +31,7 @@ public final class CyclesSettingsScreen extends Screen {
     protected void init() {
         int buttonWidth = Math.min(280, this.width - 40);
         int left = (this.width - buttonWidth) / 2;
-        int top = Math.max(72, this.height / 2 - 30);
+        int top = Math.max(94, this.height / 2 - 30);
         addRenderableWidget(Button.builder(
                         Component.translatable("screen.cyclesrenderer.settings.edit"),
                         button -> minecraft.gui.setScreen(
@@ -122,6 +122,9 @@ public final class CyclesSettingsScreen extends Screen {
                 settings.resolutionPercentage(),
                 settings.interactiveSamples(),
                 settings.stillSamples()));
+        lines.add(Component.translatable(
+                "screen.cyclesrenderer.settings.color_pipeline",
+                settings.viewTransform().getTranslatedName()));
         if (!NativeBridge.isReady()) {
             lines.add(Component.translatable("screen.cyclesrenderer.settings.native_not_loaded"));
             return lines;

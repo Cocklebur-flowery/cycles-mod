@@ -206,7 +206,7 @@ public record CyclesRenderSettings(
     }
 
     public enum ViewTransform implements NativeEnum, NamedEnum {
-        STANDARD(0), RAW(1), AGX(2), KHRONOS_PBR_NEUTRAL(3);
+        STANDARD(0), RAW(1), AGX(2), KHRONOS_PBR_NEUTRAL(3), ACES_2(4);
 
         private final int nativeId;
 
