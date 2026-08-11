@@ -420,7 +420,7 @@ Section 流送切换到 ABI v5 后，旧高度场暂不再合并进活动场景�
 - HDR 测试场景在 AgX 下保留高光层次，Raw/Standard 行为可对照。
 - 设置错误不会让 Minecraft 进程崩溃。
 
-当前状态：采样、分辨率、光程、过滤、设备策略、OptiX 降噪和基础显示参数已经通过 ABI v12 接通，Combined 显示源已是可租用的 scene-linear RGBA16F；类型化 HDR Pass cache、Blender OCIO 资产/AgX 和 OIDN 构建尚未完成，因此单元 B 只完成了控制面与一部分 Cycles 参数，不标记为整体验收。
+当前状态：采样、分辨率、光程、过滤、设备策略、OptiX 降噪和基础显示参数已经通过 ABI v12 接通，Combined 显示源已是可租用并由 Vulkan 直接上传的 scene-linear RGBA16F；渐进状态已明确区分 Interactive、Settling 和 Still。类型化 HDR Pass cache、Blender OCIO 资产/AgX 和 OIDN 构建尚未完成，因此单元 B 只完成了控制面与一部分 Cycles 参数，不标记为整体验收。
 
 ### 单元 C：Minecraft 设置界面与 Pass 查看器
 

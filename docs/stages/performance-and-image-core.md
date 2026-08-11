@@ -185,3 +185,9 @@ P1 至 P4 完成后进行一次 1080p 游戏人工里程碑：观察实际 sampl
 - NeoForge 注册 `cyclesrenderer:pipeline/present` 全屏 pipeline，输入为 scene-linear RGBA16F，输出到 Minecraft 主颜色目标。
 - 32 字节 `CyclesDisplay` uniform 在设置 revision 或远裁剪变化时更新；曝光、Gamma、Raw/Standard 和调试 Pass 映射均在 GPU shader 执行。
 - AgX、Khronos PBR Neutral 与 ACES 目前仍使用 Standard 的临时曲线；P11 将由打包的 OCIO GPU processor 替换这一占位行为。
+
+### P8a：渐进采样状态机
+
+- 相机变化后进入 `Interactive`；首个交互帧产生后，在 stationary delay 内报告 `Settling`，到期后进入 `Still` 并使用 still samples/time limit。
+- 即使 interactive/still sample 数相同也会完成状态切换，保证静止阶段的时间限制与后续降噪调度仍能生效。
+- F10 新增 settling 剩余毫秒数和状态切换计数；native smoke 主动移动相机并验证 `Interactive -> Settling -> Still`。

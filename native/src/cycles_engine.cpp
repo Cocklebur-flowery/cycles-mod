@@ -1597,6 +1597,10 @@ class CyclesEngine::Impl final {
             diagnostics.target_sample_count = target_sample_count_diagnostic_;
             diagnostics.sampling_state = sampling_state_diagnostic_;
             diagnostics.sample_rate = sample_rate_diagnostic_;
+            diagnostics.settling_remaining_millis =
+                settling_remaining_millis_diagnostic_;
+            diagnostics.sampling_transition_count =
+                sampling_transition_count_diagnostic_;
             diagnostics.scene_commit_count = scene_commit_count_;
             diagnostics.scene_delta_count = scene_delta_count_;
             diagnostics.render_start_count = render_start_count_;
@@ -1716,6 +1720,9 @@ class CyclesEngine::Impl final {
         request.camera = camera;
         const auto now = std::chrono::steady_clock::now();
         bool changed = false;
+        bool update_sampling_phase = false;
+        std::uint32_t sampling_phase = CYCLES_BRIDGE_SAMPLING_IDLE;
+        std::uint32_t settling_remaining_millis = 0U;
         {
             std::lock_guard lock(request_mutex_);
             if (!requested_scene_) {
@@ -1734,20 +1741,33 @@ class CyclesEngine::Impl final {
                 last_camera_change_ = now;
                 last_camera_generation_ = frames_.generation();
                 changed = true;
-            } else if (requested_camera_->sample_count
-                           == static_cast<int>(requested_settings_.interactive_samples)
-                       && requested_settings_.still_samples
-                           != requested_settings_.interactive_samples
-                       && now - last_camera_change_
-                           >= std::chrono::milliseconds(
-                               requested_settings_.stationary_delay_millis)
+                update_sampling_phase = true;
+                sampling_phase = CYCLES_BRIDGE_SAMPLING_INTERACTIVE;
+                settling_remaining_millis = requested_settings_.stationary_delay_millis;
+            } else if (requested_camera_->sampling_state
+                           != CYCLES_BRIDGE_SAMPLING_STILL
                        && frames_.generation() != last_camera_generation_) {
-                request.sample_count = static_cast<int>(requested_settings_.still_samples);
-                request.sampling_state = CYCLES_BRIDGE_SAMPLING_STILL;
-                request.revision = ++camera_revision_;
-                requested_camera_ = request;
-                changed = true;
+                const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+                    now - last_camera_change_);
+                const auto delay = std::chrono::milliseconds(
+                    requested_settings_.stationary_delay_millis);
+                update_sampling_phase = true;
+                if (elapsed >= delay) {
+                    request.sample_count = static_cast<int>(requested_settings_.still_samples);
+                    request.sampling_state = CYCLES_BRIDGE_SAMPLING_STILL;
+                    request.revision = ++camera_revision_;
+                    requested_camera_ = request;
+                    changed = true;
+                    sampling_phase = CYCLES_BRIDGE_SAMPLING_STILL;
+                } else {
+                    sampling_phase = CYCLES_BRIDGE_SAMPLING_SETTLING;
+                    settling_remaining_millis = static_cast<std::uint32_t>(
+                        std::max<std::int64_t>(0, (delay - elapsed).count()));
+                }
             }
+        }
+        if (update_sampling_phase) {
+            set_sampling_phase(sampling_phase, settling_remaining_millis);
         }
         if (changed) {
             set_state("camera-queued", {});
@@ -1760,6 +1780,17 @@ class CyclesEngine::Impl final {
             return false;
         }
         return true;
+    }
+
+    void set_sampling_phase(
+        std::uint32_t sampling_state,
+        std::uint32_t settling_remaining_millis) {
+        std::lock_guard lock(state_mutex_);
+        if (sampling_state_diagnostic_ != sampling_state) {
+            sampling_transition_count_diagnostic_++;
+        }
+        sampling_state_diagnostic_ = sampling_state;
+        settling_remaining_millis_diagnostic_ = settling_remaining_millis;
     }
 
     void set_state(std::string state, std::string terminal_error) {
@@ -1915,7 +1946,14 @@ class CyclesEngine::Impl final {
             effective_denoiser_ = effective_denoiser;
             target_sample_count_diagnostic_ =
                 static_cast<std::uint32_t>(render_params.samples);
+            if (sampling_state_diagnostic_ != camera_request.sampling_state) {
+                sampling_transition_count_diagnostic_++;
+            }
             sampling_state_diagnostic_ = camera_request.sampling_state;
+            settling_remaining_millis_diagnostic_ =
+                camera_request.sampling_state == CYCLES_BRIDGE_SAMPLING_INTERACTIVE
+                ? settings.stationary_delay_millis
+                : 0U;
             sample_rate_diagnostic_ = 0.0F;
         }
         session.reset(render_params, buffer);
@@ -2161,6 +2199,8 @@ class CyclesEngine::Impl final {
     std::uint32_t target_sample_count_diagnostic_ = 0;
     std::uint32_t sampling_state_diagnostic_ = CYCLES_BRIDGE_SAMPLING_IDLE;
     float sample_rate_diagnostic_ = 0.0F;
+    std::uint32_t settling_remaining_millis_diagnostic_ = 0;
+    std::uint32_t sampling_transition_count_diagnostic_ = 0;
     std::uint64_t scene_commit_count_ = 0;
     std::uint64_t scene_delta_count_ = 0;
     std::uint64_t render_start_count_ = 0;

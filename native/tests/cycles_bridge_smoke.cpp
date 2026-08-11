@@ -177,6 +177,7 @@ CyclesBridgeRenderSettings default_settings() {
     settings.resolution_percentage = 100;
     settings.interactive_samples = 1;
     settings.still_samples = 1;
+    settings.stationary_delay_millis = 150;
     settings.noise_threshold = 0.01F;
     settings.maximum_bounce = 3;
     settings.diffuse_bounces = 2;
@@ -227,6 +228,48 @@ bool wait_for_actual_sample(
         Sleep(10);
     }
     std::cerr << "native diagnostics never reported a completed sample\n";
+    return false;
+}
+
+bool verify_progressive_sampling(
+    CyclesBridgeRenderer* renderer,
+    CyclesBridgeCamera& camera,
+    CyclesBridgeDiagnostics& diagnostics) {
+    camera.position_x += 0.125;
+    bool saw_interactive = false;
+    bool saw_settling = false;
+    bool saw_still = false;
+    std::uint64_t still_start_generation = 0U;
+    for (int attempt = 0; attempt < 200; ++attempt) {
+        camera.frame_id++;
+        if (!require_ok(
+                cycles_bridge_update_camera(renderer, &camera),
+                "progressive camera update")
+            || !require_ok(
+                cycles_bridge_query_diagnostics(renderer, &diagnostics),
+                "progressive diagnostics")) {
+            return false;
+        }
+        saw_interactive |=
+            diagnostics.sampling_state == CYCLES_BRIDGE_SAMPLING_INTERACTIVE;
+        saw_settling |=
+            diagnostics.sampling_state == CYCLES_BRIDGE_SAMPLING_SETTLING;
+        if (diagnostics.sampling_state == CYCLES_BRIDGE_SAMPLING_STILL) {
+            if (!saw_still) {
+                saw_still = true;
+                still_start_generation = diagnostics.frame_generation;
+            } else if (diagnostics.frame_generation != still_start_generation) {
+                return saw_interactive && saw_settling
+                    && diagnostics.settling_remaining_millis == 0U
+                    && diagnostics.sampling_transition_count >= 3U;
+            }
+        }
+        Sleep(10);
+    }
+    std::cerr << "progressive sampler did not reach Still; state="
+              << diagnostics.sampling_state
+              << ";remaining=" << diagnostics.settling_remaining_millis
+              << ";transitions=" << diagnostics.sampling_transition_count << '\n';
     return false;
 }
 
@@ -438,6 +481,10 @@ int main(int argc, char** argv) {
         cycles_bridge_destroy_renderer(renderer);
         return 1;
     }
+    if (!verify_progressive_sampling(renderer, camera, diagnostics)) {
+        cycles_bridge_destroy_renderer(renderer);
+        return 1;
+    }
     CyclesBridgeFrameView acquired{};
     acquired.struct_size = sizeof(acquired);
     acquired.struct_version = 1;
@@ -492,6 +539,8 @@ int main(int argc, char** argv) {
         || diagnostics.active_frame_leases != 0U
         || diagnostics.peak_frame_leases == 0U
         || diagnostics.frame_slot_count != 3U
+        || diagnostics.settling_remaining_millis != 0U
+        || diagnostics.sampling_transition_count < 3U
         || diagnostics.sampling_state == CYCLES_BRIDGE_SAMPLING_IDLE) {
         std::cerr << "unexpected diagnostics after Combined restore: revision="
                   << diagnostics.settings_revision << ";pass=" << diagnostics.active_pass

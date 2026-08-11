@@ -251,7 +251,7 @@ struct CyclesBridgeDiagnostics {
     std::uint32_t target_sample_count;
     std::uint32_t sampling_state;
     float sample_rate;
-    std::uint32_t reserved_v7;
+    std::uint32_t settling_remaining_millis;
     std::uint64_t produced_frame_count;
     std::uint64_t copied_frame_count;
     std::uint64_t copied_byte_count;
@@ -263,7 +263,7 @@ struct CyclesBridgeDiagnostics {
     std::uint32_t ema_copy_micros;
     std::uint32_t max_copy_micros;
     std::uint32_t frame_age_micros;
-    std::uint32_t reserved_v8;
+    std::uint32_t sampling_transition_count;
     std::uint64_t scene_commit_count;
     std::uint64_t scene_delta_count;
     std::uint64_t render_start_count;
