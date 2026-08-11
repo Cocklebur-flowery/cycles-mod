@@ -1,0 +1,5 @@
+{
+  "key.category.cyclesrenderer.main": "Cycles Renderer",
+  "key.cyclesrenderer.toggle_test_frame": "Toggle experimental world renderer",
+  "message.cyclesrenderer.test_frame": "Experimental backend owns the world frame — press F8 for vanilla"
+}

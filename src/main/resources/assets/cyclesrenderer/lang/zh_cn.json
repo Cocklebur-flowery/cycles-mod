@@ -1,0 +1,5 @@
+{
+  "key.category.cyclesrenderer.main": "Cycles 渲染器",
+  "key.cyclesrenderer.toggle_test_frame": "切换实验世界渲染器",
+  "message.cyclesrenderer.test_frame": "实验后端已接管世界帧 — 按 F8 恢复原版"
+}
