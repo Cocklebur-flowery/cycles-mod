@@ -1467,14 +1467,15 @@ std::uint32_t configure_scene_settings(
     return effective_denoiser;
 }
 
-void create_output_passes(ccl::Scene* scene, const CyclesBridgeRenderSettings& settings) {
-    ccl::Pass* combined = scene->create_node<ccl::Pass>();
-    combined->set_name(ccl::ustring(pass_name(CYCLES_BRIDGE_PASS_COMBINED)));
-    combined->set_type(ccl::PASS_COMBINED);
-    if (settings.active_pass != CYCLES_BRIDGE_PASS_COMBINED) {
-        ccl::Pass* selected = scene->create_node<ccl::Pass>();
-        selected->set_name(ccl::ustring(pass_name(settings.active_pass)));
-        selected->set_type(pass_type(settings.active_pass));
+void create_output_passes(ccl::Scene* scene, std::uint64_t registered_pass_mask) {
+    registered_pass_mask |= 1ULL << CYCLES_BRIDGE_PASS_COMBINED;
+    for (std::uint32_t pass = 0; pass < CYCLES_BRIDGE_PASS_COUNT; ++pass) {
+        if ((registered_pass_mask & (1ULL << pass)) == 0U) {
+            continue;
+        }
+        ccl::Pass* output = scene->create_node<ccl::Pass>();
+        output->set_name(ccl::ustring(pass_name(pass)));
+        output->set_type(pass_type(pass));
     }
 }
 
@@ -1850,6 +1851,9 @@ class CyclesEngine::Impl final {
             diagnostics.last_render_start_micros = last_render_start_micros_;
             diagnostics.ema_render_start_micros = ema_render_start_micros_;
             diagnostics.max_render_start_micros = max_render_start_micros_;
+            diagnostics.registered_pass_mask = registered_pass_mask_diagnostic_;
+            diagnostics.pass_registry_rebuild_count = pass_registry_rebuild_count_;
+            diagnostics.pass_registry_hit_count = pass_registry_hit_count_;
         }
         frames_.fill_diagnostics(diagnostics);
     }
@@ -2092,6 +2096,7 @@ class CyclesEngine::Impl final {
         const ccl::DeviceInfo& device,
         const SceneRequest& scene_request,
         const CyclesBridgeRenderSettings& settings,
+        std::uint64_t registered_pass_mask,
         ccl::SessionParams& session_params,
         SceneRuntime& runtime) {
         session_params = make_session_params(device);
@@ -2099,7 +2104,7 @@ class CyclesEngine::Impl final {
         scene_params.background = false;
         auto session = ccl::make_unique<ccl::Session>(session_params, scene_params);
         session->set_display_driver(ccl::make_unique<FrameDisplayDriver>(frames_));
-        create_output_passes(session->scene.get(), settings);
+        create_output_passes(session->scene.get(), registered_pass_mask);
         build_scene(session->scene.get(), scene_request, runtime);
         const std::uint32_t effective_denoiser =
             configure_scene_settings(session->scene.get(), device, settings);
@@ -2115,6 +2120,7 @@ class CyclesEngine::Impl final {
         ccl::SessionParams& params,
         const SceneRequest& scene_request,
         const CyclesBridgeRenderSettings& settings,
+        std::uint64_t registered_pass_mask,
         SceneRuntime& runtime,
         std::size_t& device_index) {
         if (session) {
@@ -2130,7 +2136,13 @@ class CyclesEngine::Impl final {
             }
             try {
                 set_device_state(device, "initializing");
-                session = create_session(device, scene_request, settings, params, runtime);
+                session = create_session(
+                    device,
+                    scene_request,
+                    settings,
+                    registered_pass_mask,
+                    params,
+                    runtime);
                 set_device_state(device, "scene-ready");
                 return true;
             } catch (const std::exception& exception) {
@@ -2277,6 +2289,7 @@ class CyclesEngine::Impl final {
         std::uint64_t observed_scene_revision = 0;
         std::uint64_t observed_camera_revision = 0;
         std::uint64_t render_camera_revision = 0;
+        std::uint64_t registered_pass_mask = 1ULL << CYCLES_BRIDGE_PASS_COMBINED;
         bool render_in_flight = false;
         std::size_t device_index = 0;
 
@@ -2323,6 +2336,17 @@ class CyclesEngine::Impl final {
                 if (requested_settings.revision != active_settings_revision) {
                     const bool pass_changed = requested_settings.active_pass
                         != active_settings.active_pass;
+                    const std::uint64_t requested_pass_bit =
+                        1ULL << requested_settings.active_pass;
+                    const bool pass_registration_required = pass_changed
+                        && (registered_pass_mask & requested_pass_bit) == 0U;
+                    if (pass_registration_required) {
+                        registered_pass_mask |= requested_pass_bit;
+                    }
+                    if (session && pass_changed && !pass_registration_required) {
+                        std::lock_guard lock(state_mutex_);
+                        pass_registry_hit_count_++;
+                    }
                     pass_only_settings_update = requested_pass_only_change;
                     if (session && (requested_settings_reset == CYCLES_BRIDGE_RESET_SESSION
                                     || pass_changed)) {
@@ -2332,6 +2356,10 @@ class CyclesEngine::Impl final {
                         active_scene.reset();
                         active_scene_revision = 0;
                         device_index = 0;
+                        if (pass_registration_required) {
+                            std::lock_guard lock(state_mutex_);
+                            pass_registry_rebuild_count_++;
+                        }
                     } else if (session && render_in_flight) {
                         session->cancel(true);
                     }
@@ -2348,6 +2376,7 @@ class CyclesEngine::Impl final {
                         std::lock_guard lock(state_mutex_);
                         active_settings_revision_diagnostic_ = active_settings_revision;
                         active_pass_diagnostic_ = active_settings.active_pass;
+                        registered_pass_mask_diagnostic_ = registered_pass_mask;
                     }
                 }
 
@@ -2396,6 +2425,7 @@ class CyclesEngine::Impl final {
                                 session_params,
                                 *requested_scene,
                                 active_settings,
+                                registered_pass_mask,
                                 scene_runtime,
                                 device_index)) {
                             continue;
@@ -2480,6 +2510,10 @@ class CyclesEngine::Impl final {
     std::uint32_t last_render_start_micros_ = 0;
     std::uint32_t ema_render_start_micros_ = 0;
     std::uint32_t max_render_start_micros_ = 0;
+    std::uint64_t registered_pass_mask_diagnostic_ =
+        1ULL << CYCLES_BRIDGE_PASS_COMBINED;
+    std::uint32_t pass_registry_rebuild_count_ = 0;
+    std::uint32_t pass_registry_hit_count_ = 0;
     std::string state_;
     std::string terminal_error_;
 

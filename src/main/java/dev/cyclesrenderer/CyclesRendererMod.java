@@ -385,6 +385,8 @@ public final class CyclesRendererMod {
         }
         try {
             NativeBridge.Diagnostics diagnostics = NativeBridge.diagnostics();
+            NativeBridge.PassDescriptor passDescriptor =
+                    NativeBridge.passDescriptor(diagnostics.activePassId());
             CyclesRenderSettings settings = CyclesClientConfig.snapshot();
             CyclesFramePresenter.Telemetry presentation = FRAME_PRESENTER.telemetry();
             SectionGeometryCollector.Telemetry capture = SectionGeometryCollector.telemetry();
@@ -455,6 +457,22 @@ public final class CyclesRendererMod {
                     "pass masks raw=0x" + Long.toHexString(diagnostics.cachedRawPassMask())
                             + " denoised=0x"
                             + Long.toHexString(diagnostics.cachedDenoisedPassMask()),
+                    6, y, 0xFFE0E0E0);
+            y += 10;
+            graphics.text(
+                    minecraft.font,
+                    "pass registry=0x" + Long.toHexString(diagnostics.registeredPassMask())
+                            + " hit/rebuild=" + diagnostics.passRegistryHitCount()
+                            + "/" + diagnostics.passRegistryRebuildCount(),
+                    6, y, 0xFFE0E0E0);
+            y += 10;
+            graphics.text(
+                    minecraft.font,
+                    "pass desc=" + passDescriptor.semanticName()
+                            + " components=" + passDescriptor.sourceComponentCount()
+                            + "->" + passDescriptor.displayComponentCount()
+                            + " " + passDescriptor.pixelFormatName()
+                            + " flags=0x" + Integer.toHexString(passDescriptor.flags()),
                     6, y, 0xFFE0E0E0);
             y += 10;
             graphics.text(

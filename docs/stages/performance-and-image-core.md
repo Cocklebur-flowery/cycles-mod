@@ -97,7 +97,7 @@ F10 叠加层采用“当前值 + 最近窗口统计”，不把目标值伪装�
 | P6 | `perf: add acquired frame ring buffers` | Native 三缓冲、FFM acquire/release | 已完成（本提交） |
 | P7 | `feat: present scene-linear rgba16f frames` | Vulkan RGBA16F 与最小显示 Shader | 已完成（P7a/P7b） |
 | P8 | `feat: add progressive interaction states` | Interactive/Settling/Still 和动态分辨率 | 已完成（P8a/P8b） |
-| P9 | `feat: add typed pass cache` | Pass 注册表、内存预算、raw/denoised 分离 | P9a 缓存已完成；P9b 描述/注册表待开始 |
+| P9 | `feat: add typed pass cache` | Pass 注册表、内存预算、raw/denoised 分离 | 已完成（P9a/P9b，待游戏内人工验收） |
 | P10 | `feat: schedule cycles denoisers` | OptiX/OIDN 能力、调度与 OIDN 构建 | 待开始 |
 | P11 | `feat: integrate ocio color management` | OCIO Vulkan、AgX、ACES 2、工作/显示空间 | 待开始 |
 | P12 | `feat: expose sampling and physical camera controls` | 原生蓝噪声、镜头、裁剪、景深 | 待开始 |
@@ -206,4 +206,10 @@ P1 至 P4 完成后进行一次 1080p 游戏人工里程碑：观察实际 sampl
 - 相机、场景和真实渲染参数变化会清空缓存；只切换 Pass 或修改预算会保留缓存。缓存命中只发布显示 generation，不增加 Cycles produced-frame 计数。
 - 帧槽记录实际 Pass、Variant 和 camera revision；缓存恢复、清空 generation 或取消边界的迟到帧不能冒充当前请求的新采样。降噪拓扑变化当前按 Session reset 处理，P10 再优化调度成本。
 - F10 显示活动 Variant、条目/预算/命中/淘汰和 Raw/Denoised masks。完整数据模型、内存口径和失效矩阵见 [类型化 HDR Pass 缓存](pass-cache.md)。
-- P9b 仍需加入可查询的 Pass descriptor/on-demand registry；当前切换到未注册 Pass 仍可能重建 Cycles Session，因此 P9 尚未整体验收。
+
+### P9b：Pass 描述与按需注册表
+
+- ABI v14 新增固定 64 字节的 `CyclesBridgePassDescriptor` 查询；Java/F10 读取 Native 声明的源分量、RGBA16F 显示格式、语义和缓存/色彩管理 flags，不再硬编码推断。
+- Native Pass registry 以 Combined 起步，第一次访问其他 Pass 时增长；注册 mask 跨 Session 重建保留，诊断记录注册增长重建和已注册命中。
+- Cycles 5.2 的当前 DisplayDriver 路径在同一 Session 原地切换 Film display pass 会停在 `0/1` sample。为保证输出正确，当前每次 Pass 切换仍重建 Session；Pass cache 在等待期间提供旧帧。该限制已写入稳定运行时契约，后续优化不得绕过回归测试。
+- Native smoke 查询全部描述符、遍历 7 个 Pass、切回已注册 Combined，并继续覆盖 OptiX、Raw/Denoised cache、Section 增删和动态分辨率。

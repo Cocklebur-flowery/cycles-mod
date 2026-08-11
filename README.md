@@ -6,7 +6,7 @@
 
 ## 当前阶段
 
-- Cycles 5.2 已通过 C ABI v13 接入 Java Foreign Function & Memory API；v12 在 RGBA16F DisplayDriver 后加入三槽帧环与显式 acquire/release 租约，v13 增加类型化 HDR Pass 缓存与诊断，Minecraft 实时路径已直接上传租约中的 RGBA16F。
+- Cycles 5.2 已通过 C ABI v14 接入 Java Foreign Function & Memory API；v12 在 RGBA16F DisplayDriver 后加入三槽帧环与显式 acquire/release 租约，v13 增加类型化 HDR Pass 缓存，v14 增加 Pass descriptor 与按需注册表，Minecraft 实时路径已直接上传租约中的 RGBA16F。
 - 近景不再扫描固定 `64 × 32 × 64` 方块盒，而是直接复制 Minecraft `SectionCompiler` 生成的 16³ Section 网格。
 - 活跃 Section 范围跟随游戏的“有效渲染距离”；水平判定复用原版区块距离规则，垂直范围复用原版渲染器的 Section 范围和世界高度边界。
 - 方块放置/破坏、光照更新、区块装卸和视距移动触发原版 Section 重编译后，会以稳定 Section ID 增量替换或移除 Native 几何。
@@ -18,7 +18,7 @@
 - NeoForge CLIENT 配置持久化到 `config/cyclesrenderer-client.toml`。默认仍为 Fit Inside `480 × 270`、移动 1 sample、静止 150 ms 后 8 samples；可以在 F9/模组配置页改成固定分辨率，最高 `3840 × 2160`，包括 `1920 × 1080`。可选动态分辨率默认关闭；开启后交互/Settling 阶段使用独立百分比，静止阶段恢复基础输出尺寸。
 - 设置页开放设备策略、分辨率、交互/静止采样、自适应采样、时间限制、光程反弹、Clamp、像素过滤、种子、降噪、EV、Gamma、查看变换、活动 Pass 和诊断开关。设置按 revision 异步提交给 Cycles 工作线程。
 - Pass 查看器按需创建并显示 `Combined`、`Depth`、`Normal`、`Diffuse Color`、`Emission`、`Roughness` 和 `Sample Count`，不会同时把所有 Pass 复制到 Java/Vulkan。
-- Native 以 `(Pass ID, Raw/Denoised)` 缓存最近查看过的 RGBA16F Pass，默认 LRU 预算为 256 MiB；F10 显示条目、占用、命中、淘汰和两类 Pass mask。当前切换未注册 Pass 仍会重建 Cycles Session，descriptor/on-demand registry 留给 P9b。
+- Native 以 `(Pass ID, Raw/Denoised)` 缓存最近查看过的 RGBA16F Pass，默认 LRU 预算为 256 MiB；F10 显示条目、占用、命中、淘汰、注册表和活动 descriptor。Pass 只在首次访问时加入注册 mask；当前每次切换仍重建 Cycles Session，以规避 Cycles 5.2 DisplayDriver 原地切换停在 `0/1` sample 的问题。
 - 运行时能力查询会报告实际设备、可用 Pass 和降噪器。当前构建已验证 RTX 5080 上的 OptiX 降噪；OpenImageDenoise 仍未编入 Cycles 静态库，因此会报告不可用。
 - Java 每次只租用并上传 Native 的低分辨率 RGBA16F 新帧；Minecraft Vulkan 使用专用全屏 pipeline 在 GPU 上完成基础显示变换并最近邻放大到主渲染目标，不再在 CPU 上生成 4K RGBA 临时帧。
 - Minecraft 的 Vulkan swapchain、纹理和命令编码器仍由 Minecraft 管理；Cycles 不使用 Vulkan。
@@ -93,7 +93,7 @@ run-client.cmd runClient
 
 `buildNative` 会构建 native DLL 和冒烟程序，并把 `.deps/cycles-install` 中的运行时 DLL 与 `lib/kernel_*.zst` 自动部署到 `build/native/bin/`。不需要手工复制 JAR、DLL 或 GPU 内核。
 
-`runNativeSmoke` 会构造一个带 UV、彩色纹理与 Alpha Clip 的小型网格场景，验证 ABI v13 的 RGBA16F DisplayDriver、帧租约 acquire/release、独立相机更新、能力/诊断、实际/目标 sample、Interactive/Settling/Still、动态分辨率尺寸跃迁、全部 7 个 Pass、Raw/Denoised Pass cache、OptiX 降噪，以及 Section 创建、修改和删除，然后输出实际后端、设备、分辨率和帧校验和。
+`runNativeSmoke` 会构造一个带 UV、彩色纹理与 Alpha Clip 的小型网格场景，验证 ABI v14 的 RGBA16F DisplayDriver、帧租约 acquire/release、独立相机更新、能力/诊断、实际/目标 sample、Interactive/Settling/Still、动态分辨率尺寸跃迁、全部 7 个 Pass descriptor/按需注册、Raw/Denoised Pass cache、OptiX 降噪，以及 Section 创建、修改和删除，然后输出实际后端、设备、分辨率和帧校验和。
 
 `runClient` 只会为启动出的 Minecraft 进程把 `build/native/bin/` 加入 `PATH`，使 Windows 能找到 Cycles 的二级 DLL 依赖；它不会修改系统或用户环境变量。修改 native 运行时文件后必须重新启动客户端。
 
@@ -104,7 +104,7 @@ Minecraft SectionCompiler（16³ Section、流体、NeoForge 追加几何）
   -> SectionCompilerMixin 在 MeshData 关闭前复制 CPU 顶点
   -> SectionGeometryCollector（按 Section ID 合并最新重编译结果）
   -> SectionSceneManager（原版视距、装卸、资源代次、批量提交）
-  -> NativeBridge（ABI v13：Section 流送 + RGBA16F DisplayDriver + 三槽帧租约 + 类型化 Pass cache）
+  -> NativeBridge（ABI v14：Section 流送 + RGBA16F DisplayDriver + 三槽帧租约 + 类型化 Pass cache/registry）
   -> CyclesEngine 后台场景请求
   -> 现有 Cycles Session 内按 Section ID 新建、原地更新或删除 Mesh/Object
   -> 共享图集与 Opaque/Cutout/Blend 材质
@@ -145,7 +145,7 @@ DH Provider 代码仍隔离保留，但本阶段不再把其低模高度场合�
 
 ## ABI 与运行时约束
 
-ABI v13 保留旧的整场景入口、v5 Section 布局和 v6 设置/能力字段；`CyclesBridgeRenderSettings` 固定 208 字节、`CyclesBridgeCapabilities` 固定 64 字节，`CyclesBridgeDiagnostics` 由 v12 的 240 字节追加为 288 字节。v7 报告实际采样；v8 追加帧管线统计；v9 追加场景更新时间；v10 新增 `update_camera`；v11 切换 scene-linear `half4`；v12 新增 `CyclesBridgeFrameView` 与 `acquire_frame/release_frame`；v13 追加 Raw/Denoised Pass cache mask、预算和 LRU 统计。租约持有期间对应槽位不会被 Cycles 覆写，Java `AcquiredFrame` 必须用 try-with-resources 在 `NativeBridge.close()` 前释放。Minecraft 实时路径直接把租约上传到 `GpuFormat.RGBA16_FLOAT`；旧 `render_frame` 的 RGBA8 转换仅保留给兼容调用和 smoke test。Java 与 DLL 的 ABI 版本不一致时会在启用前拒绝运行。
+ABI v14 保留旧的整场景入口、v5 Section 布局和 v6 设置/能力字段；`CyclesBridgeRenderSettings` 固定 208 字节、`CyclesBridgeCapabilities` 固定 64 字节、`CyclesBridgePassDescriptor` 固定 64 字节，`CyclesBridgeDiagnostics` 由 v13 的 288 字节追加为 304 字节。v7 报告实际采样；v8 追加帧管线统计；v9 追加场景更新时间；v10 新增 `update_camera`；v11 切换 scene-linear `half4`；v12 新增 `CyclesBridgeFrameView` 与 `acquire_frame/release_frame`；v13 追加 Raw/Denoised Pass cache；v14 追加只读 descriptor 查询和 Pass registry 遥测。租约持有期间对应槽位不会被 Cycles 覆写，Java `AcquiredFrame` 必须用 try-with-resources 在 `NativeBridge.close()` 前释放。Minecraft 实时路径直接把租约上传到 `GpuFormat.RGBA16_FLOAT`；旧 `render_frame` 的 RGBA8 转换仅保留给兼容调用和 smoke test。Java 与 DLL 的 ABI 版本不一致时会在启用前拒绝运行。
 
 Cycles 的 GPU 内核通过 `path_init()` 相对于 `cyclesrenderer_native.dll` 查找。因此以下布局是运行时契约：
 

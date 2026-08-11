@@ -16,9 +16,9 @@ struct CyclesBridgeRenderer {
 
 namespace {
 
-constexpr std::uint32_t kAbiVersion = 13;
+constexpr std::uint32_t kAbiVersion = 14;
 constexpr std::uint32_t kStructVersion = 1;
-constexpr char kBuildInfo[] = "cyclesrenderer-native/cycles-5.2;abi=13";
+constexpr char kBuildInfo[] = "cyclesrenderer-native/cycles-5.2;abi=14";
 
 static_assert(sizeof(CyclesBridgeCamera) == 80);
 static_assert(offsetof(CyclesBridgeCamera, frame_id) == 8);
@@ -35,8 +35,9 @@ static_assert(sizeof(CyclesBridgeFrameView) == 72);
 static_assert(offsetof(CyclesBridgeFrameView, generation) == 16);
 static_assert(offsetof(CyclesBridgeFrameView, pixels) == 48);
 static_assert(sizeof(CyclesBridgeRenderSettings) == 208);
+static_assert(sizeof(CyclesBridgePassDescriptor) == 64);
 static_assert(sizeof(CyclesBridgeCapabilities) == 64);
-static_assert(sizeof(CyclesBridgeDiagnostics) == 288);
+static_assert(sizeof(CyclesBridgeDiagnostics) == 304);
 static_assert(sizeof(CyclesBridgeVertex) == 40);
 static_assert(offsetof(CyclesBridgeVertex, packed_rgba) == 32);
 static_assert(sizeof(CyclesBridgeTriangle) == 16);
@@ -283,6 +284,59 @@ std::uint32_t cycles_bridge_query_capabilities(
     } catch (...) {
         return CYCLES_BRIDGE_STATUS_RENDER_ERROR;
     }
+}
+
+std::uint32_t cycles_bridge_query_pass_descriptor(
+    std::uint32_t pass_id,
+    CyclesBridgePassDescriptor* descriptor) {
+    if (descriptor == nullptr
+        || descriptor->struct_size < sizeof(CyclesBridgePassDescriptor)
+        || descriptor->struct_version != kStructVersion
+        || pass_id >= CYCLES_BRIDGE_PASS_COUNT) {
+        return CYCLES_BRIDGE_STATUS_INVALID_ARGUMENT;
+    }
+    CyclesBridgePassDescriptor result{};
+    result.struct_size = sizeof(result);
+    result.struct_version = kStructVersion;
+    result.pass_id = pass_id;
+    result.display_component_count = 4U;
+    result.pixel_format = CYCLES_BRIDGE_PIXEL_FORMAT_RGBA16_FLOAT;
+    result.flags = CYCLES_BRIDGE_PASS_DISPLAYABLE | CYCLES_BRIDGE_PASS_CACHE_RAW;
+    switch (pass_id) {
+        case CYCLES_BRIDGE_PASS_COMBINED:
+            result.source_component_count = 4U;
+            result.semantic = CYCLES_BRIDGE_PASS_SEMANTIC_COLOR;
+            result.flags |= CYCLES_BRIDGE_PASS_COLOR_MANAGED
+                | CYCLES_BRIDGE_PASS_DENOISE_RESULT
+                | CYCLES_BRIDGE_PASS_CACHE_DENOISED;
+            break;
+        case CYCLES_BRIDGE_PASS_DEPTH:
+            result.source_component_count = 1U;
+            result.semantic = CYCLES_BRIDGE_PASS_SEMANTIC_DEPTH;
+            result.flags |= CYCLES_BRIDGE_PASS_DEBUG;
+            break;
+        case CYCLES_BRIDGE_PASS_NORMAL:
+            result.source_component_count = 3U;
+            result.semantic = CYCLES_BRIDGE_PASS_SEMANTIC_NORMAL;
+            result.flags |= CYCLES_BRIDGE_PASS_DEBUG;
+            break;
+        case CYCLES_BRIDGE_PASS_DIFFUSE_COLOR:
+        case CYCLES_BRIDGE_PASS_EMISSION:
+            result.source_component_count = 3U;
+            result.semantic = CYCLES_BRIDGE_PASS_SEMANTIC_COLOR;
+            result.flags |= CYCLES_BRIDGE_PASS_COLOR_MANAGED;
+            break;
+        case CYCLES_BRIDGE_PASS_ROUGHNESS:
+        case CYCLES_BRIDGE_PASS_SAMPLE_COUNT:
+            result.source_component_count = 1U;
+            result.semantic = CYCLES_BRIDGE_PASS_SEMANTIC_SCALAR;
+            result.flags |= CYCLES_BRIDGE_PASS_DEBUG;
+            break;
+        default:
+            return CYCLES_BRIDGE_STATUS_INVALID_ARGUMENT;
+    }
+    *descriptor = result;
+    return CYCLES_BRIDGE_STATUS_OK;
 }
 
 std::uint32_t cycles_bridge_apply_settings(

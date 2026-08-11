@@ -23,7 +23,7 @@ import static java.lang.foreign.ValueLayout.JAVA_INT;
 import static java.lang.foreign.ValueLayout.JAVA_LONG;
 
 public final class NativeBridge {
-    public static final int ABI_VERSION = 13;
+    public static final int ABI_VERSION = 14;
     public static final int PIXEL_FORMAT_RGBA16_FLOAT = 2;
 
     private static final String LIBRARY_PATH_PROPERTY = "cyclesrenderer.nativeLibrary";
@@ -159,6 +159,16 @@ public final class NativeBridge {
             JAVA_INT.withName("interactive_resolution_percentage"),
             JAVA_INT.withName("pass_cache_megabytes"),
             MemoryLayout.sequenceLayout(6, JAVA_INT).withName("reserved"));
+    private static final MemoryLayout PASS_DESCRIPTOR_LAYOUT = MemoryLayout.structLayout(
+            JAVA_INT.withName("struct_size"),
+            JAVA_INT.withName("struct_version"),
+            JAVA_INT.withName("pass_id"),
+            JAVA_INT.withName("source_component_count"),
+            JAVA_INT.withName("display_component_count"),
+            JAVA_INT.withName("pixel_format"),
+            JAVA_INT.withName("semantic"),
+            JAVA_INT.withName("flags"),
+            MemoryLayout.sequenceLayout(8, JAVA_INT).withName("reserved"));
     private static final MemoryLayout CAPABILITIES_LAYOUT = MemoryLayout.structLayout(
             JAVA_INT.withName("struct_size"),
             JAVA_INT.withName("struct_version"),
@@ -227,7 +237,10 @@ public final class NativeBridge {
             JAVA_INT.withName("pass_cache_entry_count"),
             JAVA_INT.withName("pass_cache_eviction_count"),
             JAVA_INT.withName("pass_cache_hit_count"),
-            JAVA_INT.withName("active_frame_variant"));
+            JAVA_INT.withName("active_frame_variant"),
+            JAVA_LONG.withName("registered_pass_mask"),
+            JAVA_INT.withName("pass_registry_rebuild_count"),
+            JAVA_INT.withName("pass_registry_hit_count"));
     private static final MemoryLayout VERTEX_LAYOUT = MemoryLayout.structLayout(
             JAVA_FLOAT.withName("position_x"),
             JAVA_FLOAT.withName("position_y"),
@@ -272,8 +285,9 @@ public final class NativeBridge {
                 || FRAME_LAYOUT.byteSize() != 40L
                 || FRAME_VIEW_LAYOUT.byteSize() != 72L
                 || SETTINGS_LAYOUT.byteSize() != 208L
+                || PASS_DESCRIPTOR_LAYOUT.byteSize() != 64L
                 || CAPABILITIES_LAYOUT.byteSize() != 64L
-                || DIAGNOSTICS_LAYOUT.byteSize() != 288L
+                || DIAGNOSTICS_LAYOUT.byteSize() != 304L
                 || VERTEX_LAYOUT.byteSize() != 40L
                 || TRIANGLE_LAYOUT.byteSize() != 16L
                 || MATERIAL_LAYOUT.byteSize() != 32L
@@ -407,6 +421,17 @@ public final class NativeBridge {
         }
     }
 
+    public static PassDescriptor passDescriptor(int passId) {
+        BridgeState state = requireState();
+        try {
+            return state.passDescriptor(passId);
+        } catch (Throwable error) {
+            rethrowFatalError(error);
+            throw new IllegalStateException("native pass descriptor query failed: "
+                    + describe(error), error);
+        }
+    }
+
     public static void close() {
         BridgeState state = bridgeState;
         bridgeState = null;
@@ -485,6 +510,7 @@ public final class NativeBridge {
         private final MethodHandle destroyRenderer;
         private final MethodHandle writeRendererInfo;
         private final MethodHandle queryCapabilities;
+        private final MethodHandle queryPassDescriptor;
         private final MethodHandle applySettings;
         private final MethodHandle queryDiagnostics;
         private final MethodHandle resetScene;
@@ -500,6 +526,7 @@ public final class NativeBridge {
         private final MemorySegment frameInfoSegment;
         private final MemorySegment frameViewSegment;
         private final MemorySegment settingsSegment;
+        private final MemorySegment passDescriptorSegment;
         private final MemorySegment capabilitiesSegment;
         private final MemorySegment diagnosticsSegment;
         private final MemorySegment framePixelsSegment;
@@ -515,6 +542,7 @@ public final class NativeBridge {
                 MethodHandle destroyRenderer,
                 MethodHandle writeRendererInfo,
                 MethodHandle queryCapabilities,
+                MethodHandle queryPassDescriptor,
                 MethodHandle applySettings,
                 MethodHandle queryDiagnostics,
                 MethodHandle resetScene,
@@ -532,6 +560,7 @@ public final class NativeBridge {
             this.destroyRenderer = destroyRenderer;
             this.writeRendererInfo = writeRendererInfo;
             this.queryCapabilities = queryCapabilities;
+            this.queryPassDescriptor = queryPassDescriptor;
             this.applySettings = applySettings;
             this.queryDiagnostics = queryDiagnostics;
             this.resetScene = resetScene;
@@ -547,6 +576,7 @@ public final class NativeBridge {
             this.frameInfoSegment = libraryArena.allocate(FRAME_LAYOUT);
             this.frameViewSegment = libraryArena.allocate(FRAME_VIEW_LAYOUT);
             this.settingsSegment = libraryArena.allocate(SETTINGS_LAYOUT);
+            this.passDescriptorSegment = libraryArena.allocate(PASS_DESCRIPTOR_LAYOUT);
             this.capabilitiesSegment = libraryArena.allocate(CAPABILITIES_LAYOUT);
             this.diagnosticsSegment = libraryArena.allocate(DIAGNOSTICS_LAYOUT);
             this.framePixelsSegment = libraryArena.allocate(MAX_NATIVE_FRAME_BYTES, 16);
@@ -580,6 +610,9 @@ public final class NativeBridge {
                 MethodHandle queryCapabilities = downcall(linker, symbols,
                         "cycles_bridge_query_capabilities",
                         FunctionDescriptor.of(JAVA_INT, ADDRESS, ADDRESS));
+                MethodHandle queryPassDescriptor = downcall(linker, symbols,
+                        "cycles_bridge_query_pass_descriptor",
+                        FunctionDescriptor.of(JAVA_INT, JAVA_INT, ADDRESS));
                 MethodHandle applySettings = downcall(linker, symbols,
                         "cycles_bridge_apply_settings",
                         FunctionDescriptor.of(JAVA_INT, ADDRESS, ADDRESS));
@@ -638,6 +671,7 @@ public final class NativeBridge {
                         destroyRenderer,
                         writeRendererInfo,
                         queryCapabilities,
+                        queryPassDescriptor,
                         applySettings,
                         queryDiagnostics,
                         resetScene,
@@ -807,6 +841,26 @@ public final class NativeBridge {
                     capabilitiesSegment.get(JAVA_INT, 40L));
         }
 
+        private PassDescriptor passDescriptor(int passId) throws Throwable {
+            if (passId < 0 || passId >= CyclesRenderSettings.PassView.values().length) {
+                throw new IllegalArgumentException("unknown pass id " + passId);
+            }
+            passDescriptorSegment.fill((byte) 0);
+            passDescriptorSegment.set(
+                    JAVA_INT, 0L, Math.toIntExact(PASS_DESCRIPTOR_LAYOUT.byteSize()));
+            passDescriptorSegment.set(JAVA_INT, 4L, STRUCT_VERSION);
+            checkStatus(
+                    (int) queryPassDescriptor.invokeExact(passId, passDescriptorSegment),
+                    "pass descriptor query");
+            return new PassDescriptor(
+                    passDescriptorSegment.get(JAVA_INT, 8L),
+                    passDescriptorSegment.get(JAVA_INT, 12L),
+                    passDescriptorSegment.get(JAVA_INT, 16L),
+                    passDescriptorSegment.get(JAVA_INT, 20L),
+                    passDescriptorSegment.get(JAVA_INT, 24L),
+                    passDescriptorSegment.get(JAVA_INT, 28L));
+        }
+
         private Diagnostics diagnostics() throws Throwable {
             diagnosticsSegment.fill((byte) 0);
             diagnosticsSegment.set(
@@ -870,7 +924,10 @@ public final class NativeBridge {
                     diagnosticsSegment.get(JAVA_INT, 272L),
                     diagnosticsSegment.get(JAVA_INT, 276L),
                     diagnosticsSegment.get(JAVA_INT, 280L),
-                    diagnosticsSegment.get(JAVA_INT, 284L));
+                    diagnosticsSegment.get(JAVA_INT, 284L),
+                    diagnosticsSegment.get(JAVA_LONG, 288L),
+                    diagnosticsSegment.get(JAVA_INT, 296L),
+                    diagnosticsSegment.get(JAVA_INT, 300L));
         }
 
         private RenderedFrame renderFrame(
@@ -1294,6 +1351,30 @@ public final class NativeBridge {
         }
     }
 
+    public record PassDescriptor(
+            int passId,
+            int sourceComponentCount,
+            int displayComponentCount,
+            int pixelFormat,
+            int semantic,
+            int flags) {
+        public String semanticName() {
+            return switch (semantic) {
+                case 1 -> "color";
+                case 2 -> "depth";
+                case 3 -> "normal";
+                case 4 -> "scalar";
+                default -> "unknown";
+            };
+        }
+
+        public String pixelFormatName() {
+            return pixelFormat == PIXEL_FORMAT_RGBA16_FLOAT
+                    ? "RGBA16_FLOAT"
+                    : "unknown";
+        }
+    }
+
     public record Diagnostics(
             long settingsRevision,
             long sceneRevision,
@@ -1349,7 +1430,10 @@ public final class NativeBridge {
             int passCacheEntryCount,
             int passCacheEvictionCount,
             int passCacheHitCount,
-            int activeFrameVariant) {
+            int activeFrameVariant,
+            long registeredPassMask,
+            int passRegistryRebuildCount,
+            int passRegistryHitCount) {
         public String stateName() {
             return switch (stateCode) {
                 case 1 -> "scene-staging";

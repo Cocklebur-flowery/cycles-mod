@@ -331,9 +331,27 @@ bool verify_progressive_sampling(
 int main(int argc, char** argv) {
     const bool require_optix = argc > 1 && std::strcmp(argv[1], "--require-optix") == 0;
     std::cerr << "[smoke] ABI check\n";
-    if (cycles_bridge_abi_version() != 13U) {
+    if (cycles_bridge_abi_version() != 14U) {
         std::cerr << "unexpected native ABI " << cycles_bridge_abi_version() << '\n';
         return 1;
+    }
+    for (std::uint32_t pass = 0; pass < CYCLES_BRIDGE_PASS_COUNT; ++pass) {
+        CyclesBridgePassDescriptor descriptor{};
+        descriptor.struct_size = sizeof(descriptor);
+        descriptor.struct_version = 1;
+        if (!require_ok(
+                cycles_bridge_query_pass_descriptor(pass, &descriptor),
+                "pass descriptor query")
+            || descriptor.pass_id != pass
+            || descriptor.source_component_count == 0U
+            || descriptor.display_component_count != 4U
+            || descriptor.pixel_format != CYCLES_BRIDGE_PIXEL_FORMAT_RGBA16_FLOAT
+            || descriptor.semantic == 0U
+            || (descriptor.flags & CYCLES_BRIDGE_PASS_DISPLAYABLE) == 0U
+            || (descriptor.flags & CYCLES_BRIDGE_PASS_CACHE_RAW) == 0U) {
+            std::cerr << "invalid descriptor for pass " << pass << '\n';
+            return 1;
+        }
     }
 
     CyclesBridgeRenderer* renderer = nullptr;
@@ -506,6 +524,10 @@ int main(int argc, char** argv) {
         || diagnostics.pass_cache_bytes == 0U
         || diagnostics.pass_cache_bytes > diagnostics.pass_cache_budget_bytes
         || diagnostics.pass_cache_hit_count == 0U
+        || diagnostics.registered_pass_mask != all_passes_mask
+        || diagnostics.pass_registry_rebuild_count
+            < CYCLES_BRIDGE_PASS_COUNT - 1U
+        || diagnostics.pass_registry_hit_count == 0U
         || diagnostics.active_frame_variant != CYCLES_BRIDGE_FRAME_VARIANT_RAW) {
         std::cerr << "unexpected raw pass cache state: raw="
                   << diagnostics.cached_raw_pass_mask
@@ -513,7 +535,10 @@ int main(int argc, char** argv) {
                   << ";entries=" << diagnostics.pass_cache_entry_count
                   << ";bytes=" << diagnostics.pass_cache_bytes
                   << ";budget=" << diagnostics.pass_cache_budget_bytes
-                  << ";hits=" << diagnostics.pass_cache_hit_count << '\n';
+                  << ";hits=" << diagnostics.pass_cache_hit_count
+                  << ";registered=" << diagnostics.registered_pass_mask
+                  << ";registry-rebuilds=" << diagnostics.pass_registry_rebuild_count
+                  << ";registry-hits=" << diagnostics.pass_registry_hit_count << '\n';
         cycles_bridge_destroy_renderer(renderer);
         return 1;
     }

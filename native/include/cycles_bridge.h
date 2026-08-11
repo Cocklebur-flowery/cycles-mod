@@ -44,6 +44,22 @@ enum CyclesBridgeFrameVariant : std::uint32_t {
     CYCLES_BRIDGE_FRAME_VARIANT_DENOISED = 1,
 };
 
+enum CyclesBridgePassSemantic : std::uint32_t {
+    CYCLES_BRIDGE_PASS_SEMANTIC_COLOR = 1,
+    CYCLES_BRIDGE_PASS_SEMANTIC_DEPTH = 2,
+    CYCLES_BRIDGE_PASS_SEMANTIC_NORMAL = 3,
+    CYCLES_BRIDGE_PASS_SEMANTIC_SCALAR = 4,
+};
+
+enum CyclesBridgePassDescriptorFlags : std::uint32_t {
+    CYCLES_BRIDGE_PASS_DISPLAYABLE = 1U << 0U,
+    CYCLES_BRIDGE_PASS_COLOR_MANAGED = 1U << 1U,
+    CYCLES_BRIDGE_PASS_DENOISE_RESULT = 1U << 2U,
+    CYCLES_BRIDGE_PASS_DEBUG = 1U << 3U,
+    CYCLES_BRIDGE_PASS_CACHE_RAW = 1U << 4U,
+    CYCLES_BRIDGE_PASS_CACHE_DENOISED = 1U << 5U,
+};
+
 enum CyclesBridgeCapabilityFlags : std::uint64_t {
     CYCLES_BRIDGE_CAPABILITY_SETTINGS = 1ULL << 0U,
     CYCLES_BRIDGE_CAPABILITY_PASS_VIEWER = 1ULL << 1U,
@@ -222,6 +238,18 @@ struct CyclesBridgeRenderSettings {
     std::uint32_t reserved[6];
 };
 
+struct CyclesBridgePassDescriptor {
+    std::uint32_t struct_size;
+    std::uint32_t struct_version;
+    std::uint32_t pass_id;
+    std::uint32_t source_component_count;
+    std::uint32_t display_component_count;
+    std::uint32_t pixel_format;
+    std::uint32_t semantic;
+    std::uint32_t flags;
+    std::uint32_t reserved[8];
+};
+
 struct CyclesBridgeCapabilities {
     std::uint32_t struct_size;
     std::uint32_t struct_version;
@@ -293,6 +321,9 @@ struct CyclesBridgeDiagnostics {
     std::uint32_t pass_cache_eviction_count;
     std::uint32_t pass_cache_hit_count;
     std::uint32_t active_frame_variant;
+    std::uint64_t registered_pass_mask;
+    std::uint32_t pass_registry_rebuild_count;
+    std::uint32_t pass_registry_hit_count;
 };
 
 struct CyclesBridgeVertex {
@@ -359,6 +390,10 @@ CYCLES_BRIDGE_API std::uint32_t cycles_bridge_write_renderer_info(
 CYCLES_BRIDGE_API std::uint32_t cycles_bridge_query_capabilities(
     const CyclesBridgeRenderer* renderer,
     CyclesBridgeCapabilities* capabilities);
+
+CYCLES_BRIDGE_API std::uint32_t cycles_bridge_query_pass_descriptor(
+    std::uint32_t pass_id,
+    CyclesBridgePassDescriptor* descriptor);
 
 CYCLES_BRIDGE_API std::uint32_t cycles_bridge_apply_settings(
     CyclesBridgeRenderer* renderer,
