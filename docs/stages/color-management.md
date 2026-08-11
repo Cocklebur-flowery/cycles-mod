@@ -47,7 +47,7 @@ Minecraft 26.2 的图形封装目前不开放 3D 纹理，因此 P11 的 GPU LUT
 ## 6. P11b 原生 LUT 契约
 
 - ABI v16 新增 `CyclesBridgeColorLutDescriptor` 与 `cycles_bridge_query_color_lut`。第一次只查询描述符，第二次由调用方提供缓冲区；缓冲区过小时明确返回 `BUFFER_TOO_SMALL`。
-- LUT 固定为 `65 x 65 x 65`、RGBA32F，二维尺寸为 `4225 x 65`。红色轴在每个蓝色切片内连续，绿色轴映射到二维 Y，shader 在 P11c 中执行三线性插值。
+- LUT 固定为 `64 x 64 x 64`、RGBA32F，二维尺寸为 `4096 x 64`。红色轴在每个蓝色切片内连续，绿色轴映射到二维 Y，shader 在 P11c 中执行三线性插值。4096 宽度不超过 Vulkan 对二维纹理尺寸的最低保证。
 - scene-linear 输入使用固定 log2 shaper：范围 `[-10, 16]`，epsilon 为 `2^-10`。这覆盖零到约 65536 的 HDR 通道值；负值在显示端钳制为零，不会改变 scene-linear 帧缓存。
 - 原生能力结构保留 64 字节大小，并把原保留槽定义为色彩变换掩码、LUT 边长、像素格式和配置状态。`cycles_bridge_write_color_management_info` 返回实际配置路径、状态、显示设备、边长和错误原因。
 - LUT 按视图惰性生成并缓存。AgX、Khronos PBR Neutral 与 ACES 2.0 都调用固定 Blender 配置中的官方 OCIO CPU processor，不使用手写近似曲线。

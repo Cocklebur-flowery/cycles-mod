@@ -421,7 +421,7 @@ int main(int argc, char** argv) {
         || (capabilities.capability_flags & CYCLES_BRIDGE_CAPABILITY_PASS_VIEWER) == 0U
         || capabilities.pass_mask != ((1ULL << CYCLES_BRIDGE_PASS_COUNT) - 1ULL)
         || capabilities.color_config_state != CYCLES_BRIDGE_COLOR_CONFIG_READY
-        || capabilities.color_lut_edge_length != 65U
+        || capabilities.color_lut_edge_length != 64U
         || capabilities.color_lut_pixel_format != CYCLES_BRIDGE_PIXEL_FORMAT_RGBA32_FLOAT
         || (capabilities.color_transform_mask
             & (1U << CYCLES_BRIDGE_VIEW_TRANSFORM_AGX)) == 0U
@@ -461,7 +461,7 @@ int main(int argc, char** argv) {
                 nullptr,
                 0U),
             "AgX LUT descriptor")
-        || color_lut.edge_length != 65U
+        || color_lut.edge_length != 64U
         || color_lut.width != color_lut.edge_length * color_lut.edge_length
         || color_lut.height != color_lut.edge_length
         || color_lut.pixel_format != CYCLES_BRIDGE_PIXEL_FORMAT_RGBA32_FLOAT
@@ -497,7 +497,7 @@ int main(int argc, char** argv) {
         + static_cast<std::size_t>(32U) * color_lut.edge_length
         + 32U) * 4U;
     if (!std::isfinite(color_lut_pixels[neutral_midpoint])
-        || std::abs(color_lut_pixels[neutral_midpoint] - 0.961554F) > 0.0001F
+        || std::abs(color_lut_pixels[neutral_midpoint] - 0.970145F) > 0.0001F
         || std::abs(color_lut_pixels[neutral_midpoint + 3U] - 1.0F) > 0.0001F) {
         std::cerr << "unexpected AgX LUT midpoint "
                   << color_lut_pixels[neutral_midpoint] << '\n';

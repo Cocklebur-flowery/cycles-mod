@@ -20,7 +20,7 @@ namespace {
 
 namespace OCIO = OCIO_NAMESPACE;
 
-constexpr std::uint32_t kLutEdgeLength = 65;
+constexpr std::uint32_t kLutEdgeLength = 64;
 constexpr float kShaperLog2Min = -10.0F;
 constexpr float kShaperLog2Max = 16.0F;
 constexpr float kShaperEpsilon = 1.0F / 1024.0F;
