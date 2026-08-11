@@ -46,6 +46,15 @@ class CyclesEngine final {
 
     void query_capabilities(CyclesBridgeCapabilities& capabilities) const;
 
+    [[nodiscard]] std::string color_management_info() const;
+
+    bool query_color_lut(
+        std::uint32_t view_transform,
+        CyclesBridgeColorLutDescriptor& descriptor,
+        float* rgba,
+        std::uint64_t rgba_capacity,
+        std::string& error) const;
+
     void query_diagnostics(CyclesBridgeDiagnostics& diagnostics) const;
 
     bool render(

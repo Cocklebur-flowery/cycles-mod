@@ -37,6 +37,31 @@ enum CyclesBridgePixelFormat : std::uint32_t {
     CYCLES_BRIDGE_PIXEL_FORMAT_UNKNOWN = 0,
     CYCLES_BRIDGE_PIXEL_FORMAT_RGBA8_UNORM = 1,
     CYCLES_BRIDGE_PIXEL_FORMAT_RGBA16_FLOAT = 2,
+    CYCLES_BRIDGE_PIXEL_FORMAT_RGBA32_FLOAT = 3,
+};
+
+enum CyclesBridgeViewTransform : std::uint32_t {
+    CYCLES_BRIDGE_VIEW_TRANSFORM_STANDARD = 0,
+    CYCLES_BRIDGE_VIEW_TRANSFORM_RAW = 1,
+    CYCLES_BRIDGE_VIEW_TRANSFORM_AGX = 2,
+    CYCLES_BRIDGE_VIEW_TRANSFORM_KHRONOS_PBR_NEUTRAL = 3,
+    CYCLES_BRIDGE_VIEW_TRANSFORM_ACES_2 = 4,
+};
+
+enum CyclesBridgeColorConfigState : std::uint32_t {
+    CYCLES_BRIDGE_COLOR_CONFIG_UNAVAILABLE = 0,
+    CYCLES_BRIDGE_COLOR_CONFIG_READY = 1,
+    CYCLES_BRIDGE_COLOR_CONFIG_ERROR = 2,
+};
+
+enum CyclesBridgeColorLutFlags : std::uint32_t {
+    CYCLES_BRIDGE_COLOR_LUT_SCENE_LINEAR_INPUT = 1U << 0U,
+    CYCLES_BRIDGE_COLOR_LUT_DISPLAY_REFERRED_OUTPUT = 1U << 1U,
+    CYCLES_BRIDGE_COLOR_LUT_FLATTENED_RED_MAJOR = 1U << 2U,
+};
+
+enum CyclesBridgeColorLutInterpolation : std::uint32_t {
+    CYCLES_BRIDGE_COLOR_LUT_INTERPOLATION_TRILINEAR = 1,
 };
 
 enum CyclesBridgeFrameVariant : std::uint32_t {
@@ -268,7 +293,28 @@ struct CyclesBridgeCapabilities {
     std::uint32_t maximum_width;
     std::uint32_t maximum_height;
     std::uint32_t device_count;
-    std::uint32_t reserved[5];
+    std::uint32_t color_transform_mask;
+    std::uint32_t color_lut_edge_length;
+    std::uint32_t color_lut_pixel_format;
+    std::uint32_t color_config_state;
+    std::uint32_t reserved;
+};
+
+struct CyclesBridgeColorLutDescriptor {
+    std::uint32_t struct_size;
+    std::uint32_t struct_version;
+    std::uint32_t view_transform;
+    std::uint32_t edge_length;
+    std::uint32_t width;
+    std::uint32_t height;
+    std::uint32_t pixel_format;
+    std::uint32_t flags;
+    std::uint64_t pixel_byte_count;
+    float shaper_log2_min;
+    float shaper_log2_max;
+    float shaper_epsilon;
+    std::uint32_t interpolation;
+    std::uint32_t reserved[2];
 };
 
 struct CyclesBridgeDiagnostics {
@@ -404,6 +450,18 @@ CYCLES_BRIDGE_API std::uint32_t cycles_bridge_write_renderer_info(
 CYCLES_BRIDGE_API std::uint32_t cycles_bridge_query_capabilities(
     const CyclesBridgeRenderer* renderer,
     CyclesBridgeCapabilities* capabilities);
+
+CYCLES_BRIDGE_API std::uint32_t cycles_bridge_write_color_management_info(
+    const CyclesBridgeRenderer* renderer,
+    char* output,
+    std::uint32_t capacity);
+
+CYCLES_BRIDGE_API std::uint32_t cycles_bridge_query_color_lut(
+    const CyclesBridgeRenderer* renderer,
+    std::uint32_t view_transform,
+    CyclesBridgeColorLutDescriptor* descriptor,
+    float* rgba,
+    std::uint64_t rgba_capacity);
 
 CYCLES_BRIDGE_API std::uint32_t cycles_bridge_query_pass_descriptor(
     std::uint32_t pass_id,

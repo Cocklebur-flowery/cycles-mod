@@ -380,7 +380,7 @@ bool verify_progressive_sampling(
 int main(int argc, char** argv) {
     const bool require_optix = argc > 1 && std::strcmp(argv[1], "--require-optix") == 0;
     std::cerr << "[smoke] ABI check\n";
-    if (cycles_bridge_abi_version() != 15U) {
+    if (cycles_bridge_abi_version() != 16U) {
         std::cerr << "unexpected native ABI " << cycles_bridge_abi_version() << '\n';
         return 1;
     }
@@ -420,9 +420,87 @@ int main(int argc, char** argv) {
         || (capabilities.capability_flags & CYCLES_BRIDGE_CAPABILITY_SETTINGS) == 0U
         || (capabilities.capability_flags & CYCLES_BRIDGE_CAPABILITY_PASS_VIEWER) == 0U
         || capabilities.pass_mask != ((1ULL << CYCLES_BRIDGE_PASS_COUNT) - 1ULL)
+        || capabilities.color_config_state != CYCLES_BRIDGE_COLOR_CONFIG_READY
+        || capabilities.color_lut_edge_length != 65U
+        || capabilities.color_lut_pixel_format != CYCLES_BRIDGE_PIXEL_FORMAT_RGBA32_FLOAT
+        || (capabilities.color_transform_mask
+            & (1U << CYCLES_BRIDGE_VIEW_TRANSFORM_AGX)) == 0U
+        || (capabilities.color_transform_mask
+            & (1U << CYCLES_BRIDGE_VIEW_TRANSFORM_KHRONOS_PBR_NEUTRAL)) == 0U
+        || (capabilities.color_transform_mask
+            & (1U << CYCLES_BRIDGE_VIEW_TRANSFORM_ACES_2)) == 0U
         || !require_ok(
             cycles_bridge_apply_settings(renderer, &settings),
             "initial settings")) {
+        cycles_bridge_destroy_renderer(renderer);
+        return 1;
+    }
+
+    std::array<char, 1024> color_info{};
+    if (!require_ok(
+            cycles_bridge_write_color_management_info(
+                renderer,
+                color_info.data(),
+                static_cast<std::uint32_t>(color_info.size())),
+            "color management info")
+        || std::strstr(color_info.data(), "state=ready") == nullptr
+        || std::strstr(color_info.data(), "display=sRGB") == nullptr) {
+        std::cerr << "invalid color management info: " << color_info.data() << '\n';
+        cycles_bridge_destroy_renderer(renderer);
+        return 1;
+    }
+
+    CyclesBridgeColorLutDescriptor color_lut{};
+    color_lut.struct_size = sizeof(color_lut);
+    color_lut.struct_version = 1;
+    if (!require_ok(
+            cycles_bridge_query_color_lut(
+                renderer,
+                CYCLES_BRIDGE_VIEW_TRANSFORM_AGX,
+                &color_lut,
+                nullptr,
+                0U),
+            "AgX LUT descriptor")
+        || color_lut.edge_length != 65U
+        || color_lut.width != color_lut.edge_length * color_lut.edge_length
+        || color_lut.height != color_lut.edge_length
+        || color_lut.pixel_format != CYCLES_BRIDGE_PIXEL_FORMAT_RGBA32_FLOAT
+        || color_lut.pixel_byte_count
+            != static_cast<std::uint64_t>(color_lut.width) * color_lut.height
+                * 4U * sizeof(float)) {
+        cycles_bridge_destroy_renderer(renderer);
+        return 1;
+    }
+    std::vector<float> color_lut_pixels(
+        static_cast<std::size_t>(color_lut.pixel_byte_count / sizeof(float)));
+    color_lut.struct_size = sizeof(color_lut);
+    color_lut.struct_version = 1;
+    if (cycles_bridge_query_color_lut(
+            renderer,
+            CYCLES_BRIDGE_VIEW_TRANSFORM_AGX,
+            &color_lut,
+            color_lut_pixels.data(),
+            sizeof(float)) != CYCLES_BRIDGE_STATUS_BUFFER_TOO_SMALL
+        || !require_ok(
+            cycles_bridge_query_color_lut(
+                renderer,
+                CYCLES_BRIDGE_VIEW_TRANSFORM_AGX,
+                &color_lut,
+                color_lut_pixels.data(),
+                color_lut.pixel_byte_count),
+            "AgX LUT pixels")) {
+        cycles_bridge_destroy_renderer(renderer);
+        return 1;
+    }
+    const std::size_t neutral_midpoint = (
+        static_cast<std::size_t>(32U) * color_lut.width
+        + static_cast<std::size_t>(32U) * color_lut.edge_length
+        + 32U) * 4U;
+    if (!std::isfinite(color_lut_pixels[neutral_midpoint])
+        || std::abs(color_lut_pixels[neutral_midpoint] - 0.961554F) > 0.0001F
+        || std::abs(color_lut_pixels[neutral_midpoint + 3U] - 1.0F) > 0.0001F) {
+        std::cerr << "unexpected AgX LUT midpoint "
+                  << color_lut_pixels[neutral_midpoint] << '\n';
         cycles_bridge_destroy_renderer(renderer);
         return 1;
     }

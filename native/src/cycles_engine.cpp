@@ -1,5 +1,7 @@
 #include "cycles_engine.h"
 
+#include "color_management.h"
+
 #include <Windows.h>
 
 #include <algorithm>
@@ -1512,6 +1514,7 @@ class CyclesEngine::Impl final {
  public:
     Impl() {
         initialize_cycles_runtime();
+        color_management_ = std::make_unique<ColorManagement>();
         devices_ = enumerate_devices();
         if (devices_.empty()) {
             throw std::runtime_error("Cycles reported no OptiX, CUDA, or CPU devices");
@@ -1826,6 +1829,10 @@ class CyclesEngine::Impl final {
         capabilities.maximum_width = kMaximumRenderWidth;
         capabilities.maximum_height = kMaximumRenderHeight;
         capabilities.device_count = static_cast<std::uint32_t>(devices_.size());
+        capabilities.color_transform_mask = color_management_->transform_mask();
+        capabilities.color_lut_edge_length = color_management_->lut_edge_length();
+        capabilities.color_lut_pixel_format = CYCLES_BRIDGE_PIXEL_FORMAT_RGBA32_FLOAT;
+        capabilities.color_config_state = color_management_->state();
         for (const ccl::DeviceInfo& device : devices_) {
             capabilities.device_mask |= device_mask(device);
             if ((device.denoisers & ccl::DENOISER_OPTIX) != 0) {
@@ -1837,6 +1844,20 @@ class CyclesEngine::Impl final {
             }
 #endif
         }
+    }
+
+    [[nodiscard]] std::string color_management_info() const {
+        return color_management_->info();
+    }
+
+    bool query_color_lut(
+        std::uint32_t view_transform,
+        CyclesBridgeColorLutDescriptor& descriptor,
+        float* rgba,
+        std::uint64_t rgba_capacity,
+        std::string& error) const {
+        return color_management_->query_lut(
+            view_transform, descriptor, rgba, rgba_capacity, error);
     }
 
     void query_diagnostics(CyclesBridgeDiagnostics& diagnostics) const {
@@ -2586,6 +2607,7 @@ class CyclesEngine::Impl final {
     std::chrono::steady_clock::time_point sampling_measure_time_{};
 
     std::vector<ccl::DeviceInfo> devices_;
+    std::unique_ptr<ColorManagement> color_management_;
     FrameStore frames_;
     std::thread worker_;
 };
@@ -2639,6 +2661,20 @@ bool CyclesEngine::apply_settings(
 
 void CyclesEngine::query_capabilities(CyclesBridgeCapabilities& capabilities) const {
     impl_->query_capabilities(capabilities);
+}
+
+std::string CyclesEngine::color_management_info() const {
+    return impl_->color_management_info();
+}
+
+bool CyclesEngine::query_color_lut(
+    std::uint32_t view_transform,
+    CyclesBridgeColorLutDescriptor& descriptor,
+    float* rgba,
+    std::uint64_t rgba_capacity,
+    std::string& error) const {
+    return impl_->query_color_lut(
+        view_transform, descriptor, rgba, rgba_capacity, error);
 }
 
 void CyclesEngine::query_diagnostics(CyclesBridgeDiagnostics& diagnostics) const {

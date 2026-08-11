@@ -1,6 +1,6 @@
 # OCIO 色彩管理（P11）
 
-状态：P11a 已完成自动验证，P11b 待开始
+状态：P11a 已完成自动验证，P11b 原生数据契约已实现
 目标平台：Blender 5.2.0 / OpenColorIO 2.5 / Minecraft Vulkan sRGB SDR swapchain
 
 ## 1. 固定来源
@@ -26,7 +26,7 @@ Minecraft 26.2 的图形封装目前不开放 3D 纹理，因此 P11 的 GPU LUT
 ## 3. 子阶段
 
 - P11a：固定 Blender 5.2 OCIO 资产来源、稀疏获取和运行时部署（已完成）。
-- P11b：增加色彩处理器能力/错误诊断与可复现的 GPU LUT 数据契约。
+- P11b：增加色彩处理器能力/错误诊断与可复现的 GPU LUT 数据契约（原生 ABI 已实现，Java 诊断待接入）。
 - P11c：Vulkan presenter 绑定扁平 LUT，使 AgX 和 Khronos PBR Neutral 真正生效。
 - P11d：增加 ACES 2.0 SDR 查看变换，并明确 Rec.2020/PQ/HLG 与真 HDR swapchain 的边界。
 
@@ -43,3 +43,11 @@ Minecraft 26.2 的图形封装目前不开放 3D 纹理，因此 P11 的 GPU LUT
 - 构建目录必须存在 `color/ocio/config.ocio` 及其 LUT；不得依赖 Blender 安装目录。
 - P11b 起用 OCIO CPU processor 固定测试点作为基准；P11c 的 GPU 输出以这些点和游戏内高光梯度进行比对。
 - 每个代码子阶段执行 `runNativeSmoke`、`build`、diff 检查并独立提交。
+
+## 6. P11b 原生 LUT 契约
+
+- ABI v16 新增 `CyclesBridgeColorLutDescriptor` 与 `cycles_bridge_query_color_lut`。第一次只查询描述符，第二次由调用方提供缓冲区；缓冲区过小时明确返回 `BUFFER_TOO_SMALL`。
+- LUT 固定为 `65 x 65 x 65`、RGBA32F，二维尺寸为 `4225 x 65`。红色轴在每个蓝色切片内连续，绿色轴映射到二维 Y，shader 在 P11c 中执行三线性插值。
+- scene-linear 输入使用固定 log2 shaper：范围 `[-10, 16]`，epsilon 为 `2^-10`。这覆盖零到约 65536 的 HDR 通道值；负值在显示端钳制为零，不会改变 scene-linear 帧缓存。
+- 原生能力结构保留 64 字节大小，并把原保留槽定义为色彩变换掩码、LUT 边长、像素格式和配置状态。`cycles_bridge_write_color_management_info` 返回实际配置路径、状态、显示设备、边长和错误原因。
+- LUT 按视图惰性生成并缓存。AgX、Khronos PBR Neutral 与 ACES 2.0 都调用固定 Blender 配置中的官方 OCIO CPU processor，不使用手写近似曲线。

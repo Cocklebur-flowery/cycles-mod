@@ -16,9 +16,9 @@ struct CyclesBridgeRenderer {
 
 namespace {
 
-constexpr std::uint32_t kAbiVersion = 15;
+constexpr std::uint32_t kAbiVersion = 16;
 constexpr std::uint32_t kStructVersion = 1;
-constexpr char kBuildInfo[] = "cyclesrenderer-native/cycles-5.2;abi=15";
+constexpr char kBuildInfo[] = "cyclesrenderer-native/cycles-5.2;abi=16";
 
 static_assert(sizeof(CyclesBridgeCamera) == 80);
 static_assert(offsetof(CyclesBridgeCamera, frame_id) == 8);
@@ -37,6 +37,8 @@ static_assert(offsetof(CyclesBridgeFrameView, pixels) == 48);
 static_assert(sizeof(CyclesBridgeRenderSettings) == 208);
 static_assert(sizeof(CyclesBridgePassDescriptor) == 64);
 static_assert(sizeof(CyclesBridgeCapabilities) == 64);
+static_assert(sizeof(CyclesBridgeColorLutDescriptor) == 64);
+static_assert(offsetof(CyclesBridgeColorLutDescriptor, pixel_byte_count) == 32);
 static_assert(sizeof(CyclesBridgeDiagnostics) == 328);
 static_assert(sizeof(CyclesBridgeVertex) == 40);
 static_assert(offsetof(CyclesBridgeVertex, packed_rgba) == 32);
@@ -224,7 +226,7 @@ bool valid_settings(const CyclesBridgeRenderSettings& settings) {
         && settings.exposure_ev >= -20.0F && settings.exposure_ev <= 20.0F
         && std::isfinite(settings.gamma)
         && settings.gamma >= 0.1F && settings.gamma <= 5.0F
-        && settings.view_transform <= 3U
+        && settings.view_transform <= CYCLES_BRIDGE_VIEW_TRANSFORM_ACES_2
         && settings.active_pass < CYCLES_BRIDGE_PASS_COUNT
         && valid_bool(settings.debug_overlay);
 }
@@ -281,6 +283,53 @@ std::uint32_t cycles_bridge_query_capabilities(
     try {
         renderer->engine->query_capabilities(*capabilities);
         return CYCLES_BRIDGE_STATUS_OK;
+    } catch (...) {
+        return CYCLES_BRIDGE_STATUS_RENDER_ERROR;
+    }
+}
+
+std::uint32_t cycles_bridge_write_color_management_info(
+    const CyclesBridgeRenderer* renderer,
+    char* output,
+    std::uint32_t capacity) {
+    if (renderer == nullptr || renderer->engine == nullptr) {
+        return CYCLES_BRIDGE_STATUS_INVALID_ARGUMENT;
+    }
+    return write_string(renderer->engine->color_management_info(), output, capacity);
+}
+
+std::uint32_t cycles_bridge_query_color_lut(
+    const CyclesBridgeRenderer* renderer,
+    std::uint32_t view_transform,
+    CyclesBridgeColorLutDescriptor* descriptor,
+    float* rgba,
+    std::uint64_t rgba_capacity) {
+    if (renderer == nullptr || renderer->engine == nullptr || descriptor == nullptr
+        || descriptor->struct_size != sizeof(CyclesBridgeColorLutDescriptor)
+        || descriptor->struct_version != kStructVersion
+        || (rgba == nullptr && rgba_capacity != 0U)) {
+        return CYCLES_BRIDGE_STATUS_INVALID_ARGUMENT;
+    }
+    try {
+        CyclesBridgeColorLutDescriptor result{};
+        std::string error;
+        if (!renderer->engine->query_color_lut(
+                view_transform, result, nullptr, 0U, error)) {
+            return CYCLES_BRIDGE_STATUS_RENDER_ERROR;
+        }
+        *descriptor = result;
+        if (rgba == nullptr) {
+            return CYCLES_BRIDGE_STATUS_OK;
+        }
+        if (rgba_capacity < result.pixel_byte_count) {
+            return CYCLES_BRIDGE_STATUS_BUFFER_TOO_SMALL;
+        }
+        return renderer->engine->query_color_lut(
+                   view_transform, result, rgba, rgba_capacity, error)
+            ? CYCLES_BRIDGE_STATUS_OK
+            : CYCLES_BRIDGE_STATUS_RENDER_ERROR;
+    } catch (const std::bad_alloc&) {
+        return CYCLES_BRIDGE_STATUS_OUT_OF_MEMORY;
     } catch (...) {
         return CYCLES_BRIDGE_STATUS_RENDER_ERROR;
     }

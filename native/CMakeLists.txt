@@ -34,6 +34,7 @@ foreach(runtime_dll IN LISTS OIDN_RUNTIME_DLLS)
 endforeach()
 
 add_library(cyclesrenderer_native SHARED
+    src/color_management.cpp
     src/cycles_bridge.cpp
     src/cycles_engine.cpp
 )
