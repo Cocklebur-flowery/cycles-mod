@@ -56,6 +56,7 @@ public final class CyclesRendererMod {
             InputConstants.Type.KEYSYM,
             InputConstants.KEY_F10,
             KEY_CATEGORY);
+    private static final long FRAME_DELIVERY_INTERVAL_NANOS = 1_000_000_000L / 120L;
 
     private static boolean testFrameEnabled;
     private static boolean nativeBridgeReady;
@@ -66,6 +67,12 @@ public final class CyclesRendererMod {
     private static long lastBridgeCallMicros;
     private static long emaBridgeCallMicros;
     private static long maxBridgeCallMicros;
+    private static long cameraCallCount;
+    private static long lastCameraCallMicros;
+    private static long emaCameraCallMicros;
+    private static long maxCameraCallMicros;
+    private static long skippedFrameDeliveryCount;
+    private static long lastFrameDeliveryNanos;
     private static volatile long resourceRevision;
     private static ModContainer modContainer;
     private static final SectionSceneManager SCENE_MANAGER = new SectionSceneManager();
@@ -130,6 +137,12 @@ public final class CyclesRendererMod {
             lastBridgeCallMicros = 0L;
             emaBridgeCallMicros = 0L;
             maxBridgeCallMicros = 0L;
+            cameraCallCount = 0L;
+            lastCameraCallMicros = 0L;
+            emaCameraCallMicros = 0L;
+            maxCameraCallMicros = 0L;
+            skippedFrameDeliveryCount = 0L;
+            lastFrameDeliveryNanos = 0L;
             SCENE_MANAGER.reset();
             FRAME_PRESENTER.reset();
             SectionGeometryCollector.setEnabled(true);
@@ -216,22 +229,37 @@ public final class CyclesRendererMod {
                     level,
                     camera.pos,
                     resourceRevision);
-            if (update.reset()) {
-                FRAME_PRESENTER.reset();
-            }
             long frameId = nativeFrameId++;
-            long bridgeStart = System.nanoTime();
-            NativeBridge.RenderedFrame frame = NativeBridge.renderFrame(
+            NativeBridge.CameraInput cameraInput = createCameraInput(camera);
+            long cameraStart = System.nanoTime();
+            NativeBridge.updateCamera(
                     mainTarget.width,
                     mainTarget.height,
                     frameId,
-                    createCameraInput(camera));
-            recordBridgeCall(System.nanoTime() - bridgeStart);
-            FRAME_PRESENTER.update(frame);
-            FRAME_PRESENTER.present(mainTarget);
+                    cameraInput);
+            recordCameraCall(System.nanoTime() - cameraStart);
 
             long now = System.nanoTime();
-            if ((update.reset() || update.committed())
+            NativeBridge.RenderedFrame frame = null;
+            if (!FRAME_PRESENTER.hasFrame()
+                    || now - lastFrameDeliveryNanos >= FRAME_DELIVERY_INTERVAL_NANOS) {
+                long bridgeStart = System.nanoTime();
+                frame = NativeBridge.renderFrame(
+                        mainTarget.width,
+                        mainTarget.height,
+                        frameId,
+                        cameraInput);
+                recordBridgeCall(System.nanoTime() - bridgeStart);
+                lastFrameDeliveryNanos = System.nanoTime();
+                FRAME_PRESENTER.update(frame);
+            } else {
+                skippedFrameDeliveryCount++;
+            }
+            FRAME_PRESENTER.present(mainTarget);
+
+            now = System.nanoTime();
+            if (frame != null
+                    && (update.reset() || update.committed())
                     && now - lastStatsLogNanos >= 2_000_000_000L) {
                 lastStatsLogNanos = now;
                 LOGGER.info(
@@ -285,6 +313,16 @@ public final class CyclesRendererMod {
                 : (emaBridgeCallMicros * 7L + micros) / 8L;
         maxBridgeCallMicros = Math.max(maxBridgeCallMicros, micros);
         bridgeCallCount++;
+    }
+
+    private static void recordCameraCall(long elapsedNanos) {
+        long micros = Math.max(0L, (elapsedNanos + 999L) / 1_000L);
+        lastCameraCallMicros = micros;
+        emaCameraCallMicros = emaCameraCallMicros == 0L
+                ? micros
+                : (emaCameraCallMicros * 7L + micros) / 8L;
+        maxCameraCallMicros = Math.max(maxCameraCallMicros, micros);
+        cameraCallCount++;
     }
 
     private static void disableExperimentalRenderer() {
@@ -401,10 +439,19 @@ public final class CyclesRendererMod {
             y += 10;
             graphics.text(
                     minecraft.font,
-                    "bridge us=" + lastBridgeCallMicros
+                    "camera queue us=" + lastCameraCallMicros
+                            + "/" + emaCameraCallMicros
+                            + "/" + maxCameraCallMicros
+                            + " calls=" + cameraCallCount,
+                    6, y, 0xFFE0E0E0);
+            y += 10;
+            graphics.text(
+                    minecraft.font,
+                    "frame pull us=" + lastBridgeCallMicros
                             + "/" + emaBridgeCallMicros
                             + "/" + maxBridgeCallMicros
-                            + " calls=" + bridgeCallCount,
+                            + " polls=" + bridgeCallCount
+                            + " skipped=" + skippedFrameDeliveryCount,
                     6, y, 0xFFE0E0E0);
             y += 10;
             graphics.text(

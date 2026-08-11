@@ -91,7 +91,7 @@ F10 叠加层采用“当前值 + 最近窗口统计”，不把目标值伪装�
 | P1 | `feat: report actual render sampling` | ABI v7、实际/目标 sample、sample state/rate、F10 | 已完成（本提交） |
 | P2 | `perf: add frame pipeline telemetry` | Native convert/copy、Java/Vulkan upload、帧计数 | 已完成（本提交） |
 | P3 | `perf: trace section update latency` | 捕获/upsert/commit/队列与卡顿热点 | 已完成（Java `89d5c0d`，Native 本提交） |
-| P4 | `perf: throttle display frame delivery` | 上传限频、latest-only、保留上一有效帧 | 待开始 |
+| P4 | `perf: throttle display frame delivery` | 上传限频、latest-only、保留上一有效帧 | 已完成（本提交） |
 | P5 | `perf: adopt cycles half-float display driver` | Cycles DisplayDriver、RGBA16F、移除 CPU RGBA8/pow | 待开始 |
 | P6 | `perf: add acquired frame ring buffers` | Native 双/三缓冲、FFM acquire/release | 待开始 |
 | P7 | `feat: present scene-linear rgba16f frames` | Vulkan RGBA16F 与最小显示 Shader | 待开始 |
@@ -151,3 +151,10 @@ P1 至 P4 完成后进行一次 1080p 游戏人工里程碑：观察实际 sampl
 - ABI v9 追加 Native `commit_scene` 整 Section 映射快照复制、Cycles `apply_scene_delta` 和 `session.reset/start` 三段计时与计数。
 - `commit_scene` 在调用线程复制常驻 Section 映射，理论成本会随视距和 Section 数增长；现在可将 Java FFI commit 与 Native commit 两行对照，判断它是否就是 0.1 秒主线程热点。
 - scene delta 和 render start 在 Cycles worker 上执行，可能通过 CPU 竞争造成帧时间尖峰，但不会被误记为主线程 FFI 时间。
+
+### P4：相机与成品帧交付解耦
+
+- ABI v10 新增轻量 `update_camera`；Minecraft 仍在每个世界渲染帧投递最新相机，因此 120 Hz 以上输入不会被成品帧上传频率截断。
+- RGBA8 成品帧拉取与 Vulkan 上传临时限制为最高 120 Hz，并始终读取最新 generation；超过交付预算的中间帧不形成复制队列。
+- Section reset/commit 不再销毁当前展示纹理。新 Cycles 帧准备期间继续复用上一有效纹理，避免场景更新主动制造黑帧。
+- F10 分别报告相机队列和成品帧拉取的 last/EMA/max、调用/跳过次数。120 Hz 是替换 RGBA8 临时路径前的过渡常量，后续由渐进采样策略配置化。

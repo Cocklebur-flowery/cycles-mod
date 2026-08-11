@@ -235,7 +235,7 @@ bool wait_for_actual_sample(
 int main(int argc, char** argv) {
     const bool require_optix = argc > 1 && std::strcmp(argv[1], "--require-optix") == 0;
     std::cerr << "[smoke] ABI check\n";
-    if (cycles_bridge_abi_version() != 9U) {
+    if (cycles_bridge_abi_version() != 10U) {
         std::cerr << "unexpected native ABI " << cycles_bridge_abi_version() << '\n';
         return 1;
     }
@@ -328,6 +328,13 @@ int main(int argc, char** argv) {
     camera.rotation_w = 1.0F;
     camera.vertical_fov_radians = 1.04719755F;
     camera.depth_far = 100.0F;
+    camera.frame_id++;
+    if (!require_ok(
+            cycles_bridge_update_camera(renderer, &camera),
+            "camera update")) {
+        cycles_bridge_destroy_renderer(renderer);
+        return 1;
+    }
 
     std::vector<std::uint8_t> pixels(
         static_cast<std::size_t>(kWidth) * kHeight * 4U);

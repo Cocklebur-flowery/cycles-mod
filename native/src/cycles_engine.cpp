@@ -1522,6 +1522,10 @@ class CyclesEngine::Impl final {
         return frames_.copy_native(rgba, rgba_capacity, frame.generation, frame, error);
     }
 
+    bool update_camera(const CyclesBridgeCamera& camera, std::string& error) {
+        return queue_camera(camera, error);
+    }
+
     [[nodiscard]] std::string info() const {
         ccl::DeviceInfo selected;
         std::string state;
@@ -2107,6 +2111,12 @@ bool CyclesEngine::render_frame(
     std::uint64_t rgba_capacity,
     std::string& error) {
     return impl_->render_frame(camera, frame, rgba, rgba_capacity, error);
+}
+
+bool CyclesEngine::update_camera(
+    const CyclesBridgeCamera& camera,
+    std::string& error) {
+    return impl_->update_camera(camera, error);
 }
 
 std::string CyclesEngine::renderer_info() const {

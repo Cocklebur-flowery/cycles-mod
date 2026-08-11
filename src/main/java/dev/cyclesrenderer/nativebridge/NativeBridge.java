@@ -23,7 +23,7 @@ import static java.lang.foreign.ValueLayout.JAVA_INT;
 import static java.lang.foreign.ValueLayout.JAVA_LONG;
 
 public final class NativeBridge {
-    public static final int ABI_VERSION = 9;
+    public static final int ABI_VERSION = 10;
 
     private static final String LIBRARY_PATH_PROPERTY = "cyclesrenderer.nativeLibrary";
     private static final int STRUCT_VERSION = 1;
@@ -314,6 +314,20 @@ public final class NativeBridge {
         }
     }
 
+    public static void updateCamera(
+            int width,
+            int height,
+            long frameId,
+            CameraInput cameraInput) {
+        BridgeState state = requireState();
+        try {
+            state.updateCamera(width, height, frameId, cameraInput);
+        } catch (Throwable error) {
+            rethrowFatalError(error);
+            throw new IllegalStateException("native camera update failed: " + describe(error), error);
+        }
+    }
+
     public static String rendererInfo() {
         BridgeState state = requireState();
         try {
@@ -436,6 +450,7 @@ public final class NativeBridge {
         private final MethodHandle upsertSection;
         private final MethodHandle removeSection;
         private final MethodHandle commitScene;
+        private final MethodHandle updateCamera;
         private final MethodHandle renderFrame;
         private final MemorySegment renderer;
         private final MemorySegment cameraSegment;
@@ -462,6 +477,7 @@ public final class NativeBridge {
                 MethodHandle upsertSection,
                 MethodHandle removeSection,
                 MethodHandle commitScene,
+                MethodHandle updateCamera,
                 MethodHandle renderFrame,
                 MemorySegment renderer,
                 String buildInfo) {
@@ -476,6 +492,7 @@ public final class NativeBridge {
             this.upsertSection = upsertSection;
             this.removeSection = removeSection;
             this.commitScene = commitScene;
+            this.updateCamera = updateCamera;
             this.renderFrame = renderFrame;
             this.renderer = renderer;
             this.cameraSegment = libraryArena.allocate(CAMERA_LAYOUT);
@@ -532,6 +549,9 @@ public final class NativeBridge {
                         FunctionDescriptor.of(JAVA_INT, ADDRESS, JAVA_LONG));
                 MethodHandle commitScene = downcall(linker, symbols,
                         "cycles_bridge_commit_scene", FunctionDescriptor.of(JAVA_INT, ADDRESS));
+                MethodHandle updateCamera = downcall(linker, symbols,
+                        "cycles_bridge_update_camera",
+                        FunctionDescriptor.of(JAVA_INT, ADDRESS, ADDRESS));
                 MethodHandle renderFrame = downcall(linker, symbols,
                         "cycles_bridge_render_frame",
                         FunctionDescriptor.of(
@@ -569,6 +589,7 @@ public final class NativeBridge {
                         upsertSection,
                         removeSection,
                         commitScene,
+                        updateCamera,
                         renderFrame,
                         renderer,
                         buildInfo);
@@ -820,6 +841,19 @@ public final class NativeBridge {
                     generation,
                     sampleCount,
                     pixels);
+        }
+
+        private void updateCamera(
+                int width,
+                int height,
+                long frameId,
+                CameraInput input) throws Throwable {
+            if (width <= 0 || height <= 0) {
+                throw new IllegalArgumentException("invalid viewport " + width + "x" + height);
+            }
+            writeCamera(cameraSegment, width, height, frameId, input);
+            int status = (int) updateCamera.invokeExact(renderer, cameraSegment);
+            checkRendererStatus(status, "renderer camera update");
         }
 
         private ByteBuffer fillTestFrame(int width, int height, long frameId) throws Throwable {

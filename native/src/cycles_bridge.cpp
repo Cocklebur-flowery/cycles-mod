@@ -16,9 +16,9 @@ struct CyclesBridgeRenderer {
 
 namespace {
 
-constexpr std::uint32_t kAbiVersion = 9;
+constexpr std::uint32_t kAbiVersion = 10;
 constexpr std::uint32_t kStructVersion = 1;
-constexpr char kBuildInfo[] = "cyclesrenderer-native/cycles-5.2;abi=9";
+constexpr char kBuildInfo[] = "cyclesrenderer-native/cycles-5.2;abi=10";
 
 static_assert(sizeof(CyclesBridgeCamera) == 80);
 static_assert(offsetof(CyclesBridgeCamera, frame_id) == 8);
@@ -469,6 +469,26 @@ std::uint32_t cycles_bridge_render_frame(
     try {
         std::string error;
         return renderer->engine->render_frame(*camera, *frame, rgba, rgba_capacity, error)
+            ? CYCLES_BRIDGE_STATUS_OK
+            : CYCLES_BRIDGE_STATUS_RENDER_ERROR;
+    } catch (const std::bad_alloc&) {
+        return CYCLES_BRIDGE_STATUS_OUT_OF_MEMORY;
+    } catch (...) {
+        return CYCLES_BRIDGE_STATUS_RENDER_ERROR;
+    }
+}
+
+std::uint32_t cycles_bridge_update_camera(
+    CyclesBridgeRenderer* renderer,
+    const CyclesBridgeCamera* camera) {
+    if (renderer == nullptr || renderer->engine == nullptr || camera == nullptr
+        || camera->struct_size < sizeof(CyclesBridgeCamera)
+        || camera->struct_version != kStructVersion) {
+        return CYCLES_BRIDGE_STATUS_INVALID_ARGUMENT;
+    }
+    try {
+        std::string error;
+        return renderer->engine->update_camera(*camera, error)
             ? CYCLES_BRIDGE_STATUS_OK
             : CYCLES_BRIDGE_STATUS_RENDER_ERROR;
     } catch (const std::bad_alloc&) {

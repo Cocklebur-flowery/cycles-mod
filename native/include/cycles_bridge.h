@@ -363,6 +363,10 @@ CYCLES_BRIDGE_API std::uint32_t cycles_bridge_render(
     std::uint8_t* rgba,
     std::uint64_t rgba_capacity);
 
+CYCLES_BRIDGE_API std::uint32_t cycles_bridge_update_camera(
+    CyclesBridgeRenderer* renderer,
+    const CyclesBridgeCamera* camera);
+
 CYCLES_BRIDGE_API std::uint32_t cycles_bridge_render_frame(
     CyclesBridgeRenderer* renderer,
     const CyclesBridgeCamera* camera,

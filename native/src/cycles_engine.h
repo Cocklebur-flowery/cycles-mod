@@ -54,6 +54,10 @@ class CyclesEngine final {
         std::uint64_t rgba_capacity,
         std::string& error);
 
+    bool update_camera(
+        const CyclesBridgeCamera& camera,
+        std::string& error);
+
     bool render_frame(
         const CyclesBridgeCamera& camera,
         CyclesBridgeFrame& frame,
