@@ -38,6 +38,10 @@ base {
 def nativeSourceDirectory = layout.projectDirectory.dir('native')
 def nativeBuildDirectory = layout.buildDirectory.dir('native').get().asFile
 def nativeLibraryFile = new File(nativeBuildDirectory, 'bin/cyclesrenderer_native.dll')
+def nativeSmokeFile = new File(nativeBuildDirectory, 'bin/cyclesrenderer_smoke.exe')
+def cyclesSourceDirectory = layout.projectDirectory.dir('.deps/cycles').asFile
+def cyclesBuildDirectory = layout.projectDirectory.dir('.deps/cycles-build').asFile
+def cyclesInstallDirectory = layout.projectDirectory.dir('.deps/cycles-install').asFile
 def clientFmlConfigFile = layout.projectDirectory.file('run/config/fml.toml').asFile
 
 // Mojang ships Java 25 to end users in 26.2, so mods should target Java 25.
@@ -150,7 +154,10 @@ tasks.register('configureNative', Exec) {
             '-S', nativeSourceDirectory.asFile.absolutePath,
             '-B', nativeBuildDirectory.absolutePath,
             '-G', 'Visual Studio 17 2022',
-            '-A', 'x64'
+            '-A', 'x64',
+            "-DCYCLES_SOURCE_DIR=${cyclesSourceDirectory.absolutePath}",
+            "-DCYCLES_BUILD_DIR=${cyclesBuildDirectory.absolutePath}",
+            "-DCYCLES_INSTALL_DIR=${cyclesInstallDirectory.absolutePath}"
 }
 
 tasks.register('buildNative', Exec) {
@@ -158,11 +165,18 @@ tasks.register('buildNative', Exec) {
     description = 'Builds the Windows x64 native renderer bridge.'
     dependsOn 'configureNative'
     inputs.dir(nativeSourceDirectory)
-    outputs.file(nativeLibraryFile)
+    outputs.files(nativeLibraryFile, nativeSmokeFile)
     commandLine 'cmake',
             '--build', nativeBuildDirectory.absolutePath,
             '--config', 'Release',
-            '--target', 'cyclesrenderer_native'
+            '--target', 'cyclesrenderer_smoke'
+}
+
+tasks.register('runNativeSmoke', Exec) {
+    group = 'verification'
+    description = 'Renders a small voxel scene through the Cycles native bridge.'
+    dependsOn 'buildNative'
+    commandLine nativeSmokeFile.absolutePath
 }
 
 tasks.register('prepareVulkanClientConfig') {

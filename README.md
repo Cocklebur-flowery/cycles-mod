@@ -1,25 +1,130 @@
+# Cycles Renderer Prototype
 
-Installation information
-=======
+这是一个面向 Minecraft 26.2 / NeoForge 26.2 的实验性客户端 MOD。Minecraft 本身使用 Vulkan 后端；MOD 将世界快照交给 Blender Cycles 渲染，并把 Cycles 输出的 RGBA 帧上传到 Minecraft 的 Vulkan 主渲染目标。
 
-This template repository can be directly cloned to get you started with a new
-mod. Simply create a new repository cloned from this one, by following the
-instructions provided by [GitHub](https://docs.github.com/en/repositories/creating-and-managing-repositories/creating-a-repository-from-a-template).
+当前实现优先选择 OptiX，失败后依次回退到 CUDA 和 CPU。F8 用于启用或关闭实验渲染器，任何 native 错误都会关闭实验路径并恢复原版世界渲染。
 
-Once you have your clone, simply open the repository in the IDE of your choice. The usual recommendation for an IDE is either IntelliJ IDEA or Eclipse.
+## 当前阶段
 
-If at any point you are missing libraries in your IDE, or you've run into problems you can
-run `gradlew --refresh-dependencies` to refresh the local cache. `gradlew clean` to reset everything 
-{this does not affect your code} and then start the process again.
+- Cycles 5.2 已通过 C ABI v3 接入 Java Foreign Function & Memory API。
+- 世界快照为相机周围 `64 × 32 × 64` 个方块。
+- 实心方块转换成经过相邻面剔除的三角网格。
+- 方块 MapColor 转换为 Cycles 漫反射材质。
+- Cycles 在自己的会话线程中渐进渲染，Minecraft 渲染线程只提交相机并读取最新完成帧。
+- 内部渲染分辨率上限为 `480 × 270`，当前每次累计 8 个样本，再放大到窗口尺寸。
+- Minecraft 的 Vulkan swapchain、纹理和命令编码器仍由 Minecraft 管理；Cycles 不使用 Vulkan。
 
-Mapping Names:
-============
-By default, the MDK is configured to use the official mapping names from Mojang for methods and fields 
-in the Minecraft codebase. These names are covered by a specific license. All modders should be aware of this
-license. For the latest license text, refer to the mapping file itself, or the reference copy here:
-https://github.com/NeoForged/NeoForm/blob/main/Mojang.md
+暂未实现方块纹理、透明方块、实体、天空系统、动态光源、区块增量更新、降噪和跨平台打包。
 
-Additional Resources: 
-==========
-Community Documentation: https://docs.neoforged.net/  
-NeoForged Discord: https://discord.neoforged.net/
+## 开发环境
+
+固定版本和工具：
+
+- Minecraft `26.2`
+- NeoForge `26.2.0.58`
+- Gradle `9.2.1`
+- Java toolchain `25`（`run-client.cmd` 可使用 JDK 17 启动 Gradle）
+- Visual Studio 2022 C++ x64 工具链
+- CMake 3.25 或更高版本
+- Cycles `v5.2.0`，提交 `3b97e190c5ff1a2ed2160d879ad5bf95bea7b8ba`
+- Blender Windows libraries，提交 `60d6e96b917568278d400a4024c98da0fb777338`
+- CUDA 13.3、OptiX 9.1
+
+`.deps/`、`.tools/`、Gradle 缓存、构建输出和游戏运行目录均不进入 Git。
+
+## 首次准备 Cycles
+
+在 PowerShell 中执行：
+
+```powershell
+cd E:\MCservers\MClife_client\cycles-mod
+powershell -ExecutionPolicy Bypass -File .\scripts\setup-cycles.ps1
+```
+
+脚本会校验固定提交，只下载构建所需的 Windows LFS 目录，并生成：
+
+```text
+.deps/cycles/          Cycles 源码与 Windows 预编译依赖
+.deps/cycles-build/    Cycles Release 静态库
+.deps/cycles-install/  运行时 DLL、OptiX/CUDA 内核和 cycles.exe
+```
+
+依赖已经存在时不需要重复执行。`buildNative` 只验证并使用这些产物，不会每次重新下载 36 GB 仓库。
+
+## 常用命令
+
+项目提供本地 Gradle 启动脚本：
+
+```bat
+run-client.cmd setup
+run-client.cmd buildNative
+run-client.cmd runNativeSmoke
+run-client.cmd runClient
+```
+
+也可以直接使用已经可用的 Gradle：
+
+```powershell
+.\gradlew.bat buildNative
+.\gradlew.bat runNativeSmoke
+.\gradlew.bat runClient
+```
+
+`buildNative` 会构建 native DLL 和冒烟程序，并把 `.deps/cycles-install` 中的运行时 DLL 与 `lib/kernel_*.zst` 自动部署到 `build/native/bin/`。不需要手工复制 JAR、DLL 或 GPU 内核。
+
+`runNativeSmoke` 会构造一个小型彩色体素场景，等待真实 Cycles 帧并输出所选后端、设备、分辨率和帧校验和。
+
+## 运行时数据流
+
+```text
+ClientVoxelSnapshot
+  -> NativeBridge（ABI v3）
+  -> CyclesEngine 请求队列
+  -> 体素可见面网格 + 漫反射材质
+  -> Cycles Session（OptiX -> CUDA -> CPU）
+  -> OutputDriver 最新渐进帧
+  -> RGBA8 最近邻放大
+  -> Minecraft Vulkan writeToTexture
+```
+
+场景仅在相机进入新的区块/高度 Section 时重新捕获。相机位置、朝向、FOV 或输出尺寸变化时会重置 Cycles 累计；静止时继续积累当前帧。
+
+## 代码入口
+
+- `CyclesRendererMod.java`：F8 生命周期、场景刷新和 Vulkan 上传。
+- `ClientVoxelSnapshot.java`：从客户端世界采集固定尺寸体素颜色。
+- `NativeBridge.java`：Java 25 FFM 布局、native 生命周期和 ABI 校验。
+- `native/include/cycles_bridge.h`：稳定 C ABI；修改结构、状态码或函数时必须同步升级 Java ABI。
+- `native/src/cycles_bridge.cpp`：C ABI 参数校验和错误边界。
+- `native/src/cycles_engine.cpp`：设备选择、后台 Session、网格/材质、相机和帧交换。
+- `native/tests/cycles_bridge_smoke.cpp`：不启动 Minecraft 的 native 端到端测试。
+- `scripts/setup-cycles.ps1`：固定版本的依赖获取与 Cycles 构建。
+
+## ABI 与运行时约束
+
+ABI v3 保留了 v2 的 `CyclesBridgeCamera`（80 字节）和 `CyclesBridgeVoxelScene`（40 字节）布局，并新增 renderer info 查询。Java 与 DLL 的 ABI 版本不一致时会在启用前拒绝运行。
+
+Cycles 的 GPU 内核通过 `path_init()` 相对于 `cyclesrenderer_native.dll` 查找。因此以下布局是运行时契约：
+
+```text
+build/native/bin/
+  cyclesrenderer_native.dll
+  OpenImageIO.dll 等运行时 DLL
+  lib/
+    kernel_optix.ptx.zst
+    kernel_optix_mnee.ptx.zst
+    kernel_optix_shader_raytrace.ptx.zst
+    kernel_sm_120.cubin.zst
+```
+
+不要把 `.deps/cycles-build/lib/Release` 当作运行时目录；其中是链接阶段使用的静态库。
+
+## 修改后的验证顺序
+
+1. `run-client.cmd buildNative`
+2. `run-client.cmd runNativeSmoke`
+3. `run-client.cmd build`
+4. `run-client.cmd runClient`
+5. 进入世界按 F8，确认日志显示 `backend=OPTIX`、画面方向正确、移动时不阻塞，并确认再次按 F8 可恢复原版。
+
+每个完成的代码阶段单独创建一次本地 Git 提交。不要提交 `.deps/`、`build/`、`run/` 或 `.tools/`。

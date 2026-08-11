@@ -22,7 +22,7 @@ import static java.lang.foreign.ValueLayout.JAVA_INT;
 import static java.lang.foreign.ValueLayout.JAVA_LONG;
 
 public final class NativeBridge {
-    public static final int ABI_VERSION = 2;
+    public static final int ABI_VERSION = 3;
 
     private static final String LIBRARY_PATH_PROPERTY = "cyclesrenderer.nativeLibrary";
     private static final int STRUCT_VERSION = 1;
@@ -31,6 +31,7 @@ public final class NativeBridge {
     private static final int TEST_HEIGHT = 16;
     private static final long TEST_FRAME_ID = 7L;
     private static final int BUILD_INFO_BYTES = 128;
+    private static final int RENDERER_INFO_BYTES = 512;
 
     private static final MemoryLayout CAMERA_LAYOUT = MemoryLayout.structLayout(
             JAVA_INT.withName("struct_size"),
@@ -92,7 +93,8 @@ public final class NativeBridge {
             long checksum = verifyTestFrame(testFrame);
             bridgeState = loadedState;
             return ProbeResult.success(
-                    loadedState.buildInfo() + ", verified " + TEST_WIDTH + "x" + TEST_HEIGHT
+                    loadedState.buildInfo() + ", " + loadedState.rendererInfo()
+                            + ", verified " + TEST_WIDTH + "x" + TEST_HEIGHT
                             + " RGBA frame, checksum=" + Long.toUnsignedString(checksum));
         } catch (Throwable error) {
             if (loadedState != null) {
@@ -188,6 +190,7 @@ public final class NativeBridge {
         private final Arena libraryArena;
         private final MethodHandle fillTestFrame;
         private final MethodHandle destroyRenderer;
+        private final MethodHandle writeRendererInfo;
         private final MethodHandle uploadVoxelScene;
         private final MethodHandle render;
         private final MemorySegment renderer;
@@ -204,6 +207,7 @@ public final class NativeBridge {
                 Arena libraryArena,
                 MethodHandle fillTestFrame,
                 MethodHandle destroyRenderer,
+                MethodHandle writeRendererInfo,
                 MethodHandle uploadVoxelScene,
                 MethodHandle render,
                 MemorySegment renderer,
@@ -211,6 +215,7 @@ public final class NativeBridge {
             this.libraryArena = libraryArena;
             this.fillTestFrame = fillTestFrame;
             this.destroyRenderer = destroyRenderer;
+            this.writeRendererInfo = writeRendererInfo;
             this.uploadVoxelScene = uploadVoxelScene;
             this.render = render;
             this.renderer = renderer;
@@ -240,6 +245,9 @@ public final class NativeBridge {
                 destroyRenderer = linker.downcallHandle(
                         symbols.findOrThrow("cycles_bridge_destroy_renderer"),
                         FunctionDescriptor.ofVoid(ADDRESS));
+                MethodHandle writeRendererInfo = linker.downcallHandle(
+                        symbols.findOrThrow("cycles_bridge_write_renderer_info"),
+                        FunctionDescriptor.of(JAVA_INT, ADDRESS, ADDRESS, JAVA_INT));
                 MethodHandle uploadVoxelScene = linker.downcallHandle(
                         symbols.findOrThrow("cycles_bridge_upload_voxel_scene"),
                         FunctionDescriptor.of(JAVA_INT, ADDRESS, ADDRESS, ADDRESS, JAVA_LONG));
@@ -274,6 +282,7 @@ public final class NativeBridge {
                         libraryArena,
                         fillTestFrame,
                         destroyRenderer,
+                        writeRendererInfo,
                         uploadVoxelScene,
                         render,
                         renderer,
@@ -322,7 +331,7 @@ public final class NativeBridge {
                         sceneSegment,
                         voxelSegment,
                         (long) snapshot.voxelCount());
-                checkStatus(uploadStatus, "voxel scene upload");
+                checkRendererStatus(uploadStatus, "voxel scene upload");
             }
         }
 
@@ -346,7 +355,7 @@ public final class NativeBridge {
                     cameraSegment,
                     output,
                     (long) frameBytes);
-            checkStatus(status, "renderer frame call");
+            checkRendererStatus(status, "renderer frame call");
             framePixels.clear();
             return framePixels;
         }
@@ -399,6 +408,23 @@ public final class NativeBridge {
 
         private String buildInfo() {
             return buildInfo;
+        }
+
+        private String rendererInfo() throws Throwable {
+            try (Arena infoArena = Arena.ofConfined()) {
+                MemorySegment buffer = infoArena.allocate(RENDERER_INFO_BYTES);
+                int status = (int) writeRendererInfo.invokeExact(
+                        renderer, buffer, RENDERER_INFO_BYTES);
+                checkStatus(status, "renderer info call");
+                return buffer.getString(0, StandardCharsets.UTF_8);
+            }
+        }
+
+        private void checkRendererStatus(int status, String operation) throws Throwable {
+            if (status != STATUS_OK) {
+                throw new IllegalStateException(
+                        operation + " returned status " + status + "; " + rendererInfo());
+            }
         }
 
         @Override

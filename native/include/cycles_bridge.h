@@ -20,6 +20,7 @@ enum CyclesBridgeStatus : std::uint32_t {
     CYCLES_BRIDGE_STATUS_BUFFER_TOO_SMALL = 2,
     CYCLES_BRIDGE_STATUS_OUT_OF_MEMORY = 3,
     CYCLES_BRIDGE_STATUS_UNINITIALIZED = 4,
+    CYCLES_BRIDGE_STATUS_RENDER_ERROR = 5,
 };
 
 struct CyclesBridgeCamera {
@@ -71,6 +72,11 @@ CYCLES_BRIDGE_API std::uint32_t cycles_bridge_create_renderer(
 
 CYCLES_BRIDGE_API void cycles_bridge_destroy_renderer(
     CyclesBridgeRenderer* renderer);
+
+CYCLES_BRIDGE_API std::uint32_t cycles_bridge_write_renderer_info(
+    const CyclesBridgeRenderer* renderer,
+    char* output,
+    std::uint32_t capacity);
 
 CYCLES_BRIDGE_API std::uint32_t cycles_bridge_upload_voxel_scene(
     CyclesBridgeRenderer* renderer,
