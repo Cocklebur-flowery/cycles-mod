@@ -305,6 +305,12 @@ bool wait_for_denoised_still(
         info = renderer_info(renderer);
         if (diagnostics.sampling_state == CYCLES_BRIDGE_SAMPLING_STILL
             && diagnostics.effective_denoiser == 1U
+            && diagnostics.selected_denoiser == 1U
+            && diagnostics.denoiser_scheduled != 0U
+            && diagnostics.effective_denoiser_start_sample == 1U
+            && diagnostics.denoiser_schedule_reason
+                == CYCLES_BRIDGE_DENOISER_SCHEDULE_STILL
+            && diagnostics.denoiser_schedule_run_count > 0U
             && diagnostics.active_frame_variant
                 == CYCLES_BRIDGE_FRAME_VARIANT_DENOISED
             && (frame.flags & CYCLES_BRIDGE_FRAME_UPDATED) != 0U) {
@@ -315,6 +321,12 @@ bool wait_for_denoised_still(
     std::cerr << "OptiX denoiser never produced a Still frame: " << info
               << ";state=" << diagnostics.sampling_state
               << ";effective=" << diagnostics.effective_denoiser
+              << ";selected=" << diagnostics.selected_denoiser
+              << ";scheduled=" << diagnostics.denoiser_scheduled
+              << ";start=" << diagnostics.effective_denoiser_start_sample
+              << ";reason=" << diagnostics.denoiser_schedule_reason
+              << ";run/skip=" << diagnostics.denoiser_schedule_run_count
+              << '/' << diagnostics.denoiser_schedule_skip_count
               << ";variant=" << diagnostics.active_frame_variant << '\n';
     return false;
 }
@@ -366,7 +378,7 @@ bool verify_progressive_sampling(
 int main(int argc, char** argv) {
     const bool require_optix = argc > 1 && std::strcmp(argv[1], "--require-optix") == 0;
     std::cerr << "[smoke] ABI check\n";
-    if (cycles_bridge_abi_version() != 14U) {
+    if (cycles_bridge_abi_version() != 15U) {
         std::cerr << "unexpected native ABI " << cycles_bridge_abi_version() << '\n';
         return 1;
     }
@@ -593,12 +605,26 @@ int main(int argc, char** argv) {
                 cycles_bridge_query_diagnostics(renderer, &diagnostics),
                 "OptiX diagnostics")
             || diagnostics.effective_denoiser != 0U
+            || diagnostics.selected_denoiser != 1U
+            || diagnostics.denoiser_scheduled != 0U
+            || diagnostics.effective_denoiser_start_sample != 0U
+            || (diagnostics.denoiser_schedule_reason
+                    != CYCLES_BRIDGE_DENOISER_SCHEDULE_INTERACTIVE
+                && diagnostics.denoiser_schedule_reason
+                    != CYCLES_BRIDGE_DENOISER_SCHEDULE_SETTLING)
+            || diagnostics.denoiser_schedule_skip_count == 0U
             || diagnostics.active_frame_variant != CYCLES_BRIDGE_FRAME_VARIANT_RAW
             || !wait_for_denoised_still(
                 renderer, camera, frame, pixels, diagnostics, info)) {
             std::cerr << "detected OptiX denoiser did not follow Interactive Raw -> Still Denoised: "
                       << "state=" << diagnostics.sampling_state
                       << ";effective=" << diagnostics.effective_denoiser
+                      << ";selected=" << diagnostics.selected_denoiser
+                      << ";scheduled=" << diagnostics.denoiser_scheduled
+                      << ";start=" << diagnostics.effective_denoiser_start_sample
+                      << ";reason=" << diagnostics.denoiser_schedule_reason
+                      << ";run/skip=" << diagnostics.denoiser_schedule_run_count
+                      << '/' << diagnostics.denoiser_schedule_skip_count
                       << ";variant=" << diagnostics.active_frame_variant << '\n';
             cycles_bridge_destroy_renderer(renderer);
             return 1;

@@ -1394,11 +1394,19 @@ ccl::BufferParams configure_camera(
     return buffer;
 }
 
-std::uint32_t configure_scene_settings(
+struct DenoiserSchedule final {
+    std::uint32_t selected = 0;
+    std::uint32_t effective = 0;
+    std::uint32_t start_sample = 0;
+    std::uint32_t reason = CYCLES_BRIDGE_DENOISER_SCHEDULE_DISABLED;
+};
+
+DenoiserSchedule configure_scene_settings(
     ccl::Scene* scene,
     const ccl::DeviceInfo& device,
     const CyclesBridgeRenderSettings& settings,
-    bool schedule_denoise) {
+    std::uint32_t sampling_state,
+    int target_samples) {
     ccl::Integrator* integrator = scene->integrator;
     integrator->set_min_bounce(static_cast<int>(settings.minimum_bounce));
     integrator->set_max_bounce(static_cast<int>(settings.maximum_bounce));
@@ -1429,8 +1437,24 @@ std::uint32_t configure_scene_settings(
         effective_denoiser = 2U;
         integrator->set_denoiser_type(ccl::DENOISER_OPENIMAGEDENOISE);
     }
-    const bool denoise_active = schedule_denoise && effective_denoiser != 0U
-        && settings.active_pass == CYCLES_BRIDGE_PASS_COMBINED;
+    DenoiserSchedule denoiser_schedule{};
+    denoiser_schedule.selected = effective_denoiser;
+    if (effective_denoiser == 0U) {
+        denoiser_schedule.reason = CYCLES_BRIDGE_DENOISER_SCHEDULE_DISABLED;
+    } else if (settings.active_pass != CYCLES_BRIDGE_PASS_COMBINED) {
+        denoiser_schedule.reason = CYCLES_BRIDGE_DENOISER_SCHEDULE_DEBUG_PASS;
+    } else if (sampling_state == CYCLES_BRIDGE_SAMPLING_STILL) {
+        denoiser_schedule.effective = effective_denoiser;
+        denoiser_schedule.start_sample = std::min(
+            settings.denoiser_start_sample,
+            static_cast<std::uint32_t>(std::max(1, target_samples)));
+        denoiser_schedule.reason = CYCLES_BRIDGE_DENOISER_SCHEDULE_STILL;
+    } else if (sampling_state == CYCLES_BRIDGE_SAMPLING_SETTLING) {
+        denoiser_schedule.reason = CYCLES_BRIDGE_DENOISER_SCHEDULE_SETTLING;
+    } else {
+        denoiser_schedule.reason = CYCLES_BRIDGE_DENOISER_SCHEDULE_INTERACTIVE;
+    }
+    const bool denoise_active = denoiser_schedule.effective != 0U;
     integrator->set_use_denoise(denoise_active);
     integrator->set_denoise_start_sample(static_cast<int>(settings.denoiser_start_sample));
     int denoiser_passes = ccl::DENOISER_PASS_NONE;
@@ -1467,7 +1491,7 @@ std::uint32_t configure_scene_settings(
     film->set_use_sample_count(
         settings.adaptive_sampling != 0U
         || settings.active_pass == CYCLES_BRIDGE_PASS_SAMPLE_COUNT);
-    return denoise_active ? effective_denoiser : 0U;
+    return denoiser_schedule;
 }
 
 void create_output_passes(ccl::Scene* scene, std::uint64_t registered_pass_mask) {
@@ -1857,6 +1881,13 @@ class CyclesEngine::Impl final {
             diagnostics.registered_pass_mask = registered_pass_mask_diagnostic_;
             diagnostics.pass_registry_rebuild_count = pass_registry_rebuild_count_;
             diagnostics.pass_registry_hit_count = pass_registry_hit_count_;
+            diagnostics.selected_denoiser = selected_denoiser_;
+            diagnostics.denoiser_scheduled = effective_denoiser_ != 0U ? 1U : 0U;
+            diagnostics.effective_denoiser_start_sample =
+                effective_denoiser_start_sample_;
+            diagnostics.denoiser_schedule_reason = denoiser_schedule_reason_;
+            diagnostics.denoiser_schedule_run_count = denoiser_schedule_run_count_;
+            diagnostics.denoiser_schedule_skip_count = denoiser_schedule_skip_count_;
         }
         frames_.fill_diagnostics(diagnostics);
     }
@@ -2050,6 +2081,12 @@ class CyclesEngine::Impl final {
         }
         sampling_state_diagnostic_ = sampling_state;
         settling_remaining_millis_diagnostic_ = settling_remaining_millis;
+        if (sampling_state == CYCLES_BRIDGE_SAMPLING_SETTLING
+            && selected_denoiser_ != 0U
+            && effective_denoiser_ == 0U
+            && active_pass_diagnostic_ == CYCLES_BRIDGE_PASS_COMBINED) {
+            denoiser_schedule_reason_ = CYCLES_BRIDGE_DENOISER_SCHEDULE_SETTLING;
+        }
     }
 
     void set_state(std::string state, std::string terminal_error) {
@@ -2109,11 +2146,16 @@ class CyclesEngine::Impl final {
         session->set_display_driver(ccl::make_unique<FrameDisplayDriver>(frames_));
         create_output_passes(session->scene.get(), registered_pass_mask);
         build_scene(session->scene.get(), scene_request, runtime);
-        const std::uint32_t effective_denoiser =
-            configure_scene_settings(session->scene.get(), device, settings, false);
+        const DenoiserSchedule denoiser_schedule = configure_scene_settings(
+            session->scene.get(), device, settings,
+            CYCLES_BRIDGE_SAMPLING_INTERACTIVE,
+            static_cast<int>(settings.interactive_samples));
         {
             std::lock_guard lock(state_mutex_);
-            effective_denoiser_ = effective_denoiser;
+            selected_denoiser_ = denoiser_schedule.selected;
+            effective_denoiser_ = denoiser_schedule.effective;
+            effective_denoiser_start_sample_ = denoiser_schedule.start_sample;
+            denoiser_schedule_reason_ = denoiser_schedule.reason;
         }
         return session;
     }
@@ -2184,13 +2226,14 @@ class CyclesEngine::Impl final {
         const CyclesBridgeRenderSettings& settings) {
         const auto start_time = std::chrono::steady_clock::now();
         ccl::BufferParams buffer;
-        std::uint32_t effective_denoiser = 0;
+        DenoiserSchedule denoiser_schedule{};
         {
             const ccl::thread_scoped_lock scene_lock(session.scene->mutex);
             buffer = configure_camera(session, scene_request, camera_request);
-            effective_denoiser = configure_scene_settings(
+            denoiser_schedule = configure_scene_settings(
                 session.scene.get(), params.device, settings,
-                camera_request.sampling_state == CYCLES_BRIDGE_SAMPLING_STILL);
+                camera_request.sampling_state,
+                camera_request.sample_count);
         }
         ccl::SessionParams render_params = params;
         render_params.samples = std::max(1, camera_request.sample_count);
@@ -2204,7 +2247,7 @@ class CyclesEngine::Impl final {
             settings,
             camera_request.camera.depth_far,
             render_params.samples,
-            effective_denoiser != 0U,
+            denoiser_schedule.effective != 0U,
             camera_request.revision);
         frames_.set_sample_count(0);
         sampling_target_ = render_params.samples;
@@ -2213,7 +2256,17 @@ class CyclesEngine::Impl final {
         sampling_measure_time_ = std::chrono::steady_clock::now();
         {
             std::lock_guard lock(state_mutex_);
-            effective_denoiser_ = effective_denoiser;
+            selected_denoiser_ = denoiser_schedule.selected;
+            effective_denoiser_ = denoiser_schedule.effective;
+            effective_denoiser_start_sample_ = denoiser_schedule.start_sample;
+            denoiser_schedule_reason_ = denoiser_schedule.reason;
+            if (denoiser_schedule.selected != 0U) {
+                if (denoiser_schedule.effective != 0U) {
+                    denoiser_schedule_run_count_++;
+                } else {
+                    denoiser_schedule_skip_count_++;
+                }
+            }
             target_sample_count_diagnostic_ =
                 static_cast<std::uint32_t>(render_params.samples);
             if (sampling_state_diagnostic_ != camera_request.sampling_state) {
@@ -2518,6 +2571,12 @@ class CyclesEngine::Impl final {
         1ULL << CYCLES_BRIDGE_PASS_COMBINED;
     std::uint32_t pass_registry_rebuild_count_ = 0;
     std::uint32_t pass_registry_hit_count_ = 0;
+    std::uint32_t selected_denoiser_ = 0;
+    std::uint32_t effective_denoiser_start_sample_ = 0;
+    std::uint32_t denoiser_schedule_reason_ =
+        CYCLES_BRIDGE_DENOISER_SCHEDULE_DISABLED;
+    std::uint32_t denoiser_schedule_run_count_ = 0;
+    std::uint32_t denoiser_schedule_skip_count_ = 0;
     std::string state_;
     std::string terminal_error_;
 

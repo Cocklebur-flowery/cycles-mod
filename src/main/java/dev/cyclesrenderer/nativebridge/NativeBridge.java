@@ -23,7 +23,7 @@ import static java.lang.foreign.ValueLayout.JAVA_INT;
 import static java.lang.foreign.ValueLayout.JAVA_LONG;
 
 public final class NativeBridge {
-    public static final int ABI_VERSION = 14;
+    public static final int ABI_VERSION = 15;
     public static final int PIXEL_FORMAT_RGBA16_FLOAT = 2;
 
     private static final String LIBRARY_PATH_PROPERTY = "cyclesrenderer.nativeLibrary";
@@ -240,7 +240,13 @@ public final class NativeBridge {
             JAVA_INT.withName("active_frame_variant"),
             JAVA_LONG.withName("registered_pass_mask"),
             JAVA_INT.withName("pass_registry_rebuild_count"),
-            JAVA_INT.withName("pass_registry_hit_count"));
+            JAVA_INT.withName("pass_registry_hit_count"),
+            JAVA_INT.withName("selected_denoiser"),
+            JAVA_INT.withName("denoiser_scheduled"),
+            JAVA_INT.withName("effective_denoiser_start_sample"),
+            JAVA_INT.withName("denoiser_schedule_reason"),
+            JAVA_INT.withName("denoiser_schedule_run_count"),
+            JAVA_INT.withName("denoiser_schedule_skip_count"));
     private static final MemoryLayout VERTEX_LAYOUT = MemoryLayout.structLayout(
             JAVA_FLOAT.withName("position_x"),
             JAVA_FLOAT.withName("position_y"),
@@ -287,7 +293,7 @@ public final class NativeBridge {
                 || SETTINGS_LAYOUT.byteSize() != 208L
                 || PASS_DESCRIPTOR_LAYOUT.byteSize() != 64L
                 || CAPABILITIES_LAYOUT.byteSize() != 64L
-                || DIAGNOSTICS_LAYOUT.byteSize() != 304L
+                || DIAGNOSTICS_LAYOUT.byteSize() != 328L
                 || VERTEX_LAYOUT.byteSize() != 40L
                 || TRIANGLE_LAYOUT.byteSize() != 16L
                 || MATERIAL_LAYOUT.byteSize() != 32L
@@ -927,7 +933,13 @@ public final class NativeBridge {
                     diagnosticsSegment.get(JAVA_INT, 284L),
                     diagnosticsSegment.get(JAVA_LONG, 288L),
                     diagnosticsSegment.get(JAVA_INT, 296L),
-                    diagnosticsSegment.get(JAVA_INT, 300L));
+                    diagnosticsSegment.get(JAVA_INT, 300L),
+                    diagnosticsSegment.get(JAVA_INT, 304L),
+                    diagnosticsSegment.get(JAVA_INT, 308L),
+                    diagnosticsSegment.get(JAVA_INT, 312L),
+                    diagnosticsSegment.get(JAVA_INT, 316L),
+                    diagnosticsSegment.get(JAVA_INT, 320L),
+                    diagnosticsSegment.get(JAVA_INT, 324L));
         }
 
         private RenderedFrame renderFrame(
@@ -1433,7 +1445,13 @@ public final class NativeBridge {
             int activeFrameVariant,
             long registeredPassMask,
             int passRegistryRebuildCount,
-            int passRegistryHitCount) {
+            int passRegistryHitCount,
+            int selectedDenoiser,
+            int denoiserScheduled,
+            int effectiveDenoiserStartSample,
+            int denoiserScheduleReason,
+            int denoiserScheduleRunCount,
+            int denoiserScheduleSkipCount) {
         public String stateName() {
             return switch (stateCode) {
                 case 1 -> "scene-staging";
@@ -1461,6 +1479,24 @@ public final class NativeBridge {
                 case 1 -> "OptiX";
                 case 2 -> "OpenImageDenoise";
                 default -> "Off";
+            };
+        }
+
+        public String selectedDenoiserName() {
+            return switch (selectedDenoiser) {
+                case 1 -> "OptiX";
+                case 2 -> "OpenImageDenoise";
+                default -> "Off";
+            };
+        }
+
+        public String denoiserScheduleReasonName() {
+            return switch (denoiserScheduleReason) {
+                case 1 -> "interactive";
+                case 2 -> "settling";
+                case 3 -> "debug-pass";
+                case 4 -> "still";
+                default -> "disabled";
             };
         }
 

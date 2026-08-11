@@ -477,6 +477,21 @@ public final class CyclesRendererMod {
             y += 10;
             graphics.text(
                     minecraft.font,
+                    "denoise selected/effective=" + diagnostics.selectedDenoiserName()
+                            + "/" + diagnostics.denoiserName()
+                            + " scheduled=" + (diagnostics.denoiserScheduled() != 0)
+                            + " reason=" + diagnostics.denoiserScheduleReasonName(),
+                    6, y, 0xFFE0E0E0);
+            y += 10;
+            graphics.text(
+                    minecraft.font,
+                    "denoise start=" + diagnostics.effectiveDenoiserStartSample()
+                            + " run/skip=" + diagnostics.denoiserScheduleRunCount()
+                            + "/" + diagnostics.denoiserScheduleSkipCount(),
+                    6, y, 0xFFE0E0E0);
+            y += 10;
+            graphics.text(
+                    minecraft.font,
                     "frame leases=" + diagnostics.activeFrameLeases()
                             + "/" + diagnostics.peakFrameLeases()
                             + " slots=" + diagnostics.frameSlotCount()

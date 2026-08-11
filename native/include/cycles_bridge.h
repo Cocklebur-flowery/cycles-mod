@@ -81,6 +81,14 @@ enum CyclesBridgeDenoiserMask : std::uint32_t {
     CYCLES_BRIDGE_DENOISER_OPENIMAGEDENOISE = 1U << 1U,
 };
 
+enum CyclesBridgeDenoiserScheduleReason : std::uint32_t {
+    CYCLES_BRIDGE_DENOISER_SCHEDULE_DISABLED = 0,
+    CYCLES_BRIDGE_DENOISER_SCHEDULE_INTERACTIVE = 1,
+    CYCLES_BRIDGE_DENOISER_SCHEDULE_SETTLING = 2,
+    CYCLES_BRIDGE_DENOISER_SCHEDULE_DEBUG_PASS = 3,
+    CYCLES_BRIDGE_DENOISER_SCHEDULE_STILL = 4,
+};
+
 enum CyclesBridgePass : std::uint32_t {
     CYCLES_BRIDGE_PASS_COMBINED = 0,
     CYCLES_BRIDGE_PASS_DEPTH = 1,
@@ -324,6 +332,12 @@ struct CyclesBridgeDiagnostics {
     std::uint64_t registered_pass_mask;
     std::uint32_t pass_registry_rebuild_count;
     std::uint32_t pass_registry_hit_count;
+    std::uint32_t selected_denoiser;
+    std::uint32_t denoiser_scheduled;
+    std::uint32_t effective_denoiser_start_sample;
+    std::uint32_t denoiser_schedule_reason;
+    std::uint32_t denoiser_schedule_run_count;
+    std::uint32_t denoiser_schedule_skip_count;
 };
 
 struct CyclesBridgeVertex {
