@@ -35,6 +35,10 @@ base {
     archivesName = mod_id
 }
 
+def nativeSourceDirectory = layout.projectDirectory.dir('native')
+def nativeBuildDirectory = layout.buildDirectory.dir('native').get().asFile
+def nativeLibraryFile = new File(nativeBuildDirectory, 'bin/cyclesrenderer_native.dll')
+
 // Mojang ships Java 25 to end users in 26.2, so mods should target Java 25.
 java.toolchain.languageVersion = JavaLanguageVersion.of(25)
 
@@ -52,6 +56,7 @@ neoForge {
             client()
             // Comma-separated list of namespaces to load gametests from. Empty = all namespaces.
             systemProperty 'neoforge.enabledGameTestNamespaces', project.mod_id
+            systemProperty 'cyclesrenderer.nativeLibrary', nativeLibraryFile.absolutePath
         }
 
         server {
@@ -132,6 +137,34 @@ dependencies {
     // For more info:
     // http://www.gradle.org/docs/current/userguide/artifact_dependencies_tutorial.html
     // http://www.gradle.org/docs/current/userguide/dependency_management.html
+}
+
+tasks.register('configureNative', Exec) {
+    group = 'build'
+    description = 'Configures the Windows x64 native renderer bridge.'
+    inputs.dir(nativeSourceDirectory)
+    outputs.file(new File(nativeBuildDirectory, 'CMakeCache.txt'))
+    commandLine 'cmake',
+            '-S', nativeSourceDirectory.asFile.absolutePath,
+            '-B', nativeBuildDirectory.absolutePath,
+            '-G', 'Visual Studio 17 2022',
+            '-A', 'x64'
+}
+
+tasks.register('buildNative', Exec) {
+    group = 'build'
+    description = 'Builds the Windows x64 native renderer bridge.'
+    dependsOn 'configureNative'
+    inputs.dir(nativeSourceDirectory)
+    outputs.file(nativeLibraryFile)
+    commandLine 'cmake',
+            '--build', nativeBuildDirectory.absolutePath,
+            '--config', 'Release',
+            '--target', 'cyclesrenderer_native'
+}
+
+tasks.named('runClient').configure {
+    dependsOn 'buildNative'
 }
 
 // This block of code expands all declared replace properties in the specified resource targets.

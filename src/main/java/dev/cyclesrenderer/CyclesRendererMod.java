@@ -2,6 +2,7 @@ package dev.cyclesrenderer;
 
 import com.mojang.blaze3d.platform.InputConstants;
 import com.mojang.blaze3d.systems.RenderSystem;
+import dev.cyclesrenderer.nativebridge.NativeBridge;
 import net.minecraft.client.KeyMapping;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
@@ -16,11 +17,14 @@ import net.neoforged.neoforge.client.event.RenderGuiEvent;
 import net.neoforged.neoforge.client.event.RenderLevelStageEvent;
 import net.neoforged.neoforge.common.NeoForge;
 import org.joml.Vector4f;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 @Mod(value = CyclesRendererMod.MOD_ID, dist = Dist.CLIENT)
 public final class CyclesRendererMod {
     public static final String MOD_ID = "cyclesrenderer";
 
+    private static final Logger LOGGER = LoggerFactory.getLogger(CyclesRendererMod.class);
     private static final Vector4f TEST_FRAME_COLOR = new Vector4f(0.063F, 0.094F, 0.173F, 1.0F);
     private static final KeyMapping.Category KEY_CATEGORY = new KeyMapping.Category(
             Identifier.fromNamespaceAndPath(MOD_ID, "main"));
@@ -46,7 +50,19 @@ public final class CyclesRendererMod {
 
     private static void onClientTick(ClientTickEvent.Post event) {
         while (TOGGLE_TEST_FRAME.consumeClick()) {
-            testFrameEnabled = !testFrameEnabled;
+            if (testFrameEnabled) {
+                testFrameEnabled = false;
+                continue;
+            }
+
+            NativeBridge.ProbeResult probe = NativeBridge.probe();
+            if (!probe.success()) {
+                LOGGER.error("Native renderer bridge probe failed: {}", probe.message());
+                continue;
+            }
+
+            LOGGER.info("Native renderer bridge ready: {}", probe.message());
+            testFrameEnabled = true;
         }
     }
 
