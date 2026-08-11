@@ -1,0 +1,11 @@
+{
+  "required": true,
+  "minVersion": "0.8.7",
+  "package": "dev.cyclesrenderer.mixin",
+  "client": [
+    "LevelRendererMixin"
+  ],
+  "injectors": {
+    "defaultRequire": 1
+  }
+}

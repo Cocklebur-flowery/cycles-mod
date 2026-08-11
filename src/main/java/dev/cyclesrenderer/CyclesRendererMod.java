@@ -50,6 +50,10 @@ public final class CyclesRendererMod {
         }
     }
 
+    public static boolean isExperimentalRendererEnabled() {
+        return testFrameEnabled;
+    }
+
     private static void onRenderLevelAfterLevel(RenderLevelStageEvent.AfterLevel event) {
         if (!testFrameEnabled) {
             return;
