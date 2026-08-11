@@ -38,6 +38,7 @@ base {
 def nativeSourceDirectory = layout.projectDirectory.dir('native')
 def nativeBuildDirectory = layout.buildDirectory.dir('native').get().asFile
 def nativeLibraryFile = new File(nativeBuildDirectory, 'bin/cyclesrenderer_native.dll')
+def clientFmlConfigFile = layout.projectDirectory.file('run/config/fml.toml').asFile
 
 // Mojang ships Java 25 to end users in 26.2, so mods should target Java 25.
 java.toolchain.languageVersion = JavaLanguageVersion.of(25)
@@ -57,6 +58,7 @@ neoForge {
             // Comma-separated list of namespaces to load gametests from. Empty = all namespaces.
             systemProperty 'neoforge.enabledGameTestNamespaces', project.mod_id
             systemProperty 'cyclesrenderer.nativeLibrary', nativeLibraryFile.absolutePath
+            programArguments.addAll '--graphicsBackend', 'vulkan'
         }
 
         server {
@@ -163,8 +165,42 @@ tasks.register('buildNative', Exec) {
             '--target', 'cyclesrenderer_native'
 }
 
+tasks.register('prepareVulkanClientConfig') {
+    group = 'ide'
+    description = 'Disables the OpenGL NeoForge early window before starting the Vulkan client.'
+
+    doLast {
+        File configFile = clientFmlConfigFile
+        File configDirectory = configFile.parentFile
+        if (!configDirectory.isDirectory() && !configDirectory.mkdirs()) {
+            throw new GradleException("Could not create FML config directory: ${configDirectory}")
+        }
+
+        String desiredSetting = 'earlyWindowControl = false'
+        if (!configFile.isFile()) {
+            configFile.setText(desiredSetting + System.lineSeparator(), 'UTF-8')
+            return
+        }
+
+        String currentConfig = configFile.getText('UTF-8')
+        String updatedConfig
+        if (currentConfig =~ /(?m)^earlyWindowControl\s*=\s*(?:true|false)\s*$/) {
+            updatedConfig = currentConfig.replaceFirst(
+                    /(?m)^earlyWindowControl\s*=\s*(?:true|false)\s*$/,
+                    desiredSetting)
+        } else {
+            String newline = currentConfig.contains('\r\n') ? '\r\n' : '\n'
+            updatedConfig = currentConfig + (currentConfig.endsWith('\n') ? '' : newline) + desiredSetting + newline
+        }
+
+        if (updatedConfig != currentConfig) {
+            configFile.setText(updatedConfig, 'UTF-8')
+        }
+    }
+}
+
 tasks.named('runClient').configure {
-    dependsOn 'buildNative'
+    dependsOn 'buildNative', 'prepareVulkanClientConfig'
 }
 
 // This block of code expands all declared replace properties in the specified resource targets.
