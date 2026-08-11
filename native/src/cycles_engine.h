@@ -14,10 +14,13 @@ class CyclesEngine final {
     CyclesEngine(const CyclesEngine&) = delete;
     CyclesEngine& operator=(const CyclesEngine&) = delete;
 
-    bool upload_voxel_scene(
-        const CyclesBridgeVoxelScene& scene,
-        const std::uint32_t* packed_voxels,
-        std::uint64_t voxel_count,
+    bool upload_scene(
+        const CyclesBridgeScene& scene,
+        const CyclesBridgeVertex* vertices,
+        const CyclesBridgeTriangle* triangles,
+        const CyclesBridgeMaterial* materials,
+        const CyclesBridgeTexture* textures,
+        const std::uint8_t* texture_pixels,
         std::string& error);
 
     bool render(

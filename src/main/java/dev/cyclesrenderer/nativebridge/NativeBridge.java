@@ -1,6 +1,6 @@
 package dev.cyclesrenderer.nativebridge;
 
-import dev.cyclesrenderer.scene.ClientVoxelSnapshot;
+import dev.cyclesrenderer.scene.ClientRenderSnapshot;
 
 import java.lang.foreign.Arena;
 import java.lang.foreign.FunctionDescriptor;
@@ -22,7 +22,7 @@ import static java.lang.foreign.ValueLayout.JAVA_INT;
 import static java.lang.foreign.ValueLayout.JAVA_LONG;
 
 public final class NativeBridge {
-    public static final int ABI_VERSION = 3;
+    public static final int ABI_VERSION = 4;
 
     private static final String LIBRARY_PATH_PROPERTY = "cyclesrenderer.nativeLibrary";
     private static final int STRUCT_VERSION = 1;
@@ -50,22 +50,63 @@ public final class NativeBridge {
             JAVA_FLOAT.withName("depth_far"),
             JAVA_INT.withName("reserved_0"),
             JAVA_INT.withName("reserved_1"));
-    private static final MemoryLayout VOXEL_SCENE_LAYOUT = MemoryLayout.structLayout(
+    private static final MemoryLayout SCENE_LAYOUT = MemoryLayout.structLayout(
             JAVA_INT.withName("struct_size"),
             JAVA_INT.withName("struct_version"),
             JAVA_INT.withName("origin_x"),
             JAVA_INT.withName("origin_y"),
             JAVA_INT.withName("origin_z"),
-            JAVA_INT.withName("size_x"),
-            JAVA_INT.withName("size_y"),
-            JAVA_INT.withName("size_z"),
+            JAVA_INT.withName("vertex_count"),
+            JAVA_INT.withName("triangle_count"),
+            JAVA_INT.withName("material_count"),
+            JAVA_INT.withName("texture_count"),
+            JAVA_INT.withName("texture_byte_count"),
             JAVA_INT.withName("reserved_0"),
             JAVA_INT.withName("reserved_1"));
+    private static final MemoryLayout VERTEX_LAYOUT = MemoryLayout.structLayout(
+            JAVA_FLOAT.withName("position_x"),
+            JAVA_FLOAT.withName("position_y"),
+            JAVA_FLOAT.withName("position_z"),
+            JAVA_FLOAT.withName("normal_x"),
+            JAVA_FLOAT.withName("normal_y"),
+            JAVA_FLOAT.withName("normal_z"),
+            JAVA_FLOAT.withName("texture_u"),
+            JAVA_FLOAT.withName("texture_v"),
+            JAVA_INT.withName("packed_rgba"),
+            JAVA_INT.withName("reserved"));
+    private static final MemoryLayout TRIANGLE_LAYOUT = MemoryLayout.structLayout(
+            JAVA_INT.withName("vertex_0"),
+            JAVA_INT.withName("vertex_1"),
+            JAVA_INT.withName("vertex_2"),
+            JAVA_INT.withName("material_index"));
+    private static final MemoryLayout MATERIAL_LAYOUT = MemoryLayout.structLayout(
+            JAVA_INT.withName("texture_index"),
+            JAVA_INT.withName("flags"),
+            JAVA_FLOAT.withName("emission_strength"),
+            JAVA_FLOAT.withName("alpha_cutoff"),
+            JAVA_INT.withName("reserved_0"),
+            JAVA_INT.withName("reserved_1"),
+            JAVA_INT.withName("reserved_2"),
+            JAVA_INT.withName("reserved_3"));
+    private static final MemoryLayout TEXTURE_LAYOUT = MemoryLayout.structLayout(
+            JAVA_INT.withName("width"),
+            JAVA_INT.withName("height"),
+            JAVA_INT.withName("pixel_offset"),
+            JAVA_INT.withName("pixel_size"),
+            JAVA_INT.withName("reserved_0"),
+            JAVA_INT.withName("reserved_1"),
+            JAVA_INT.withName("reserved_2"),
+            JAVA_INT.withName("reserved_3"));
 
     private static BridgeState bridgeState;
 
     static {
-        if (CAMERA_LAYOUT.byteSize() != 80L || VOXEL_SCENE_LAYOUT.byteSize() != 40L) {
+        if (CAMERA_LAYOUT.byteSize() != 80L
+                || SCENE_LAYOUT.byteSize() != 48L
+                || VERTEX_LAYOUT.byteSize() != 40L
+                || TRIANGLE_LAYOUT.byteSize() != 16L
+                || MATERIAL_LAYOUT.byteSize() != 32L
+                || TEXTURE_LAYOUT.byteSize() != 32L) {
             throw new ExceptionInInitializerError("native bridge structure layout mismatch");
         }
     }
@@ -105,7 +146,7 @@ public final class NativeBridge {
         }
     }
 
-    public static void uploadScene(ClientVoxelSnapshot snapshot) {
+    public static void uploadScene(ClientRenderSnapshot snapshot) {
         BridgeState state = requireState();
         try {
             state.uploadScene(snapshot);
@@ -191,7 +232,7 @@ public final class NativeBridge {
         private final MethodHandle fillTestFrame;
         private final MethodHandle destroyRenderer;
         private final MethodHandle writeRendererInfo;
-        private final MethodHandle uploadVoxelScene;
+        private final MethodHandle uploadScene;
         private final MethodHandle render;
         private final MemorySegment renderer;
         private final MemorySegment cameraSegment;
@@ -208,7 +249,7 @@ public final class NativeBridge {
                 MethodHandle fillTestFrame,
                 MethodHandle destroyRenderer,
                 MethodHandle writeRendererInfo,
-                MethodHandle uploadVoxelScene,
+                MethodHandle uploadScene,
                 MethodHandle render,
                 MemorySegment renderer,
                 String buildInfo) {
@@ -216,7 +257,7 @@ public final class NativeBridge {
             this.fillTestFrame = fillTestFrame;
             this.destroyRenderer = destroyRenderer;
             this.writeRendererInfo = writeRendererInfo;
-            this.uploadVoxelScene = uploadVoxelScene;
+            this.uploadScene = uploadScene;
             this.render = render;
             this.renderer = renderer;
             this.cameraSegment = libraryArena.allocate(CAMERA_LAYOUT);
@@ -248,9 +289,17 @@ public final class NativeBridge {
                 MethodHandle writeRendererInfo = linker.downcallHandle(
                         symbols.findOrThrow("cycles_bridge_write_renderer_info"),
                         FunctionDescriptor.of(JAVA_INT, ADDRESS, ADDRESS, JAVA_INT));
-                MethodHandle uploadVoxelScene = linker.downcallHandle(
-                        symbols.findOrThrow("cycles_bridge_upload_voxel_scene"),
-                        FunctionDescriptor.of(JAVA_INT, ADDRESS, ADDRESS, ADDRESS, JAVA_LONG));
+                MethodHandle uploadScene = linker.downcallHandle(
+                        symbols.findOrThrow("cycles_bridge_upload_scene"),
+                        FunctionDescriptor.of(
+                                JAVA_INT,
+                                ADDRESS,
+                                ADDRESS,
+                                ADDRESS,
+                                ADDRESS,
+                                ADDRESS,
+                                ADDRESS,
+                                ADDRESS));
                 MethodHandle render = linker.downcallHandle(
                         symbols.findOrThrow("cycles_bridge_render"),
                         FunctionDescriptor.of(JAVA_INT, ADDRESS, ADDRESS, ADDRESS, JAVA_LONG));
@@ -283,7 +332,7 @@ public final class NativeBridge {
                         fillTestFrame,
                         destroyRenderer,
                         writeRendererInfo,
-                        uploadVoxelScene,
+                        uploadScene,
                         render,
                         renderer,
                         buildInfo);
@@ -300,38 +349,128 @@ public final class NativeBridge {
             }
         }
 
-        private void uploadScene(ClientVoxelSnapshot snapshot) throws Throwable {
-            int expectedVoxelCount = Math.multiplyExact(
-                    Math.multiplyExact(snapshot.sizeX(), snapshot.sizeY()), snapshot.sizeZ());
-            if (snapshot.voxelCount() != expectedVoxelCount) {
-                throw new IllegalArgumentException(
-                        "voxel array length does not match scene dimensions");
+        private void uploadScene(ClientRenderSnapshot snapshot) throws Throwable {
+            int vertexCount = snapshot.vertexCount();
+            int triangleCount = snapshot.triangleCount();
+            if (triangleCount == 0) {
+                if (vertexCount != 0 || snapshot.materials().length != 0
+                        || snapshot.textures().length != 0) {
+                    throw new IllegalArgumentException("empty snapshot contains partial geometry");
+                }
+            } else if (vertexCount == 0
+                    || snapshot.materials().length == 0 || snapshot.textures().length == 0) {
+                throw new IllegalArgumentException("render snapshot contains incomplete geometry");
+            }
+            if (snapshot.vertexData().length
+                    != Math.multiplyExact(vertexCount, ClientRenderSnapshot.VERTEX_FLOAT_STRIDE)
+                    || snapshot.triangleData().length
+                    != Math.multiplyExact(
+                            triangleCount, ClientRenderSnapshot.TRIANGLE_INT_STRIDE)) {
+                throw new IllegalArgumentException("render snapshot array length mismatch");
+            }
+
+            int textureByteCount = 0;
+            for (ClientRenderSnapshot.TextureData texture : snapshot.textures()) {
+                int expectedBytes = Math.multiplyExact(
+                        Math.multiplyExact(texture.width(), texture.height()), 4);
+                if (texture.rgbaPixels().length != expectedBytes) {
+                    throw new IllegalArgumentException(
+                            "texture byte length mismatch for " + texture.sprite());
+                }
+                textureByteCount = Math.addExact(textureByteCount, expectedBytes);
             }
 
             try (Arena uploadArena = Arena.ofConfined()) {
-                MemorySegment sceneSegment = uploadArena.allocate(VOXEL_SCENE_LAYOUT);
-                sceneSegment.set(JAVA_INT, 0L, Math.toIntExact(VOXEL_SCENE_LAYOUT.byteSize()));
+                MemorySegment sceneSegment = uploadArena.allocate(SCENE_LAYOUT);
+                sceneSegment.set(JAVA_INT, 0L, Math.toIntExact(SCENE_LAYOUT.byteSize()));
                 sceneSegment.set(JAVA_INT, 4L, STRUCT_VERSION);
                 sceneSegment.set(JAVA_INT, 8L, snapshot.originX());
                 sceneSegment.set(JAVA_INT, 12L, snapshot.originY());
                 sceneSegment.set(JAVA_INT, 16L, snapshot.originZ());
-                sceneSegment.set(JAVA_INT, 20L, snapshot.sizeX());
-                sceneSegment.set(JAVA_INT, 24L, snapshot.sizeY());
-                sceneSegment.set(JAVA_INT, 28L, snapshot.sizeZ());
+                sceneSegment.set(JAVA_INT, 20L, vertexCount);
+                sceneSegment.set(JAVA_INT, 24L, triangleCount);
+                sceneSegment.set(JAVA_INT, 28L, snapshot.materials().length);
+                sceneSegment.set(JAVA_INT, 32L, snapshot.textures().length);
+                sceneSegment.set(JAVA_INT, 36L, textureByteCount);
 
-                MemorySegment voxelSegment = uploadArena.allocate(
-                        Math.multiplyExact((long) snapshot.voxelCount(), Integer.BYTES),
-                        Integer.BYTES);
-                voxelSegment.asByteBuffer()
+                if (triangleCount == 0) {
+                    int uploadStatus = (int) uploadScene.invokeExact(
+                            renderer,
+                            sceneSegment,
+                            MemorySegment.NULL,
+                            MemorySegment.NULL,
+                            MemorySegment.NULL,
+                            MemorySegment.NULL,
+                            MemorySegment.NULL);
+                    checkRendererStatus(uploadStatus, "empty scene upload");
+                    return;
+                }
+
+                MemorySegment vertices = uploadArena.allocate(
+                        Math.multiplyExact((long) vertexCount, VERTEX_LAYOUT.byteSize()),
+                        VERTEX_LAYOUT.byteAlignment());
+                for (int index = 0; index < vertexCount; index++) {
+                    long base = Math.multiplyExact((long) index, VERTEX_LAYOUT.byteSize());
+                    int input = index * ClientRenderSnapshot.VERTEX_FLOAT_STRIDE;
+                    for (int component = 0; component < 8; component++) {
+                        vertices.set(
+                                JAVA_FLOAT,
+                                base + (long) component * Float.BYTES,
+                                snapshot.vertexData()[input + component]);
+                    }
+                    vertices.set(JAVA_INT, base + 32L, snapshot.vertexColors()[index]);
+                }
+
+                MemorySegment triangles = uploadArena.allocate(
+                        Math.multiplyExact((long) triangleCount, TRIANGLE_LAYOUT.byteSize()),
+                        TRIANGLE_LAYOUT.byteAlignment());
+                triangles.asByteBuffer()
                         .order(ByteOrder.nativeOrder())
                         .asIntBuffer()
-                        .put(snapshot.packedVoxels());
-                int uploadStatus = (int) uploadVoxelScene.invokeExact(
+                        .put(snapshot.triangleData());
+
+                MemorySegment materials = uploadArena.allocate(
+                        Math.multiplyExact(
+                                (long) snapshot.materials().length, MATERIAL_LAYOUT.byteSize()),
+                        MATERIAL_LAYOUT.byteAlignment());
+                for (int index = 0; index < snapshot.materials().length; index++) {
+                    ClientRenderSnapshot.MaterialData material = snapshot.materials()[index];
+                    long base = Math.multiplyExact((long) index, MATERIAL_LAYOUT.byteSize());
+                    materials.set(JAVA_INT, base, material.textureIndex());
+                    materials.set(JAVA_INT, base + 4L, material.flags());
+                    materials.set(JAVA_FLOAT, base + 8L, material.emissionStrength());
+                    materials.set(JAVA_FLOAT, base + 12L, material.alphaCutoff());
+                }
+
+                MemorySegment textures = uploadArena.allocate(
+                        Math.multiplyExact(
+                                (long) snapshot.textures().length, TEXTURE_LAYOUT.byteSize()),
+                        TEXTURE_LAYOUT.byteAlignment());
+                MemorySegment texturePixels = uploadArena.allocate(textureByteCount, 4L);
+                int pixelOffset = 0;
+                for (int index = 0; index < snapshot.textures().length; index++) {
+                    ClientRenderSnapshot.TextureData texture = snapshot.textures()[index];
+                    long base = Math.multiplyExact((long) index, TEXTURE_LAYOUT.byteSize());
+                    textures.set(JAVA_INT, base, texture.width());
+                    textures.set(JAVA_INT, base + 4L, texture.height());
+                    textures.set(JAVA_INT, base + 8L, pixelOffset);
+                    textures.set(JAVA_INT, base + 12L, texture.rgbaPixels().length);
+                    texturePixels
+                            .asSlice(pixelOffset, texture.rgbaPixels().length)
+                            .asByteBuffer()
+                            .put(texture.rgbaPixels());
+                    pixelOffset += texture.rgbaPixels().length;
+                }
+
+                int uploadStatus = (int) uploadScene.invokeExact(
                         renderer,
                         sceneSegment,
-                        voxelSegment,
-                        (long) snapshot.voxelCount());
-                checkRendererStatus(uploadStatus, "voxel scene upload");
+                        vertices,
+                        triangles,
+                        materials,
+                        textures,
+                        texturePixels);
+                checkRendererStatus(uploadStatus, "scene upload");
             }
         }
 

@@ -6,15 +6,25 @@
 
 ## 当前阶段
 
-- Cycles 5.2 已通过 C ABI v3 接入 Java Foreign Function & Memory API。
+- Cycles 5.2 已通过 C ABI v4 接入 Java Foreign Function & Memory API。
 - 世界快照为相机周围 `64 × 32 × 64` 个方块。
-- 实心方块转换成经过相邻面剔除的三角网格。
-- 方块 MapColor 转换为 Cycles 漫反射材质。
+- 快照读取 Minecraft/NeoForge 最终 `BlockStateModel` 与 `BakedQuad`，保留非完整方块形状、模型随机变体、位置偏移、UV 和几何法线。
+- 使用 Minecraft 的面剔除规则，并从最终 `TextureAtlasSprite` 提取资源包覆盖后的 RGBA 像素。
+- Cycles 材质支持基础纹理、方块/生物群系 Tint、Cutout Alpha Clip 和基础发光；半透明层暂时跳过并计数。
+- 资源包重载会增加场景资源代次并强制重建快照，不复用旧 Sprite 像素。
 - Cycles 在自己的会话线程中渐进渲染，Minecraft 渲染线程只提交相机并读取最新完成帧。
 - 内部渲染分辨率上限为 `480 × 270`，当前每次累计 8 个样本，再放大到窗口尺寸。
 - Minecraft 的 Vulkan swapchain、纹理和命令编码器仍由 Minecraft 管理；Cycles 不使用 Vulkan。
 
-暂未实现方块纹理、透明方块、实体、天空系统、动态光源、区块增量更新、降噪和跨平台打包。
+暂未实现半透明/折射方块、流体、方块实体、实体、天空系统、动态光源、区块增量更新、PBR 扩展、降噪和跨平台打包。
+
+## 下一里程碑规划
+
+当前里程碑分单元实现通用静态方块数据桥、Distant Horizons LOD Provider、Cycles HDR/采样/降噪/OpenColorIO/多通道核心以及游戏内设置界面。实现范围、兼容性边界、稳定协议、风险和验收标准见：
+
+- [渲染数据桥与 Cycles 画面控制里程碑](docs/render-bridge-and-settings-plan.md)
+
+规划已经确认并进入实施；每个可独立验证的单元完成后创建一个本地 Git 提交。
 
 ## 开发环境
 
@@ -72,29 +82,29 @@ run-client.cmd runClient
 
 `buildNative` 会构建 native DLL 和冒烟程序，并把 `.deps/cycles-install` 中的运行时 DLL 与 `lib/kernel_*.zst` 自动部署到 `build/native/bin/`。不需要手工复制 JAR、DLL 或 GPU 内核。
 
-`runNativeSmoke` 会构造一个小型彩色体素场景，等待真实 Cycles 帧并输出所选后端、设备、分辨率和帧校验和。
+`runNativeSmoke` 会构造一个带 UV、彩色纹理与 Alpha Clip 的小型网格场景，等待真实 Cycles 帧并输出所选后端、设备、分辨率和帧校验和。
 
 `runClient` 只会为启动出的 Minecraft 进程把 `build/native/bin/` 加入 `PATH`，使 Windows 能找到 Cycles 的二级 DLL 依赖；它不会修改系统或用户环境变量。修改 native 运行时文件后必须重新启动客户端。
 
 ## 运行时数据流
 
 ```text
-ClientVoxelSnapshot
-  -> NativeBridge（ABI v3）
+ClientRenderSnapshot（最终 BakedQuad、Sprite、Tint）
+  -> NativeBridge（ABI v4 扁平场景数组）
   -> CyclesEngine 请求队列
-  -> 体素可见面网格 + 漫反射材质
+  -> Cycles 网格 + 内存纹理 + Diffuse/Cutout/Emission 材质
   -> Cycles Session（OptiX -> CUDA -> CPU）
   -> OutputDriver 最新渐进帧
   -> RGBA8 最近邻放大
   -> Minecraft Vulkan writeToTexture
 ```
 
-场景仅在相机进入新的区块/高度 Section 时重新捕获。相机位置、朝向、FOV 或输出尺寸变化时会重置 Cycles 累计；静止时继续积累当前帧。
+场景在相机进入新的区块/高度 Section 或资源包重载时重新捕获。相机位置、朝向、FOV 或输出尺寸变化时会重置 Cycles 累计；静止时继续积累当前帧。
 
 ## 代码入口
 
 - `CyclesRendererMod.java`：F8 生命周期、场景刷新和 Vulkan 上传。
-- `ClientVoxelSnapshot.java`：从客户端世界采集固定尺寸体素颜色。
+- `ClientRenderSnapshot.java`：从客户端世界最终模型采集固定范围的网格、纹理和基础材质。
 - `NativeBridge.java`：Java 25 FFM 布局、native 生命周期和 ABI 校验。
 - `native/include/cycles_bridge.h`：稳定 C ABI；修改结构、状态码或函数时必须同步升级 Java ABI。
 - `native/src/cycles_bridge.cpp`：C ABI 参数校验和错误边界。
@@ -104,7 +114,7 @@ ClientVoxelSnapshot
 
 ## ABI 与运行时约束
 
-ABI v3 保留了 v2 的 `CyclesBridgeCamera`（80 字节）和 `CyclesBridgeVoxelScene`（40 字节）布局，并新增 renderer info 查询。Java 与 DLL 的 ABI 版本不一致时会在启用前拒绝运行。
+ABI v4 保留 `CyclesBridgeCamera`（80 字节），以 `CyclesBridgeScene` 和扁平的 Vertex/Triangle/Material/Texture 数组取代体素结构。纹理像素通过一次调用以内存 RGBA8 传入；Java 与 DLL 的 ABI 版本不一致时会在启用前拒绝运行。
 
 Cycles 的 GPU 内核通过 `path_init()` 相对于 `cyclesrenderer_native.dll` 查找。因此以下布局是运行时契约：
 

@@ -3,7 +3,7 @@ package dev.cyclesrenderer;
 import com.mojang.blaze3d.platform.InputConstants;
 import com.mojang.blaze3d.systems.RenderSystem;
 import dev.cyclesrenderer.nativebridge.NativeBridge;
-import dev.cyclesrenderer.scene.ClientVoxelSnapshot;
+import dev.cyclesrenderer.scene.ClientRenderSnapshot;
 import net.minecraft.client.KeyMapping;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
@@ -11,10 +11,12 @@ import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.renderer.state.level.CameraRenderState;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.Identifier;
+import net.minecraft.server.packs.resources.ResourceManagerReloadListener;
 import net.neoforged.api.distmarker.Dist;
 import net.neoforged.bus.api.IEventBus;
 import net.neoforged.fml.common.Mod;
 import net.neoforged.neoforge.client.event.ClientTickEvent;
+import net.neoforged.neoforge.client.event.AddClientReloadListenersEvent;
 import net.neoforged.neoforge.client.event.RegisterKeyMappingsEvent;
 import net.neoforged.neoforge.client.event.RenderGuiEvent;
 import net.neoforged.neoforge.client.event.RenderLevelStageEvent;
@@ -39,11 +41,13 @@ public final class CyclesRendererMod {
 
     private static boolean testFrameEnabled;
     private static long nativeFrameId;
-    private static ClientVoxelSnapshot voxelSnapshot;
+    private static ClientRenderSnapshot renderSnapshot;
     private static ClientLevel snapshotLevel;
+    private static volatile long resourceRevision;
 
     public CyclesRendererMod(IEventBus modEventBus) {
         modEventBus.addListener(CyclesRendererMod::registerKeyMappings);
+        modEventBus.addListener(CyclesRendererMod::addClientReloadListeners);
         NeoForge.EVENT_BUS.addListener(CyclesRendererMod::onClientTick);
         NeoForge.EVENT_BUS.addListener(CyclesRendererMod::onRenderLevelAfterLevel);
         NeoForge.EVENT_BUS.addListener(CyclesRendererMod::onRenderGui);
@@ -52,6 +56,12 @@ public final class CyclesRendererMod {
     private static void registerKeyMappings(RegisterKeyMappingsEvent event) {
         event.registerCategory(KEY_CATEGORY);
         event.register(TOGGLE_TEST_FRAME);
+    }
+
+    private static void addClientReloadListeners(AddClientReloadListenersEvent event) {
+        event.addListener(
+                Identifier.fromNamespaceAndPath(MOD_ID, "scene_resources"),
+                (ResourceManagerReloadListener) resourceManager -> resourceRevision++);
     }
 
     private static void onClientTick(ClientTickEvent.Post event) {
@@ -69,7 +79,7 @@ public final class CyclesRendererMod {
 
             LOGGER.info("Native renderer bridge ready: {}", probe.message());
             nativeFrameId = 0L;
-            voxelSnapshot = null;
+            renderSnapshot = null;
             snapshotLevel = null;
             testFrameEnabled = true;
         }
@@ -123,27 +133,35 @@ public final class CyclesRendererMod {
     private static void refreshVoxelSceneIfNeeded(
             ClientLevel level,
             CameraRenderState camera) {
+        long currentResourceRevision = resourceRevision;
         if (snapshotLevel == level
-                && voxelSnapshot != null
-                && voxelSnapshot.isForCameraPosition(camera.pos)) {
+                && renderSnapshot != null
+                && renderSnapshot.isCurrentFor(camera.pos, currentResourceRevision)) {
             return;
         }
 
         long captureStart = System.nanoTime();
-        ClientVoxelSnapshot capturedSnapshot = ClientVoxelSnapshot.capture(level, camera.pos);
+        ClientRenderSnapshot capturedSnapshot = ClientRenderSnapshot.capture(
+                level, camera.pos, currentResourceRevision);
         NativeBridge.uploadScene(capturedSnapshot);
-        voxelSnapshot = capturedSnapshot;
+        renderSnapshot = capturedSnapshot;
         snapshotLevel = level;
         long captureMilliseconds = (System.nanoTime() - captureStart) / 1_000_000L;
         LOGGER.info(
-                "Uploaded voxel scene: origin=({}, {}, {}), size={}x{}x{}, solid={}, capture={} ms",
+                "Uploaded model scene: origin=({}, {}, {}), vertices={}, triangles={}, "
+                        + "materials={}, textures={}, quads={}, skippedTranslucent={}, "
+                        + "unsupportedTints={}, skippedModelBlocks={}, capture={} ms",
                 capturedSnapshot.originX(),
                 capturedSnapshot.originY(),
                 capturedSnapshot.originZ(),
-                capturedSnapshot.sizeX(),
-                capturedSnapshot.sizeY(),
-                capturedSnapshot.sizeZ(),
-                capturedSnapshot.solidVoxelCount(),
+                capturedSnapshot.vertexCount(),
+                capturedSnapshot.triangleCount(),
+                capturedSnapshot.materials().length,
+                capturedSnapshot.textures().length,
+                capturedSnapshot.quadCount(),
+                capturedSnapshot.skippedTranslucentQuadCount(),
+                capturedSnapshot.unsupportedTintQuadCount(),
+                capturedSnapshot.skippedModelBlockCount(),
                 captureMilliseconds);
     }
 
@@ -167,7 +185,7 @@ public final class CyclesRendererMod {
 
     private static void disableExperimentalRenderer() {
         testFrameEnabled = false;
-        voxelSnapshot = null;
+        renderSnapshot = null;
         snapshotLevel = null;
         NativeBridge.close();
     }

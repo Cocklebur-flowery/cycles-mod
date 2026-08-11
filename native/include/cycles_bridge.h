@@ -23,6 +23,10 @@ enum CyclesBridgeStatus : std::uint32_t {
     CYCLES_BRIDGE_STATUS_RENDER_ERROR = 5,
 };
 
+enum CyclesBridgeMaterialFlags : std::uint32_t {
+    CYCLES_BRIDGE_MATERIAL_CUTOUT = 1U << 0U,
+};
+
 struct CyclesBridgeCamera {
     std::uint32_t struct_size;
     std::uint32_t struct_version;
@@ -41,16 +45,54 @@ struct CyclesBridgeCamera {
     std::uint32_t reserved[2];
 };
 
-struct CyclesBridgeVoxelScene {
+struct CyclesBridgeScene {
     std::uint32_t struct_size;
     std::uint32_t struct_version;
     std::int32_t origin_x;
     std::int32_t origin_y;
     std::int32_t origin_z;
-    std::uint32_t size_x;
-    std::uint32_t size_y;
-    std::uint32_t size_z;
+    std::uint32_t vertex_count;
+    std::uint32_t triangle_count;
+    std::uint32_t material_count;
+    std::uint32_t texture_count;
+    std::uint32_t texture_byte_count;
     std::uint32_t reserved[2];
+};
+
+struct CyclesBridgeVertex {
+    float position_x;
+    float position_y;
+    float position_z;
+    float normal_x;
+    float normal_y;
+    float normal_z;
+    float texture_u;
+    float texture_v;
+    std::uint32_t packed_rgba;
+    std::uint32_t reserved;
+};
+
+struct CyclesBridgeTriangle {
+    std::uint32_t vertex_0;
+    std::uint32_t vertex_1;
+    std::uint32_t vertex_2;
+    std::uint32_t material_index;
+};
+
+struct CyclesBridgeMaterial {
+    std::uint32_t texture_index;
+    std::uint32_t flags;
+    float emission_strength;
+    float alpha_cutoff;
+    std::uint32_t reserved[4];
+};
+
+struct CyclesBridgeTexture {
+    std::uint32_t width;
+    std::uint32_t height;
+    std::uint32_t pixel_offset;
+    std::uint32_t pixel_size;
+    std::uint32_t reserved[4];
 };
 
 struct CyclesBridgeRenderer;
@@ -78,11 +120,14 @@ CYCLES_BRIDGE_API std::uint32_t cycles_bridge_write_renderer_info(
     char* output,
     std::uint32_t capacity);
 
-CYCLES_BRIDGE_API std::uint32_t cycles_bridge_upload_voxel_scene(
+CYCLES_BRIDGE_API std::uint32_t cycles_bridge_upload_scene(
     CyclesBridgeRenderer* renderer,
-    const CyclesBridgeVoxelScene* scene,
-    const std::uint32_t* packed_voxels,
-    std::uint64_t voxel_count);
+    const CyclesBridgeScene* scene,
+    const CyclesBridgeVertex* vertices,
+    const CyclesBridgeTriangle* triangles,
+    const CyclesBridgeMaterial* materials,
+    const CyclesBridgeTexture* textures,
+    const std::uint8_t* texture_pixels);
 
 CYCLES_BRIDGE_API std::uint32_t cycles_bridge_render(
     CyclesBridgeRenderer* renderer,

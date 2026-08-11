@@ -18,12 +18,14 @@
 #include <stdexcept>
 #include <thread>
 #include <tuple>
-#include <unordered_map>
 #include <utility>
 #include <vector>
 
 #include "device/device.h"
+#include "scene/attribute.h"
 #include "scene/camera.h"
+#include "scene/image.h"
+#include "scene/image_loader.h"
 #include "scene/integrator.h"
 #include "scene/mesh.h"
 #include "scene/object.h"
@@ -37,6 +39,7 @@
 #include "session/output_driver.h"
 #include "session/session.h"
 #include "util/log.h"
+#include "util/image_metadata.h"
 #include "util/path.h"
 #include "util/string.h"
 #include "util/system.h"
@@ -54,8 +57,12 @@ constexpr int kRenderSamples = 8;
 constexpr char kCombinedPass[] = "combined";
 
 struct SceneRequest {
-    CyclesBridgeVoxelScene scene{};
-    std::vector<std::uint32_t> voxels;
+    CyclesBridgeScene scene{};
+    std::vector<CyclesBridgeVertex> vertices;
+    std::vector<CyclesBridgeTriangle> triangles;
+    std::vector<CyclesBridgeMaterial> materials;
+    std::vector<CyclesBridgeTexture> textures;
+    std::vector<std::uint8_t> texture_pixels;
     std::uint64_t revision = 0;
 };
 
@@ -330,67 +337,133 @@ class FrameOutputDriver final : public ccl::OutputDriver {
     FrameStore& frames_;
 };
 
-std::size_t voxel_index(
-    const CyclesBridgeVoxelScene& scene,
-    std::uint32_t x,
-    std::uint32_t y,
-    std::uint32_t z) {
-    return static_cast<std::size_t>(x)
-        + static_cast<std::size_t>(scene.size_x)
-            * (static_cast<std::size_t>(z) + static_cast<std::size_t>(scene.size_z) * y);
-}
+class MemoryImageLoader final : public ccl::ImageLoader {
+ public:
+    MemoryImageLoader(
+        std::string name,
+        std::uint32_t width,
+        std::uint32_t height,
+        std::vector<std::uint8_t> pixels)
+        : name_(std::move(name)), width_(width), height_(height), pixels_(std::move(pixels)) {}
 
-bool solid_at(
-    const SceneRequest& request,
-    int x,
-    int y,
-    int z) {
-    if (x < 0 || y < 0 || z < 0
-        || x >= static_cast<int>(request.scene.size_x)
-        || y >= static_cast<int>(request.scene.size_y)
-        || z >= static_cast<int>(request.scene.size_z)) {
-        return false;
+    bool load_metadata(
+        ccl::ImageMetaData& metadata,
+        const ccl::ImageLoaderParams&,
+        ccl::Progress&) override {
+        metadata.width = width_;
+        metadata.height = height_;
+        metadata.channels = 4;
+        metadata.type = ccl::IMAGE_DATA_TYPE_BYTE4;
+        metadata.is_compressible_as_srgb = true;
+        return true;
     }
-    return (request.voxels[voxel_index(
-                request.scene,
-                static_cast<std::uint32_t>(x),
-                static_cast<std::uint32_t>(y),
-                static_cast<std::uint32_t>(z))]
-            >> 24U)
-        != 0U;
-}
 
-struct FaceDefinition {
-    int neighbor_x;
-    int neighbor_y;
-    int neighbor_z;
-    std::array<std::array<float, 3>, 4> corners;
+    bool load_pixels(const ccl::ImageMetaData& metadata, void* pixels) override {
+        if (metadata.memory_size() != pixels_.size()) {
+            return false;
+        }
+        std::memcpy(pixels, pixels_.data(), pixels_.size());
+        metadata.conform_pixels(pixels);
+        return true;
+    }
+
+    ccl::string name() const override {
+        return name_;
+    }
+
+    bool equals(const ccl::ImageLoader& other) const override {
+        const auto* image = dynamic_cast<const MemoryImageLoader*>(&other);
+        return image != nullptr && image->name_ == name_;
+    }
+
+ private:
+    std::string name_;
+    std::uint32_t width_;
+    std::uint32_t height_;
+    std::vector<std::uint8_t> pixels_;
 };
 
-constexpr std::array<FaceDefinition, 6> kFaces = {{
-    {-1, 0, 0, {{{0, 0, 0}, {0, 0, 1}, {0, 1, 1}, {0, 1, 0}}}},
-    {1, 0, 0, {{{1, 0, 1}, {1, 0, 0}, {1, 1, 0}, {1, 1, 1}}}},
-    {0, -1, 0, {{{0, 0, 1}, {0, 0, 0}, {1, 0, 0}, {1, 0, 1}}}},
-    {0, 1, 0, {{{0, 1, 0}, {0, 1, 1}, {1, 1, 1}, {1, 1, 0}}}},
-    {0, 0, -1, {{{1, 0, 0}, {0, 0, 0}, {0, 1, 0}, {1, 1, 0}}}},
-    {0, 0, 1, {{{0, 0, 1}, {1, 0, 1}, {1, 1, 1}, {0, 1, 1}}}},
-}};
-
-ccl::Shader* create_diffuse_shader(
+std::vector<ccl::ImageHandle> create_images(
     ccl::Scene* scene,
-    std::uint32_t packed_color,
+    const SceneRequest& request) {
+    ccl::ImageParams params;
+    params.colorspace = ccl::u_colorspace_scene_linear_srgb;
+    params.alpha_type = ccl::IMAGE_ALPHA_UNASSOCIATED;
+    params.interpolation = ccl::INTERPOLATION_CLOSEST;
+    params.extension = ccl::EXTENSION_REPEAT;
+
+    std::vector<ccl::ImageHandle> images;
+    images.reserve(request.textures.size());
+    for (std::size_t index = 0; index < request.textures.size(); ++index) {
+        const CyclesBridgeTexture& texture = request.textures[index];
+        const auto begin = request.texture_pixels.begin() + texture.pixel_offset;
+        std::vector<std::uint8_t> pixels(begin, begin + texture.pixel_size);
+        auto loader = ccl::make_unique<MemoryImageLoader>(
+            "minecraft_texture_" + std::to_string(index),
+            texture.width,
+            texture.height,
+            std::move(pixels));
+        images.push_back(scene->image_manager->add_image(std::move(loader), params));
+    }
+    return images;
+}
+
+ccl::Shader* create_material_shader(
+    ccl::Scene* scene,
+    const CyclesBridgeMaterial& material,
+    const ccl::ImageHandle& image,
     std::size_t index) {
     auto graph = ccl::make_unique<ccl::ShaderGraph>();
+    ccl::TextureCoordinateNode* coordinates =
+        graph->create_node<ccl::TextureCoordinateNode>();
+    ccl::ImageTextureNode* texture = graph->create_node<ccl::ImageTextureNode>();
+    texture->handle = image;
+    texture->set_colorspace(ccl::u_colorspace_scene_linear_srgb);
+    texture->set_alpha_type(ccl::IMAGE_ALPHA_UNASSOCIATED);
+    texture->set_interpolation(ccl::INTERPOLATION_CLOSEST);
+    texture->set_extension(ccl::EXTENSION_REPEAT);
+    graph->connect(coordinates->output("UV"), texture->input("Vector"));
+
+    ccl::VertexColorNode* vertex_color = graph->create_node<ccl::VertexColorNode>();
+    ccl::VectorMathNode* multiply = graph->create_node<ccl::VectorMathNode>();
+    multiply->set_math_type(ccl::NODE_VECTOR_MATH_MULTIPLY);
+    graph->connect(texture->output("Color"), multiply->input("Vector1"));
+    graph->connect(vertex_color->output("Color"), multiply->input("Vector2"));
+
     ccl::DiffuseBsdfNode* diffuse = graph->create_node<ccl::DiffuseBsdfNode>();
-    diffuse->set_color(ccl::make_float3(
-        srgb_to_linear(packed_color & 0xFFU),
-        srgb_to_linear((packed_color >> 8U) & 0xFFU),
-        srgb_to_linear((packed_color >> 16U) & 0xFFU)));
     diffuse->set_roughness(0.8F);
-    graph->connect(diffuse->output("BSDF"), graph->output()->input("Surface"));
+    graph->connect(multiply->output("Vector"), diffuse->input("Color"));
+    ccl::ShaderOutput* opaque_closure = diffuse->output("BSDF");
+
+    if (material.emission_strength > 0.0F) {
+        ccl::EmissionNode* emission = graph->create_node<ccl::EmissionNode>();
+        emission->set_strength(material.emission_strength);
+        graph->connect(multiply->output("Vector"), emission->input("Color"));
+        ccl::AddClosureNode* add = graph->create_node<ccl::AddClosureNode>();
+        graph->connect(opaque_closure, add->input("Closure1"));
+        graph->connect(emission->output("Emission"), add->input("Closure2"));
+        opaque_closure = add->output("Closure");
+    }
+
+    ccl::ShaderOutput* surface = opaque_closure;
+    if ((material.flags & CYCLES_BRIDGE_MATERIAL_CUTOUT) != 0U) {
+        ccl::MathNode* threshold = graph->create_node<ccl::MathNode>();
+        threshold->set_math_type(ccl::NODE_MATH_GREATER_THAN);
+        threshold->set_value2(material.alpha_cutoff);
+        graph->connect(texture->output("Alpha"), threshold->input("Value1"));
+
+        ccl::TransparentBsdfNode* transparent =
+            graph->create_node<ccl::TransparentBsdfNode>();
+        ccl::MixClosureNode* cutout = graph->create_node<ccl::MixClosureNode>();
+        graph->connect(threshold->output("Value"), cutout->input("Fac"));
+        graph->connect(transparent->output("BSDF"), cutout->input("Closure1"));
+        graph->connect(opaque_closure, cutout->input("Closure2"));
+        surface = cutout->output("Closure");
+    }
+    graph->connect(surface, graph->output()->input("Surface"));
 
     ccl::Shader* shader = scene->create_node<ccl::Shader>();
-    shader->name = "voxel_" + std::to_string(index);
+    shader->name = "minecraft_material_" + std::to_string(index);
     shader->set_graph(std::move(graph));
     shader->tag_update(scene);
     return shader;
@@ -409,7 +482,7 @@ void configure_background(ccl::Scene* scene) {
     scene->background->tag_update(scene);
 }
 
-void build_voxel_scene(ccl::Scene* scene, const SceneRequest& request) {
+void build_scene(ccl::Scene* scene, const SceneRequest& request) {
     configure_background(scene);
     scene->integrator->set_max_bounce(3);
     scene->integrator->set_max_diffuse_bounce(2);
@@ -418,41 +491,16 @@ void build_voxel_scene(ccl::Scene* scene, const SceneRequest& request) {
     scene->integrator->set_max_volume_bounce(0);
     scene->integrator->set_use_adaptive_sampling(false);
 
-    std::unordered_map<std::uint32_t, int> shader_indices;
-    std::size_t visible_faces = 0;
-    for (std::uint32_t y = 0; y < request.scene.size_y; ++y) {
-        for (std::uint32_t z = 0; z < request.scene.size_z; ++z) {
-            for (std::uint32_t x = 0; x < request.scene.size_x; ++x) {
-                const std::uint32_t packed =
-                    request.voxels[voxel_index(request.scene, x, y, z)];
-                if ((packed >> 24U) == 0U) {
-                    continue;
-                }
-                shader_indices.try_emplace(packed, static_cast<int>(shader_indices.size()));
-                for (const FaceDefinition& face : kFaces) {
-                    if (!solid_at(
-                            request,
-                            static_cast<int>(x) + face.neighbor_x,
-                            static_cast<int>(y) + face.neighbor_y,
-                            static_cast<int>(z) + face.neighbor_z)) {
-                        visible_faces++;
-                    }
-                }
-            }
-        }
-    }
-
-    std::vector<ccl::Shader*> shaders(shader_indices.size(), nullptr);
-    for (const auto& [packed, index] : shader_indices) {
-        shaders[static_cast<std::size_t>(index)] =
-            create_diffuse_shader(scene, packed, static_cast<std::size_t>(index));
-    }
-
-    if (visible_faces == 0) {
+    if (request.triangles.empty()) {
         return;
     }
-    if (visible_faces > static_cast<std::size_t>(std::numeric_limits<int>::max() / 4)) {
-        throw std::runtime_error("voxel mesh exceeds the Cycles vertex limit");
+
+    const std::vector<ccl::ImageHandle> images = create_images(scene, request);
+    std::vector<ccl::Shader*> shaders(request.materials.size(), nullptr);
+    for (std::size_t index = 0; index < request.materials.size(); ++index) {
+        const CyclesBridgeMaterial& material = request.materials[index];
+        shaders[index] = create_material_shader(
+            scene, material, images[material.texture_index], index);
     }
 
     ccl::Mesh* mesh = scene->create_node<ccl::Mesh>();
@@ -462,57 +510,50 @@ void build_voxel_scene(ccl::Scene* scene, const SceneRequest& request) {
     }
     mesh->set_used_shaders(used_shaders);
     mesh->resize_mesh(
-        static_cast<int>(visible_faces * 4U),
-        static_cast<int>(visible_faces * 2U));
+        static_cast<int>(request.vertices.size()),
+        static_cast<int>(request.triangles.size()));
 
     ccl::packed_float3* positions = mesh->get_position_for_write();
     int* triangles = mesh->get_triangles().data();
     int* triangle_shaders = mesh->get_shader().data();
     bool* smooth = mesh->get_smooth().data();
-    std::size_t face_index = 0;
-    for (std::uint32_t y = 0; y < request.scene.size_y; ++y) {
-        for (std::uint32_t z = 0; z < request.scene.size_z; ++z) {
-            for (std::uint32_t x = 0; x < request.scene.size_x; ++x) {
-                const std::uint32_t packed =
-                    request.voxels[voxel_index(request.scene, x, y, z)];
-                if ((packed >> 24U) == 0U) {
-                    continue;
-                }
-                const int shader_index = shader_indices.at(packed);
-                for (const FaceDefinition& face : kFaces) {
-                    if (solid_at(
-                            request,
-                            static_cast<int>(x) + face.neighbor_x,
-                            static_cast<int>(y) + face.neighbor_y,
-                            static_cast<int>(z) + face.neighbor_z)) {
-                        continue;
-                    }
+    ccl::Attribute* normal_attribute = mesh->attributes.add(ccl::ATTR_STD_VERTEX_NORMAL);
+    ccl::packed_normal* normals = normal_attribute->data_for_write<ccl::packed_normal>();
+    ccl::Attribute* uv_attribute = mesh->attributes.add(ccl::ATTR_STD_UV);
+    ccl::float2* uvs = uv_attribute->data_for_write<ccl::float2>();
+    ccl::Attribute* color_attribute = mesh->attributes.add(ccl::ATTR_STD_VERTEX_COLOR);
+    ccl::uchar4* colors = color_attribute->data_for_write<ccl::uchar4>();
 
-                    const int vertex_base = static_cast<int>(face_index * 4U);
-                    const int triangle_base = static_cast<int>(face_index * 2U);
-                    for (int corner = 0; corner < 4; ++corner) {
-                        positions[vertex_base + corner] = ccl::make_float3(
-                            static_cast<float>(x) + face.corners[corner][0],
-                            static_cast<float>(y) + face.corners[corner][1],
-                            static_cast<float>(z) + face.corners[corner][2]);
-                    }
-                    const int indices[6] = {
-                        vertex_base,
-                        vertex_base + 1,
-                        vertex_base + 2,
-                        vertex_base,
-                        vertex_base + 2,
-                        vertex_base + 3,
-                    };
-                    std::copy_n(indices, 6, triangles + triangle_base * 3);
-                    triangle_shaders[triangle_base] = shader_index;
-                    triangle_shaders[triangle_base + 1] = shader_index;
-                    smooth[triangle_base] = false;
-                    smooth[triangle_base + 1] = false;
-                    face_index++;
-                }
-            }
+    for (std::size_t index = 0; index < request.vertices.size(); ++index) {
+        const CyclesBridgeVertex& vertex = request.vertices[index];
+        positions[index] = ccl::make_float3(
+            vertex.position_x, vertex.position_y, vertex.position_z);
+        ccl::float3 normal = ccl::make_float3(
+            vertex.normal_x, vertex.normal_y, vertex.normal_z);
+        const float length = ccl::len(normal);
+        normal = length <= 1.0e-8F
+            ? ccl::make_float3(0.0F, 1.0F, 0.0F)
+            : normal / length;
+        normals[index] = ccl::packed_normal(normal);
+    }
+    for (std::size_t index = 0; index < request.triangles.size(); ++index) {
+        const CyclesBridgeTriangle& triangle = request.triangles[index];
+        const std::uint32_t indices[3] = {
+            triangle.vertex_0, triangle.vertex_1, triangle.vertex_2};
+        for (std::size_t corner = 0; corner < 3; ++corner) {
+            const std::size_t output_index = index * 3U + corner;
+            const CyclesBridgeVertex& vertex = request.vertices[indices[corner]];
+            triangles[output_index] = static_cast<int>(indices[corner]);
+            uvs[output_index] = ccl::make_float2(vertex.texture_u, vertex.texture_v);
+            const std::uint32_t rgba = vertex.packed_rgba;
+            colors[output_index] = ccl::make_uchar4(
+                to_unorm(srgb_to_linear(rgba & 0xFFU)),
+                to_unorm(srgb_to_linear((rgba >> 8U) & 0xFFU)),
+                to_unorm(srgb_to_linear((rgba >> 16U) & 0xFFU)),
+                static_cast<std::uint8_t>((rgba >> 24U) & 0xFFU));
         }
+        triangle_shaders[index] = static_cast<int>(triangle.material_index);
+        smooth[index] = true;
     }
 
     mesh->tag_position_modified();
@@ -526,7 +567,7 @@ void build_voxel_scene(ccl::Scene* scene, const SceneRequest& request) {
 
 ccl::Transform camera_transform(
     const CyclesBridgeCamera& camera,
-    const CyclesBridgeVoxelScene& scene) {
+    const CyclesBridgeScene& scene) {
     double qx = camera.rotation_x;
     double qy = camera.rotation_y;
     double qz = camera.rotation_z;
@@ -616,13 +657,23 @@ class CyclesEngine::Impl final {
     }
 
     bool upload(
-        const CyclesBridgeVoxelScene& scene,
-        const std::uint32_t* packed_voxels,
-        std::uint64_t voxel_count,
+        const CyclesBridgeScene& scene,
+        const CyclesBridgeVertex* vertices,
+        const CyclesBridgeTriangle* triangles,
+        const CyclesBridgeMaterial* materials,
+        const CyclesBridgeTexture* textures,
+        const std::uint8_t* texture_pixels,
         std::string& error) {
         auto request = std::make_shared<SceneRequest>();
         request->scene = scene;
-        request->voxels.assign(packed_voxels, packed_voxels + voxel_count);
+        if (scene.triangle_count != 0) {
+            request->vertices.assign(vertices, vertices + scene.vertex_count);
+            request->triangles.assign(triangles, triangles + scene.triangle_count);
+            request->materials.assign(materials, materials + scene.material_count);
+            request->textures.assign(textures, textures + scene.texture_count);
+            request->texture_pixels.assign(
+                texture_pixels, texture_pixels + scene.texture_byte_count);
+        }
         {
             std::lock_guard lock(request_mutex_);
             if (stopping_) {
@@ -667,7 +718,7 @@ class CyclesEngine::Impl final {
         {
             std::lock_guard lock(request_mutex_);
             if (!requested_scene_) {
-                error = "voxel scene has not been uploaded";
+                error = "scene has not been uploaded";
                 return false;
             }
             if (!requested_camera_ || !same_camera(*requested_camera_, request)) {
@@ -756,7 +807,7 @@ class CyclesEngine::Impl final {
         ccl::Pass* pass = session->scene->create_node<ccl::Pass>();
         pass->set_name(ccl::ustring(kCombinedPass));
         pass->set_type(ccl::PASS_COMBINED);
-        build_voxel_scene(session->scene.get(), scene_request);
+        build_scene(session->scene.get(), scene_request);
         return session;
     }
 
@@ -897,12 +948,16 @@ CyclesEngine::CyclesEngine() : impl_(std::make_unique<Impl>()) {}
 
 CyclesEngine::~CyclesEngine() = default;
 
-bool CyclesEngine::upload_voxel_scene(
-    const CyclesBridgeVoxelScene& scene,
-    const std::uint32_t* packed_voxels,
-    std::uint64_t voxel_count,
+bool CyclesEngine::upload_scene(
+    const CyclesBridgeScene& scene,
+    const CyclesBridgeVertex* vertices,
+    const CyclesBridgeTriangle* triangles,
+    const CyclesBridgeMaterial* materials,
+    const CyclesBridgeTexture* textures,
+    const std::uint8_t* texture_pixels,
     std::string& error) {
-    return impl_->upload(scene, packed_voxels, voxel_count, error);
+    return impl_->upload(
+        scene, vertices, triangles, materials, textures, texture_pixels, error);
 }
 
 bool CyclesEngine::render(
