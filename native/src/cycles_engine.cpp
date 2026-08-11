@@ -38,7 +38,7 @@
 #include "scene/shader_graph.h"
 #include "scene/shader_nodes.h"
 #include "session/buffers.h"
-#include "session/output_driver.h"
+#include "session/display_driver.h"
 #include "session/session.h"
 #include "util/log.h"
 #include "util/image_metadata.h"
@@ -119,21 +119,6 @@ ccl::PassType pass_type(std::uint32_t pass) {
         case CYCLES_BRIDGE_PASS_ROUGHNESS: return ccl::PASS_ROUGHNESS;
         case CYCLES_BRIDGE_PASS_SAMPLE_COUNT: return ccl::PASS_SAMPLE_COUNT;
         default: return ccl::PASS_COMBINED;
-    }
-}
-
-int pass_components(std::uint32_t pass) {
-    switch (pass) {
-        case CYCLES_BRIDGE_PASS_DEPTH:
-        case CYCLES_BRIDGE_PASS_ROUGHNESS:
-        case CYCLES_BRIDGE_PASS_SAMPLE_COUNT:
-            return 1;
-        case CYCLES_BRIDGE_PASS_NORMAL:
-        case CYCLES_BRIDGE_PASS_DIFFUSE_COLOR:
-        case CYCLES_BRIDGE_PASS_EMISSION:
-            return 3;
-        default:
-            return 4;
     }
 }
 
@@ -362,6 +347,9 @@ float srgb_to_linear(std::uint32_t value) {
 }
 
 std::uint8_t to_unorm(float value) {
+    if (std::isnan(value)) {
+        return 0U;
+    }
     const float clamped = std::clamp(value, 0.0F, 1.0F);
     return static_cast<std::uint8_t>(std::lround(clamped * 255.0F));
 }
@@ -390,7 +378,7 @@ class FrameStore final {
         height_ = 0;
         sample_count_ = 0;
         last_frame_completed_ = {};
-        rgba_.clear();
+        rgba_half_.clear();
         generation_++;
     }
 
@@ -399,120 +387,79 @@ class FrameStore final {
         float depth_far,
         int target_samples) {
         std::lock_guard lock(mutex_);
+        const float exposure_scale = std::exp2(settings.exposure_ev);
+        const float normalized_depth_far = std::max(1.0F, depth_far);
+        const int normalized_target_samples = std::max(1, target_samples);
+        const bool rebuild_lut = !display_lut_ready_
+            || active_pass_ != settings.active_pass
+            || !nearly_equal(exposure_scale_, exposure_scale, 1.0e-6)
+            || !nearly_equal(gamma_, settings.gamma, 1.0e-6)
+            || view_transform_ != settings.view_transform
+            || !nearly_equal(depth_far_, normalized_depth_far, 1.0e-6)
+            || target_samples_ != normalized_target_samples;
         active_pass_ = settings.active_pass;
-        exposure_scale_ = std::exp2(settings.exposure_ev);
+        exposure_scale_ = exposure_scale;
         gamma_ = settings.gamma;
         view_transform_ = settings.view_transform;
-        depth_far_ = std::max(1.0F, depth_far);
-        target_samples_ = std::max(1, target_samples);
+        depth_far_ = normalized_depth_far;
+        target_samples_ = normalized_target_samples;
+        if (rebuild_lut) {
+            rebuild_display_luts_locked();
+            display_lut_ready_ = true;
+        }
     }
 
-    bool update(const ccl::OutputDriver::Tile& tile) {
-        const auto convert_start = std::chrono::steady_clock::now();
-        if (tile.size.x <= 0 || tile.size.y <= 0
-            || tile.full_size.x <= 0 || tile.full_size.y <= 0) {
+    bool display_update_begin(
+        const ccl::DisplayDriver::Params& params,
+        int texture_width,
+        int texture_height) {
+        if (params.full_size.x <= 0 || params.full_size.y <= 0
+            || texture_width <= 0 || texture_height <= 0) {
             return false;
         }
-
-        std::uint32_t active_pass;
-        float exposure_scale;
-        float gamma;
-        std::uint32_t view_transform;
-        float depth_far;
-        int target_samples;
-        {
-            std::lock_guard lock(mutex_);
-            active_pass = active_pass_;
-            exposure_scale = exposure_scale_;
-            gamma = gamma_;
-            view_transform = view_transform_;
-            depth_far = depth_far_;
-            target_samples = target_samples_;
-        }
-        const int components = pass_components(active_pass);
-        std::vector<float> pixels(
-            static_cast<std::size_t>(tile.size.x) * tile.size.y
-                * static_cast<std::size_t>(components));
-        if (!tile.get_pass_pixels(pass_name(active_pass), components, pixels.data())) {
+        mutex_.lock();
+        if (display_update_active_) {
+            mutex_.unlock();
             return false;
         }
-
-        std::lock_guard lock(mutex_);
-        if (width_ != static_cast<std::uint32_t>(tile.full_size.x)
-            || height_ != static_cast<std::uint32_t>(tile.full_size.y)) {
-            width_ = static_cast<std::uint32_t>(tile.full_size.x);
-            height_ = static_cast<std::uint32_t>(tile.full_size.y);
-            rgba_.assign(static_cast<std::size_t>(width_) * height_ * 4U, 0U);
+        display_update_active_ = true;
+        display_update_started_ = std::chrono::steady_clock::now();
+        const auto width = static_cast<std::uint32_t>(params.full_size.x);
+        const auto height = static_cast<std::uint32_t>(params.full_size.y);
+        if (width_ != width || height_ != height) {
+            width_ = width;
+            height_ = height;
+            const ccl::half zero(0U);
+            rgba_half_.assign(
+                static_cast<std::size_t>(width_) * height_,
+                ccl::half4{zero, zero, zero, zero});
         }
+        return true;
+    }
 
-        for (int tile_y = 0; tile_y < tile.size.y; ++tile_y) {
-            const int source_y = tile_y;
-            const int target_y = tile.offset.y + tile_y;
-            if (target_y < 0 || target_y >= static_cast<int>(height_)) {
-                continue;
-            }
-            for (int tile_x = 0; tile_x < tile.size.x; ++tile_x) {
-                const int target_x = tile.offset.x + tile_x;
-                if (target_x < 0 || target_x >= static_cast<int>(width_)) {
-                    continue;
-                }
-                const std::size_t source =
-                    (static_cast<std::size_t>(source_y) * tile.size.x + tile_x)
-                        * static_cast<std::size_t>(components);
-                const std::size_t target =
-                    (static_cast<std::size_t>(target_y) * width_ + target_x) * 4U;
-                float red = 0.0F;
-                float green = 0.0F;
-                float blue = 0.0F;
-                float alpha = 1.0F;
-                if (active_pass == CYCLES_BRIDGE_PASS_DEPTH) {
-                    const float depth = pixels[source];
-                    const float value = std::isfinite(depth)
-                        ? 1.0F - std::exp(-std::max(0.0F, depth) * 8.0F / depth_far)
-                        : 1.0F;
-                    red = green = blue = value;
-                } else if (active_pass == CYCLES_BRIDGE_PASS_NORMAL) {
-                    red = pixels[source] * 0.5F + 0.5F;
-                    green = pixels[source + 1U] * 0.5F + 0.5F;
-                    blue = pixels[source + 2U] * 0.5F + 0.5F;
-                } else if (active_pass == CYCLES_BRIDGE_PASS_ROUGHNESS) {
-                    red = green = blue = pixels[source];
-                } else if (active_pass == CYCLES_BRIDGE_PASS_SAMPLE_COUNT) {
-                    const float value = pixels[source] / static_cast<float>(target_samples);
-                    red = green = blue = value;
-                } else {
-                    red = pixels[source] * exposure_scale;
-                    green = pixels[source + 1U] * exposure_scale;
-                    blue = pixels[source + 2U] * exposure_scale;
-                    if (active_pass == CYCLES_BRIDGE_PASS_COMBINED) {
-                        alpha = pixels[source + 3U];
-                    }
-                    if (view_transform != 1U) {
-                        red = linear_to_srgb(red);
-                        green = linear_to_srgb(green);
-                        blue = linear_to_srgb(blue);
-                    }
-                    if (!nearly_equal(gamma, 1.0F, 1.0e-6)) {
-                        const float inverse_gamma = 1.0F / gamma;
-                        red = std::pow(std::max(0.0F, red), inverse_gamma);
-                        green = std::pow(std::max(0.0F, green), inverse_gamma);
-                        blue = std::pow(std::max(0.0F, blue), inverse_gamma);
-                    }
-                }
-                rgba_[target] = to_unorm(red);
-                rgba_[target + 1U] = to_unorm(green);
-                rgba_[target + 2U] = to_unorm(blue);
-                rgba_[target + 3U] = to_unorm(alpha);
-            }
-        }
+    ccl::half4* display_buffer() {
+        return rgba_half_.empty() ? nullptr : rgba_half_.data();
+    }
+
+    void display_update_end() {
         const auto completed = std::chrono::steady_clock::now();
-        last_convert_micros_ = elapsed_micros(convert_start, completed);
+        last_convert_micros_ = elapsed_micros(display_update_started_, completed);
         ema_convert_micros_ = update_ema(ema_convert_micros_, last_convert_micros_);
         max_convert_micros_ = std::max(max_convert_micros_, last_convert_micros_);
         produced_frame_count_++;
         last_frame_completed_ = completed;
         generation_++;
-        return true;
+        display_update_active_ = false;
+        mutex_.unlock();
+    }
+
+    void zero_display() {
+        std::lock_guard lock(mutex_);
+        const ccl::half zero(0U);
+        std::fill(
+            rgba_half_.begin(),
+            rgba_half_.end(),
+            ccl::half4{zero, zero, zero, zero});
     }
 
     void set_sample_count(int sample_count) {
@@ -533,7 +480,7 @@ class FrameStore final {
         frame.sample_count = static_cast<std::uint32_t>(std::max(0, sample_count_));
         frame.pixel_byte_count = 0;
         frame.flags = 0;
-        if (rgba_.empty() || width_ == 0 || height_ == 0) {
+        if (rgba_half_.empty() || width_ == 0 || height_ == 0) {
             return true;
         }
 
@@ -542,26 +489,30 @@ class FrameStore final {
             unchanged_poll_count_++;
             return true;
         }
-        if (output == nullptr || capacity < rgba_.size()) {
+        const std::size_t output_size =
+            static_cast<std::size_t>(width_) * height_ * 4U;
+        if (output == nullptr || capacity < output_size) {
             error = "native frame output buffer is too small";
             return false;
         }
         const auto copy_start = std::chrono::steady_clock::now();
-        std::memcpy(output, rgba_.data(), rgba_.size());
+        for (std::size_t index = 0; index < rgba_half_.size(); ++index) {
+            write_compatibility_pixel(output + index * 4U, rgba_half_[index]);
+        }
         const auto copy_end = std::chrono::steady_clock::now();
         last_copy_micros_ = elapsed_micros(copy_start, copy_end);
         ema_copy_micros_ = update_ema(ema_copy_micros_, last_copy_micros_);
         max_copy_micros_ = std::max(max_copy_micros_, last_copy_micros_);
         copied_frame_count_++;
-        copied_byte_count_ += rgba_.size();
-        frame.pixel_byte_count = static_cast<std::uint32_t>(rgba_.size());
+        copied_byte_count_ += output_size;
+        frame.pixel_byte_count = static_cast<std::uint32_t>(output_size);
         frame.flags |= CYCLES_BRIDGE_FRAME_UPDATED;
         return true;
     }
 
     void copy_scaled(std::uint8_t* output, std::uint32_t width, std::uint32_t height) const {
         std::lock_guard lock(mutex_);
-        if (rgba_.empty() || width_ == 0 || height_ == 0) {
+        if (rgba_half_.empty() || width_ == 0 || height_ == 0) {
             for (std::uint64_t pixel = 0; pixel < static_cast<std::uint64_t>(width) * height;
                  ++pixel) {
                 output[pixel * 4U] = 104U;
@@ -581,17 +532,17 @@ class FrameStore final {
                     width_ - 1U,
                     static_cast<std::uint32_t>(static_cast<std::uint64_t>(x) * width_ / width));
                 const std::size_t source =
-                    (static_cast<std::size_t>(source_y) * width_ + source_x) * 4U;
+                    static_cast<std::size_t>(source_y) * width_ + source_x;
                 const std::size_t target =
                     (static_cast<std::size_t>(y) * width + x) * 4U;
-                std::memcpy(output + target, rgba_.data() + source, 4U);
+                write_compatibility_pixel(output + target, rgba_half_[source]);
             }
         }
     }
 
     [[nodiscard]] bool ready() const {
         std::lock_guard lock(mutex_);
-        return !rgba_.empty();
+        return !rgba_half_.empty();
     }
 
     [[nodiscard]] std::uint64_t generation() const {
@@ -615,7 +566,7 @@ class FrameStore final {
         diagnostics.width = width_;
         diagnostics.height = height_;
         diagnostics.sample_count = static_cast<std::uint32_t>(std::max(0, sample_count_));
-        diagnostics.frame_ready = rgba_.empty() ? 0U : 1U;
+        diagnostics.frame_ready = rgba_half_.empty() ? 0U : 1U;
         diagnostics.produced_frame_count = produced_frame_count_;
         diagnostics.copied_frame_count = copied_frame_count_;
         diagnostics.copied_byte_count = copied_byte_count_;
@@ -630,9 +581,46 @@ class FrameStore final {
                 std::chrono::steady_clock::time_point{}
             ? 0U
             : elapsed_micros(last_frame_completed_, std::chrono::steady_clock::now());
+        diagnostics.frame_pixel_format = CYCLES_BRIDGE_PIXEL_FORMAT_RGBA16_FLOAT;
     }
 
  private:
+    void rebuild_display_luts_locked() {
+        for (std::uint32_t bits = 0; bits <= std::numeric_limits<std::uint16_t>::max(); ++bits) {
+            const ccl::half encoded(static_cast<std::uint16_t>(bits));
+            const float source = ccl::half_to_float(encoded);
+            float display = source;
+            if (active_pass_ == CYCLES_BRIDGE_PASS_DEPTH) {
+                display = std::isfinite(source)
+                    ? 1.0F - std::exp(-std::max(0.0F, source) * 8.0F / depth_far_)
+                    : 1.0F;
+            } else if (active_pass_ == CYCLES_BRIDGE_PASS_NORMAL) {
+                display = source * 0.5F + 0.5F;
+            } else if (active_pass_ == CYCLES_BRIDGE_PASS_SAMPLE_COUNT) {
+                display = source / static_cast<float>(target_samples_);
+            } else if (active_pass_ != CYCLES_BRIDGE_PASS_ROUGHNESS) {
+                display *= exposure_scale_;
+                if (view_transform_ != 1U) {
+                    display = linear_to_srgb(display);
+                }
+                if (!nearly_equal(gamma_, 1.0F, 1.0e-6)) {
+                    display = std::pow(std::max(0.0F, display), 1.0F / gamma_);
+                }
+            }
+            display_lut_[bits] = to_unorm(display);
+            alpha_lut_[bits] = to_unorm(source);
+        }
+    }
+
+    void write_compatibility_pixel(std::uint8_t* output, const ccl::half4& pixel) const {
+        output[0] = display_lut_[static_cast<std::uint16_t>(pixel.x)];
+        output[1] = display_lut_[static_cast<std::uint16_t>(pixel.y)];
+        output[2] = display_lut_[static_cast<std::uint16_t>(pixel.z)];
+        output[3] = active_pass_ == CYCLES_BRIDGE_PASS_COMBINED
+            ? alpha_lut_[static_cast<std::uint16_t>(pixel.w)]
+            : 255U;
+    }
+
     mutable std::mutex mutex_;
     std::uint32_t width_ = 0;
     std::uint32_t height_ = 0;
@@ -644,7 +632,12 @@ class FrameStore final {
     std::uint32_t view_transform_ = 0;
     float depth_far_ = 1.0F;
     int target_samples_ = 1;
-    std::vector<std::uint8_t> rgba_;
+    std::vector<ccl::half4> rgba_half_;
+    std::array<std::uint8_t, 65536> display_lut_{};
+    std::array<std::uint8_t, 65536> alpha_lut_{};
+    bool display_lut_ready_ = false;
+    bool display_update_active_ = false;
+    std::chrono::steady_clock::time_point display_update_started_{};
     std::uint64_t produced_frame_count_ = 0;
     std::uint64_t copied_frame_count_ = 0;
     std::uint64_t copied_byte_count_ = 0;
@@ -658,17 +651,34 @@ class FrameStore final {
     std::chrono::steady_clock::time_point last_frame_completed_{};
 };
 
-class FrameOutputDriver final : public ccl::OutputDriver {
+class FrameDisplayDriver final : public ccl::DisplayDriver {
  public:
-    explicit FrameOutputDriver(FrameStore& frames) : frames_(frames) {}
+    explicit FrameDisplayDriver(FrameStore& frames) : frames_(frames) {}
 
-    void write_render_tile(const Tile& tile) override {
-        frames_.update(tile);
+    void next_tile_begin() override {}
+
+    bool update_begin(
+        const Params& params,
+        int texture_width,
+        int texture_height) override {
+        return frames_.display_update_begin(params, texture_width, texture_height);
     }
 
-    bool update_render_tile(const Tile& tile) override {
-        return frames_.update(tile);
+    void update_end() override {
+        frames_.display_update_end();
     }
+
+    ccl::half4* map_texture_buffer() override {
+        return frames_.display_buffer();
+    }
+
+    void unmap_texture_buffer() override {}
+
+    void zero() override {
+        frames_.zero_display();
+    }
+
+    void draw(const Params&) override {}
 
  private:
     FrameStore& frames_;
@@ -1670,7 +1680,7 @@ class CyclesEngine::Impl final {
         ccl::SceneParams scene_params;
         scene_params.background = false;
         auto session = ccl::make_unique<ccl::Session>(session_params, scene_params);
-        session->set_output_driver(ccl::make_unique<FrameOutputDriver>(frames_));
+        session->set_display_driver(ccl::make_unique<FrameDisplayDriver>(frames_));
         create_output_passes(session->scene.get(), settings);
         build_scene(session->scene.get(), scene_request, runtime);
         const std::uint32_t effective_denoiser =

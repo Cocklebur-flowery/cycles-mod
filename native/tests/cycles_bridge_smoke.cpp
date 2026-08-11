@@ -235,7 +235,7 @@ bool wait_for_actual_sample(
 int main(int argc, char** argv) {
     const bool require_optix = argc > 1 && std::strcmp(argv[1], "--require-optix") == 0;
     std::cerr << "[smoke] ABI check\n";
-    if (cycles_bridge_abi_version() != 10U) {
+    if (cycles_bridge_abi_version() != 11U) {
         std::cerr << "unexpected native ABI " << cycles_bridge_abi_version() << '\n';
         return 1;
     }
@@ -449,6 +449,7 @@ int main(int argc, char** argv) {
         || diagnostics.copied_frame_count == 0U
         || diagnostics.copied_byte_count
             < static_cast<std::uint64_t>(kWidth) * kHeight * 4U
+        || diagnostics.frame_pixel_format != CYCLES_BRIDGE_PIXEL_FORMAT_RGBA16_FLOAT
         || diagnostics.sampling_state == CYCLES_BRIDGE_SAMPLING_IDLE) {
         std::cerr << "unexpected diagnostics after Combined restore: revision="
                   << diagnostics.settings_revision << ";pass=" << diagnostics.active_pass

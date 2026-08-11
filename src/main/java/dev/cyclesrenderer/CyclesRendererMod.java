@@ -416,7 +416,13 @@ public final class CyclesRendererMod {
             y += 10;
             graphics.text(
                     minecraft.font,
-                    "native convert us=" + diagnostics.lastConvertMicros()
+                    "store=" + diagnostics.framePixelFormatName()
+                            + " pull=RGBA8_UNORM",
+                    6, y, 0xFFE0E0E0);
+            y += 10;
+            graphics.text(
+                    minecraft.font,
+                    "native display us=" + diagnostics.lastConvertMicros()
                             + "/" + diagnostics.emaConvertMicros()
                             + "/" + diagnostics.maxConvertMicros()
                             + " age=" + diagnostics.frameAgeMicros(),

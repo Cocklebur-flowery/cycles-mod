@@ -23,7 +23,7 @@ import static java.lang.foreign.ValueLayout.JAVA_INT;
 import static java.lang.foreign.ValueLayout.JAVA_LONG;
 
 public final class NativeBridge {
-    public static final int ABI_VERSION = 10;
+    public static final int ABI_VERSION = 11;
 
     private static final String LIBRARY_PATH_PROPERTY = "cyclesrenderer.nativeLibrary";
     private static final int STRUCT_VERSION = 1;
@@ -794,7 +794,8 @@ public final class NativeBridge {
                     diagnosticsSegment.get(JAVA_INT, 220L),
                     diagnosticsSegment.get(JAVA_INT, 224L),
                     diagnosticsSegment.get(JAVA_INT, 228L),
-                    diagnosticsSegment.get(JAVA_INT, 232L));
+                    diagnosticsSegment.get(JAVA_INT, 232L),
+                    diagnosticsSegment.get(JAVA_INT, 236L));
         }
 
         private RenderedFrame renderFrame(
@@ -1099,7 +1100,8 @@ public final class NativeBridge {
             int maxSceneDeltaMicros,
             int lastRenderStartMicros,
             int emaRenderStartMicros,
-            int maxRenderStartMicros) {
+            int maxRenderStartMicros,
+            int framePixelFormat) {
         public String stateName() {
             return switch (stateCode) {
                 case 1 -> "scene-staging";
@@ -1145,6 +1147,14 @@ public final class NativeBridge {
                 case 2 -> "settling";
                 case 3 -> "still";
                 default -> "idle";
+            };
+        }
+
+        public String framePixelFormatName() {
+            return switch (framePixelFormat) {
+                case 1 -> "RGBA8_UNORM";
+                case 2 -> "RGBA16_FLOAT";
+                default -> "unknown";
             };
         }
     }

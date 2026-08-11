@@ -33,6 +33,12 @@ enum CyclesBridgeFrameFlags : std::uint32_t {
     CYCLES_BRIDGE_FRAME_UPDATED = 1U << 1U,
 };
 
+enum CyclesBridgePixelFormat : std::uint32_t {
+    CYCLES_BRIDGE_PIXEL_FORMAT_UNKNOWN = 0,
+    CYCLES_BRIDGE_PIXEL_FORMAT_RGBA8_UNORM = 1,
+    CYCLES_BRIDGE_PIXEL_FORMAT_RGBA16_FLOAT = 2,
+};
+
 enum CyclesBridgeCapabilityFlags : std::uint64_t {
     CYCLES_BRIDGE_CAPABILITY_SETTINGS = 1ULL << 0U,
     CYCLES_BRIDGE_CAPABILITY_PASS_VIEWER = 1ULL << 1U,
@@ -252,7 +258,7 @@ struct CyclesBridgeDiagnostics {
     std::uint32_t last_render_start_micros;
     std::uint32_t ema_render_start_micros;
     std::uint32_t max_render_start_micros;
-    std::uint32_t reserved_v9;
+    std::uint32_t frame_pixel_format;
 };
 
 struct CyclesBridgeVertex {
