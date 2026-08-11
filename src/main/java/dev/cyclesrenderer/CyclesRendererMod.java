@@ -339,6 +339,8 @@ public final class CyclesRendererMod {
             NativeBridge.Diagnostics diagnostics = NativeBridge.diagnostics();
             CyclesRenderSettings settings = CyclesClientConfig.snapshot();
             CyclesFramePresenter.Telemetry presentation = FRAME_PRESENTER.telemetry();
+            SectionGeometryCollector.Telemetry capture = SectionGeometryCollector.telemetry();
+            SectionSceneManager.Telemetry scene = SCENE_MANAGER.telemetry();
             graphics.text(
                     minecraft.font,
                     diagnostics.deviceName() + " / denoise " + diagnostics.denoiserName()
@@ -413,6 +415,42 @@ public final class CyclesRendererMod {
                             + " count=" + presentation.uploadCount()
                             + " gaps=" + presentation.generationGaps()
                             + " MiB=" + oneDecimalMebibytes(presentation.uploadedBytes()),
+                    6, y, 0xFFE0E0E0);
+            y += 10;
+            graphics.text(
+                    minecraft.font,
+                    "capture us=" + capture.lastCaptureMicros()
+                            + "/" + capture.emaCaptureMicros()
+                            + "/" + capture.maxCaptureMicros()
+                            + " count=" + capture.captureCount()
+                            + " queued=" + capture.queuedCount()
+                            + " replaced=" + capture.replacedCount(),
+                    6, y, 0xFFE0E0E0);
+            y += 10;
+            graphics.text(
+                    minecraft.font,
+                    "scene java us=" + scene.lastUpdateMicros()
+                            + "/" + scene.emaUpdateMicros()
+                            + "/" + scene.maxUpdateMicros()
+                            + " accepted=" + scene.lastAcceptedSections()
+                            + " pending=" + scene.pendingCommit(),
+                    6, y, 0xFFE0E0E0);
+            y += 10;
+            graphics.text(
+                    minecraft.font,
+                    "section ffi upsert us=" + scene.lastUpsertMicros()
+                            + "/" + scene.emaUpsertMicros()
+                            + "/" + scene.maxUpsertMicros()
+                            + " remove=" + scene.lastRemoveMicros()
+                            + "/" + scene.emaRemoveMicros()
+                            + "/" + scene.maxRemoveMicros(),
+                    6, y, 0xFFE0E0E0);
+            y += 10;
+            graphics.text(
+                    minecraft.font,
+                    "section ffi commit us=" + scene.lastCommitMicros()
+                            + "/" + scene.emaCommitMicros()
+                            + "/" + scene.maxCommitMicros(),
                     6, y, 0xFFE0E0E0);
         } catch (RuntimeException error) {
             graphics.text(

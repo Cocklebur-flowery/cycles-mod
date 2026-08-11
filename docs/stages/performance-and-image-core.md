@@ -90,7 +90,7 @@ F10 叠加层采用“当前值 + 最近窗口统计”，不把目标值伪装�
 | P0 | `docs: record performance and image pipeline stage` | 本文档、指标字典、瓶颈假设 | 已完成（`7afa984`） |
 | P1 | `feat: report actual render sampling` | ABI v7、实际/目标 sample、sample state/rate、F10 | 已完成（本提交） |
 | P2 | `perf: add frame pipeline telemetry` | Native convert/copy、Java/Vulkan upload、帧计数 | 已完成（本提交） |
-| P3 | `perf: trace section update latency` | 捕获/upsert/commit/队列与卡顿热点 | 待开始 |
+| P3 | `perf: trace section update latency` | 捕获/upsert/commit/队列与卡顿热点 | Java 路径已完成，Native 待开始 |
 | P4 | `perf: throttle display frame delivery` | 上传限频、latest-only、保留上一有效帧 | 待开始 |
 | P5 | `perf: adopt cycles half-float display driver` | Cycles DisplayDriver、RGBA16F、移除 CPU RGBA8/pow | 待开始 |
 | P6 | `perf: add acquired frame ring buffers` | Native 双/三缓冲、FFM acquire/release | 待开始 |
@@ -139,3 +139,9 @@ P1 至 P4 完成后进行一次 1080p 游戏人工里程碑：观察实际 sampl
 - Native 统计成功产生的显示更新、复制到 FFM 的帧、复制字节和 generation 未变化的轮询；帧龄在查询时计算。
 - Java 统计整个 NativeBridge 帧调用的 CPU 时间，以及 Minecraft Vulkan `writeToTexture` 入队的 CPU 时间、上传次数/字节和 generation 间隙。
 - 这些数值描述 CPU 提交与内存搬运，不冒充 GPU 执行时间；GPU 时间需要后续 Vulkan timestamp query 才能确认。
+
+### P3a：Java Section 更新遥测
+
+- `SectionGeometryCollector` 以原子计数记录编译网格 decode/copy 的 last/EMA/max、捕获数、等待数和同 Section 覆盖数。
+- `SectionSceneManager` 记录每个渲染帧的场景筛选总时间，以及 FFM upsert/remove/commit 各自的 last/EMA/max。
+- F10 将这些值与帧管线值同时显示；方块更新卡顿时可先判断峰值发生在 Minecraft 网格捕获、Java/FFM，还是后续 Native/Cycles 场景应用。

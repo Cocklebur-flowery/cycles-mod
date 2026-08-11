@@ -27,6 +27,12 @@ public final class SectionGeometryCollector {
     private static final ConcurrentLinkedQueue<Long> COMPLETED =
             new ConcurrentLinkedQueue<>();
     private static final AtomicLong SEQUENCE = new AtomicLong();
+    private static final AtomicLong QUEUED_COUNT = new AtomicLong();
+    private static final AtomicLong CAPTURE_COUNT = new AtomicLong();
+    private static final AtomicLong REPLACED_COUNT = new AtomicLong();
+    private static final AtomicLong LAST_CAPTURE_MICROS = new AtomicLong();
+    private static final AtomicLong EMA_CAPTURE_MICROS = new AtomicLong();
+    private static final AtomicLong MAX_CAPTURE_MICROS = new AtomicLong();
 
     private static volatile boolean enabled;
     private static volatile ClientLevel activeLevel;
@@ -50,11 +56,18 @@ public final class SectionGeometryCollector {
     public static void clear() {
         COMPLETED.clear();
         PENDING.clear();
+        QUEUED_COUNT.set(0L);
+        CAPTURE_COUNT.set(0L);
+        REPLACED_COUNT.set(0L);
+        LAST_CAPTURE_MICROS.set(0L);
+        EMA_CAPTURE_MICROS.set(0L);
+        MAX_CAPTURE_MICROS.set(0L);
     }
 
     public static SectionGeometrySnapshot poll() {
         Long sectionNode;
         while ((sectionNode = COMPLETED.poll()) != null) {
+            QUEUED_COUNT.updateAndGet(value -> Math.max(0L, value - 1L));
             SectionGeometrySnapshot snapshot = PENDING.remove(sectionNode);
             if (snapshot != null) {
                 return snapshot;
@@ -73,6 +86,7 @@ public final class SectionGeometryCollector {
             return;
         }
 
+        long captureStart = System.nanoTime();
         try {
             SectionGeometrySnapshot snapshot = decode(
                     sectionPos, results, SEQUENCE.incrementAndGet());
@@ -81,10 +95,35 @@ public final class SectionGeometryCollector {
             }
             if (PENDING.put(sectionPos.asLong(), snapshot) == null) {
                 COMPLETED.add(sectionPos.asLong());
+                QUEUED_COUNT.incrementAndGet();
+            } else {
+                REPLACED_COUNT.incrementAndGet();
             }
         } catch (RuntimeException error) {
             LOGGER.warn("Failed to copy compiled Minecraft section {}", sectionPos, error);
+        } finally {
+            recordCapture(System.nanoTime() - captureStart);
         }
+    }
+
+    public static Telemetry telemetry() {
+        return new Telemetry(
+                CAPTURE_COUNT.get(),
+                REPLACED_COUNT.get(),
+                QUEUED_COUNT.get(),
+                PENDING.size(),
+                LAST_CAPTURE_MICROS.get(),
+                EMA_CAPTURE_MICROS.get(),
+                MAX_CAPTURE_MICROS.get());
+    }
+
+    private static void recordCapture(long elapsedNanos) {
+        long micros = Math.max(0L, (elapsedNanos + 999L) / 1_000L);
+        CAPTURE_COUNT.incrementAndGet();
+        LAST_CAPTURE_MICROS.set(micros);
+        EMA_CAPTURE_MICROS.updateAndGet(
+                previous -> previous == 0L ? micros : (previous * 7L + micros) / 8L);
+        MAX_CAPTURE_MICROS.accumulateAndGet(micros, Math::max);
     }
 
     private static SectionGeometrySnapshot decode(
@@ -217,5 +256,15 @@ public final class SectionGeometryCollector {
             vertices[target + 4] = normalY;
             vertices[target + 5] = normalZ;
         }
+    }
+
+    public record Telemetry(
+            long captureCount,
+            long replacedCount,
+            long queuedCount,
+            int pendingSnapshots,
+            long lastCaptureMicros,
+            long emaCaptureMicros,
+            long maxCaptureMicros) {
     }
 }
