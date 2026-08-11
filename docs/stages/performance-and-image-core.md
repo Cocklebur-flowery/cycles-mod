@@ -21,7 +21,7 @@ Minecraft Section 增量
 
 同时建立可扩展 Pass 缓存、交互/静止渐进采样、OptiX/OIDN 降噪、Blender AgX、ACES 2、蓝噪声和物理相机设置。Windows 真 HDR swapchain 与 CUDA/Vulkan 外部内存互操作是独立的高风险验证，不阻塞上述主路径。
 
-## 2. 当前基线与瓶颈假设
+## 2. 阶段起始基线与瓶颈假设
 
 ### 2.1 已确认的实现事实
 
@@ -95,7 +95,7 @@ F10 叠加层采用“当前值 + 最近窗口统计”，不把目标值伪装�
 | P4 | `perf: throttle display frame delivery` | 上传限频、latest-only、保留上一有效帧 | 已完成（本提交） |
 | P5 | `perf: adopt cycles half-float display driver` | Cycles DisplayDriver、RGBA16F、移除热路径 CPU `pow` | 已完成（本提交） |
 | P6 | `perf: add acquired frame ring buffers` | Native 三缓冲、FFM acquire/release | 已完成（本提交） |
-| P7 | `feat: present scene-linear rgba16f frames` | Vulkan RGBA16F 与最小显示 Shader | 待开始 |
+| P7 | `feat: present scene-linear rgba16f frames` | Vulkan RGBA16F 与最小显示 Shader | 已完成（P7a/P7b） |
 | P8 | `feat: add progressive interaction states` | Interactive/Settling/Still 和动态分辨率 | 待开始 |
 | P9 | `feat: add typed pass cache` | Pass 注册表、内存预算、raw/denoised 分离 | 待开始 |
 | P10 | `feat: schedule cycles denoisers` | OptiX/OIDN 能力、调度与 OIDN 构建 | 待开始 |
@@ -179,3 +179,9 @@ P1 至 P4 完成后进行一次 1080p 游戏人工里程碑：观察实际 sampl
 - Minecraft 实时帧改为消费 ABI v12 acquired view，不再调用 `render_frame` 的 RGBA8 兼容拷贝。
 - Presenter 创建 `GpuFormat.RGBA16_FLOAT` 纹理并按每像素 8 字节上传；命令上传记录后立即释放 Native 槽位租约。
 - RGBA8 转换仍供 native smoke 与旧调用者使用，但已离开游戏实时渲染循环。
+
+### P7b：最小 GPU 显示变换
+
+- NeoForge 注册 `cyclesrenderer:pipeline/present` 全屏 pipeline，输入为 scene-linear RGBA16F，输出到 Minecraft 主颜色目标。
+- 32 字节 `CyclesDisplay` uniform 在设置 revision 或远裁剪变化时更新；曝光、Gamma、Raw/Standard 和调试 Pass 映射均在 GPU shader 执行。
+- AgX、Khronos PBR Neutral 与 ACES 目前仍使用 Standard 的临时曲线；P11 将由打包的 OCIO GPU processor 替换这一占位行为。

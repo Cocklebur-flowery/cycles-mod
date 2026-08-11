@@ -257,7 +257,7 @@ Minecraft 相机持续运动，不能直接照搬 Blender 离线渲染的单一�
 - 查询实际可用性；界面不能显示一个运行时不可用的选项为“正常”。
 - 指定降噪器失败时按照设置决定自动回退或报告错误，不能导致 Minecraft 崩溃。
 
-当前实现状态：ABI v12 已区分“配置请求”“构建时编译能力”“设备枚举能力”和“当前实际生效降噪器”，追加实际采样、帧管线和场景更新遥测，将相机更新与成品帧复制解耦，通过 Cycles DisplayDriver 保存 scene-linear RGBA16F，并用三槽 acquire/release 租约向 FFM 暴露稳定只读帧。OptiX 已在 RTX 5080 的 native 冒烟中实际启用并产出画面；当前 Cycles 静态库仍以 `WITH_CYCLES_OPENIMAGEDENOISE=OFF` 构建，因此 OIDN 会准确报告为不可用，未假装已经支持。重建 Cycles/OIDN 及部署 DLL 保留到后续独立阶段。
+当前实现状态：ABI v12 已区分“配置请求”“构建时编译能力”“设备枚举能力”和“当前实际生效降噪器”，追加实际采样、帧管线和场景更新遥测，将相机更新与成品帧复制解耦，通过 Cycles DisplayDriver 保存 scene-linear RGBA16F，并用三槽 acquire/release 租约向 FFM 暴露稳定只读帧。Minecraft 实时路径直接上传该 RGBA16F view，旧 RGBA8 转换只保留给兼容调用与 smoke。OptiX 已在 RTX 5080 的 native 冒烟中实际启用并产出画面；当前 Cycles 静态库仍以 `WITH_CYCLES_OPENIMAGEDENOISE=OFF` 构建，因此 OIDN 会准确报告为不可用，未假装已经支持。重建 Cycles/OIDN 及部署 DLL 保留到后续独立阶段。
 
 ### 6.4 线性 HDR 与色彩管理
 
@@ -291,7 +291,7 @@ Scene Linear Pass
 
 第一版最终仍写入 Minecraft 当前 SDR RGBA8 主纹理。HDR10/Display P3/Rec.2020 输出需要确认 Minecraft Vulkan swapchain 与操作系统 HDR 状态，属于后续范围。
 
-当前实现状态：设置 ID、EV、Gamma、Standard/Raw 输出路径已经接通，但 FrameStore 仍在接收 Tile 时转换并保存 RGBA8，没有建立可复用的 Scene Linear HDR Pass cache。`AgX` 与 `Khronos PBR Neutral` 已有稳定配置 ID 和 UI 选项，但在 Blender `config.ocio`/LUT 正式部署前按 Standard 显示；这不是 Blender AgX 的近似实现，也不能宣称 OCIO 色彩管理已经完成。
+当前实现状态：设置 ID、EV、Gamma、Standard/Raw 输出路径已经接通；FrameStore、FFM view 和 Minecraft 上传纹理均保持 Scene Linear RGBA16F，曝光、Gamma 与基础 Pass 映射由专用 Vulkan 显示 shader 执行，但还没有建立可复用的类型化 HDR Pass cache。`AgX` 与 `Khronos PBR Neutral` 已有稳定配置 ID 和 UI 选项，但在 Blender `config.ocio`/LUT 正式部署前按 Standard 显示；这不是 Blender AgX 的近似实现，也不能宣称 OCIO 色彩管理已经完成。
 
 ### 6.5 设置变更语义
 

@@ -19,10 +19,10 @@
 - 设置页开放设备策略、分辨率、交互/静止采样、自适应采样、时间限制、光程反弹、Clamp、像素过滤、种子、降噪、EV、Gamma、查看变换、活动 Pass 和诊断开关。设置按 revision 异步提交给 Cycles 工作线程。
 - Pass 查看器按需创建并显示 `Combined`、`Depth`、`Normal`、`Diffuse Color`、`Emission`、`Roughness` 和 `Sample Count`，不会同时把所有 Pass 复制到 Java/Vulkan。
 - 运行时能力查询会报告实际设备、可用 Pass 和降噪器。当前构建已验证 RTX 5080 上的 OptiX 降噪；OpenImageDenoise 仍未编入 Cycles 静态库，因此会报告不可用。
-- Java 每次只上传 Native 的低分辨率新帧；Minecraft Vulkan 使用全屏三角形在 GPU 上最近邻放大到主渲染目标，不再在 CPU 上生成 4K RGBA 临时帧。
+- Java 每次只租用并上传 Native 的低分辨率 RGBA16F 新帧；Minecraft Vulkan 使用专用全屏 pipeline 在 GPU 上完成基础显示变换并最近邻放大到主渲染目标，不再在 CPU 上生成 4K RGBA 临时帧。
 - Minecraft 的 Vulkan swapchain、纹理和命令编码器仍由 Minecraft 管理；Cycles 不使用 Vulkan。
 
-当前显示缓存仍是 RGBA8，不是可复用的线性 HDR Pass 缓存。`Standard` 和调试用 `Raw` 已生效，EV/Gamma 在输出转换时应用；`AgX` 与 `Khronos PBR Neutral` 的配置 ID 已预留，但在 Blender OCIO 配置/LUT 正式部署前按 `Standard` 显示，不能视为 Blender 色彩管理已经完成。暂未实现 OpenImageDenoise、正确的玻璃/水折射材质、方块实体、实体、天空系统、动态光源、LabPBR 和跨平台打包。
+当前 Native DisplayDriver 与 Minecraft 上传纹理已保持 scene-linear RGBA16F，但尚未建立可复用的类型化 HDR Pass 缓存。`Standard` 和调试用 `Raw` 已生效，EV/Gamma 在 GPU 显示 shader 中应用；`AgX` 与 `Khronos PBR Neutral` 的配置 ID 已预留，但在 Blender OCIO 配置/LUT 正式部署前按 `Standard` 显示，不能视为 Blender 色彩管理已经完成。暂未实现 OpenImageDenoise、正确的玻璃/水折射材质、方块实体、实体、天空系统、动态光源、LabPBR 和跨平台打包。
 
 普通 Section 修改已经下沉到现有 Cycles Scene；但几何规模变化以及 Section 增删仍会让 Cycles 更新设备几何和加速结构，不能视为零成本局部 BVH 更新。共享图集、场景原点或设备变化仍会重建 Session。
 
@@ -108,9 +108,9 @@ Minecraft SectionCompiler（16³ Section、流体、NeoForge 追加几何）
   -> 现有 Cycles Session 内按 Section ID 新建、原地更新或删除 Mesh/Object
   -> 共享图集与 Opaque/Cutout/Blend 材质
   -> Cycles Session（OptiX -> CUDA -> CPU）
-  -> OutputDriver 最新渐进帧
-  -> 低分辨率 RGBA8 Vulkan 纹理
-  -> Minecraft Vulkan 全屏三角形 GPU 放大
+  -> DisplayDriver 三槽 scene-linear RGBA16F 最新渐进帧
+  -> FFM acquire/release + RGBA16F Vulkan 纹理
+  -> Minecraft Vulkan 全屏三角形 GPU 显示变换与放大
 ```
 
 场景变更先在 Java/Native 暂存区按 Section ID 合并。首批 Section 等待 750 ms 安静窗口后提交，后续更新等待 100 ms，不再用固定最大间隔强制提交半成品场景。每帧最多处理 24 个 Section 且限制约 4 ms Java 上传预算。Native 复用未变化 Section 的节点、原地改写已变化 Mesh，并只为新增/卸载 Section 创建或删除节点；相机位置、朝向、FOV 或输出尺寸变化时请求交互帧，静止后请求更高采样帧。
@@ -124,7 +124,7 @@ DH Provider 代码仍隔离保留，但本阶段不再把其低模高度场合�
 - `CyclesSettingsScreen.java`：设置总览、NeoForge 配置页入口、Pass 快捷切换与能力检测。
 - `SectionCompilerMixin.java` / `SectionGeometryCollector.java`：复制原版已编译 Section 网格并合并重复重编译。
 - `SectionSceneManager.java`：视距、世界/资源代次、区块卸载、增量缓存和提交节奏。
-- `CyclesFramePresenter.java`：低分辨率帧纹理与 Vulkan GPU 全屏放大；没有已上传纹理时不会用 Native 的旧 ready 标记遮住原版世界。
+- `CyclesFramePresenter.java` / `CyclesRenderPipelines.java`：RGBA16F 帧纹理、显示 uniform 和 Vulkan GPU 全屏显示变换/放大；没有已上传纹理时不会用 Native 的旧 ready 标记遮住原版世界。
 - `ClientRenderSnapshot.java`：旧固定范围采集实现，当前活动路径不再使用，保留作过渡参考。
 - `DistantHorizonsSceneProvider.java`：反射检测 DH API 7，在后台读取 Terrain Repo 并发布不可变远景高度场。
 - `NativeBridge.java`：Java 25 FFM 布局、native 生命周期和 ABI 校验。

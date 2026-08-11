@@ -6,6 +6,7 @@ import dev.cyclesrenderer.config.CyclesClientConfig;
 import dev.cyclesrenderer.config.CyclesRenderSettings;
 import dev.cyclesrenderer.nativebridge.NativeBridge;
 import dev.cyclesrenderer.render.CyclesFramePresenter;
+import dev.cyclesrenderer.render.CyclesRenderPipelines;
 import dev.cyclesrenderer.scene.DistantHorizonsSceneProvider;
 import dev.cyclesrenderer.scene.SectionGeometryCollector;
 import dev.cyclesrenderer.scene.SectionSceneManager;
@@ -86,6 +87,7 @@ public final class CyclesRendererMod {
                 (registeredContainer, parent) ->
                         new CyclesSettingsScreen(registeredContainer, parent));
         modEventBus.addListener(CyclesRendererMod::registerKeyMappings);
+        modEventBus.addListener(CyclesRenderPipelines::register);
         modEventBus.addListener(CyclesRendererMod::addClientReloadListeners);
         modEventBus.addListener(CyclesRendererMod::onConfigLoading);
         modEventBus.addListener(CyclesRendererMod::onConfigReloading);
@@ -260,7 +262,10 @@ public final class CyclesRendererMod {
             } else {
                 skippedFrameDeliveryCount++;
             }
-            FRAME_PRESENTER.present(mainTarget);
+            FRAME_PRESENTER.present(
+                    mainTarget,
+                    CyclesClientConfig.snapshot(),
+                    cameraInput.depthFar());
 
             now = System.nanoTime();
             if (framePolled

@@ -1,14 +1,17 @@
 package dev.cyclesrenderer.render;
 
 import com.mojang.blaze3d.GpuFormat;
+import com.mojang.blaze3d.buffers.GpuBuffer;
 import com.mojang.blaze3d.pipeline.RenderTarget;
 import com.mojang.blaze3d.pipeline.TextureTarget;
 import com.mojang.blaze3d.systems.RenderPass;
 import com.mojang.blaze3d.systems.RenderSystem;
 import com.mojang.blaze3d.textures.FilterMode;
+import dev.cyclesrenderer.config.CyclesRenderSettings;
 import dev.cyclesrenderer.nativebridge.NativeBridge;
-import net.minecraft.client.renderer.RenderPipelines;
 
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
 import java.util.Objects;
 import java.util.Optional;
 
@@ -22,6 +25,11 @@ public final class CyclesFramePresenter {
     private long lastUploadMicros;
     private long emaUploadMicros;
     private long maxUploadMicros;
+    private GpuBuffer displayUniformBuffer;
+    private final ByteBuffer displayUniformData = ByteBuffer.allocateDirect(32)
+            .order(ByteOrder.nativeOrder());
+    private long displaySettingsRevision = Long.MIN_VALUE;
+    private int displayDepthFarBits;
 
     public void update(NativeBridge.AcquiredFrame frame) {
         RenderSystem.assertOnRenderThread();
@@ -70,23 +78,30 @@ public final class CyclesFramePresenter {
         ready = true;
     }
 
-    public void present(RenderTarget output) {
+    public void present(
+            RenderTarget output,
+            CyclesRenderSettings settings,
+            float depthFar) {
         RenderSystem.assertOnRenderThread();
         if (!ready || nativeFrameTarget == null) {
             return;
         }
+        updateDisplayUniforms(settings, depthFar);
         try (RenderPass renderPass = RenderSystem.getDevice()
                 .createCommandEncoder()
                 .createRenderPass(
                         () -> "Cycles frame upscale",
                         Objects.requireNonNull(output.getColorTextureView()),
                         Optional.empty())) {
-            renderPass.setPipeline(RenderPipelines.TRACY_BLIT);
+            renderPass.setPipeline(CyclesRenderPipelines.PRESENT);
             RenderSystem.bindDefaultUniforms(renderPass);
             renderPass.bindTexture(
                     "InSampler",
                     Objects.requireNonNull(nativeFrameTarget.getColorTextureView()),
                     RenderSystem.getSamplerCache().getClampToEdge(FilterMode.NEAREST));
+            renderPass.setUniform(
+                    CyclesRenderPipelines.DISPLAY_UNIFORM,
+                    Objects.requireNonNull(displayUniformBuffer));
             renderPass.draw(3, 1, 0, 0);
         }
     }
@@ -119,10 +134,48 @@ public final class CyclesFramePresenter {
         lastUploadMicros = 0L;
         emaUploadMicros = 0L;
         maxUploadMicros = 0L;
+        displaySettingsRevision = Long.MIN_VALUE;
+        displayDepthFarBits = 0;
         if (nativeFrameTarget != null) {
             nativeFrameTarget.destroyBuffers();
             nativeFrameTarget = null;
         }
+        if (displayUniformBuffer != null) {
+            displayUniformBuffer.close();
+            displayUniformBuffer = null;
+        }
+    }
+
+    private void updateDisplayUniforms(
+            CyclesRenderSettings settings,
+            float depthFar) {
+        int depthBits = Float.floatToIntBits(depthFar);
+        if (displayUniformBuffer != null
+                && displaySettingsRevision == settings.revision()
+                && displayDepthFarBits == depthBits) {
+            return;
+        }
+        if (displayUniformBuffer == null) {
+            displayUniformBuffer = RenderSystem.getDevice().createBuffer(
+                    () -> "Cycles display settings",
+                    GpuBuffer.USAGE_COPY_DST | GpuBuffer.USAGE_UNIFORM,
+                    32L);
+        }
+        displayUniformData.clear();
+        displayUniformData.putFloat((float) Math.pow(2.0, settings.exposureEv()));
+        displayUniformData.putFloat(1.0F / settings.gamma());
+        displayUniformData.putFloat(Math.max(depthFar, 1.0F));
+        displayUniformData.putFloat(Math.max(settings.stillSamples(), 1));
+        displayUniformData.putInt(settings.activePass().nativeId());
+        displayUniformData.putInt(settings.viewTransform().nativeId());
+        displayUniformData.putInt(0);
+        displayUniformData.putInt(0);
+        displayUniformData.flip();
+        RenderSystem.getDevice().createCommandEncoder().writeToBuffer(
+                displayUniformBuffer.slice(),
+                displayUniformData);
+        displaySettingsRevision = settings.revision();
+        displayDepthFarBits = depthBits;
     }
 
     private static long nanosToMicros(long nanos) {
