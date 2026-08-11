@@ -235,7 +235,7 @@ bool wait_for_actual_sample(
 int main(int argc, char** argv) {
     const bool require_optix = argc > 1 && std::strcmp(argv[1], "--require-optix") == 0;
     std::cerr << "[smoke] ABI check\n";
-    if (cycles_bridge_abi_version() != 11U) {
+    if (cycles_bridge_abi_version() != 12U) {
         std::cerr << "unexpected native ABI " << cycles_bridge_abi_version() << '\n';
         return 1;
     }
@@ -438,6 +438,45 @@ int main(int argc, char** argv) {
         cycles_bridge_destroy_renderer(renderer);
         return 1;
     }
+    CyclesBridgeFrameView acquired{};
+    acquired.struct_size = sizeof(acquired);
+    acquired.struct_version = 1;
+    if (!require_ok(
+            cycles_bridge_acquire_frame(renderer, 0U, &acquired),
+            "frame acquire")
+        || (acquired.flags & CYCLES_BRIDGE_FRAME_READY) == 0U
+        || (acquired.flags & CYCLES_BRIDGE_FRAME_UPDATED) == 0U
+        || acquired.width != kWidth || acquired.height != kHeight
+        || acquired.pixel_format != CYCLES_BRIDGE_PIXEL_FORMAT_RGBA16_FLOAT
+        || acquired.pixel_byte_count
+            != static_cast<std::uint64_t>(kWidth) * kHeight * 8U
+        || acquired.token == 0U || acquired.pixels == nullptr) {
+        std::cerr << "acquired frame view is invalid\n";
+        cycles_bridge_destroy_renderer(renderer);
+        return 1;
+    }
+    CyclesBridgeFrameView unchanged{};
+    unchanged.struct_size = sizeof(unchanged);
+    unchanged.struct_version = 1;
+    if (!require_ok(
+            cycles_bridge_acquire_frame(renderer, acquired.generation, &unchanged),
+            "unchanged frame acquire")
+        || (unchanged.flags & CYCLES_BRIDGE_FRAME_READY) == 0U
+        || (unchanged.flags & CYCLES_BRIDGE_FRAME_UPDATED) != 0U
+        || unchanged.token != 0U || unchanged.pixels != nullptr
+        || !require_ok(
+            cycles_bridge_release_frame(renderer, acquired.token),
+            "frame release")) {
+        std::cerr << "frame lease lifecycle is invalid\n";
+        cycles_bridge_destroy_renderer(renderer);
+        return 1;
+    }
+    if (!require_ok(
+            cycles_bridge_query_diagnostics(renderer, &diagnostics),
+            "frame lease diagnostics")) {
+        cycles_bridge_destroy_renderer(renderer);
+        return 1;
+    }
     if (diagnostics.settings_revision != settings.revision
         || diagnostics.active_pass != CYCLES_BRIDGE_PASS_COMBINED
         || diagnostics.width != kWidth || diagnostics.height != kHeight
@@ -450,6 +489,9 @@ int main(int argc, char** argv) {
         || diagnostics.copied_byte_count
             < static_cast<std::uint64_t>(kWidth) * kHeight * 4U
         || diagnostics.frame_pixel_format != CYCLES_BRIDGE_PIXEL_FORMAT_RGBA16_FLOAT
+        || diagnostics.active_frame_leases != 0U
+        || diagnostics.peak_frame_leases == 0U
+        || diagnostics.frame_slot_count != 3U
         || diagnostics.sampling_state == CYCLES_BRIDGE_SAMPLING_IDLE) {
         std::cerr << "unexpected diagnostics after Combined restore: revision="
                   << diagnostics.settings_revision << ";pass=" << diagnostics.active_pass

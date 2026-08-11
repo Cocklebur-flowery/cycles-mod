@@ -94,7 +94,7 @@ F10 叠加层采用“当前值 + 最近窗口统计”，不把目标值伪装�
 | P3 | `perf: trace section update latency` | 捕获/upsert/commit/队列与卡顿热点 | 已完成（Java `89d5c0d`，Native 本提交） |
 | P4 | `perf: throttle display frame delivery` | 上传限频、latest-only、保留上一有效帧 | 已完成（本提交） |
 | P5 | `perf: adopt cycles half-float display driver` | Cycles DisplayDriver、RGBA16F、移除热路径 CPU `pow` | 已完成（本提交） |
-| P6 | `perf: add acquired frame ring buffers` | Native 双/三缓冲、FFM acquire/release | 待开始 |
+| P6 | `perf: add acquired frame ring buffers` | Native 三缓冲、FFM acquire/release | 已完成（本提交） |
 | P7 | `feat: present scene-linear rgba16f frames` | Vulkan RGBA16F 与最小显示 Shader | 待开始 |
 | P8 | `feat: add progressive interaction states` | Interactive/Settling/Still 和动态分辨率 | 待开始 |
 | P9 | `feat: add typed pass cache` | Pass 注册表、内存预算、raw/denoised 分离 | 待开始 |
@@ -166,3 +166,10 @@ P1 至 P4 完成后进行一次 1080p 游戏人工里程碑：观察实际 sampl
 - OptiX 的显示 Pass 由 Cycles 写入 half buffer，不再先读 float Pass、分配临时 float 数组，再在每个像素上执行曝光、sRGB、Gamma `pow` 和 RGBA8 量化。
 - 为保持 v10 `render_frame` 和当前 Minecraft RGBA8 上传路径可运行，Native 在被拉取时使用按 half 位模式预计算的 65,536 项查找表兼容转换；`pow` 只在设置变化时构建查找表，不在逐帧逐像素热路径执行。
 - `CyclesBridgeDiagnostics.frame_pixel_format` 和 F10 明确区分内部 `RGBA16_FLOAT` 与临时拉取 `RGBA8_UNORM`。P6/P7 完成后兼容转换才会从实时显示路径完全移除。
+
+### P6：Acquired-frame 三槽环
+
+- ABI v12 新增 72 字节 `CyclesBridgeFrameView`、`acquire_frame` 和 `release_frame`。View 返回只读 RGBA16F 指针、字节数、generation、sample、格式和不可伪造的槽位 token。
+- Native 维护 3 个独立 half4 槽位；当前发布槽与读者仍持有的槽位都不会被 Cycles 选为下一写入目标。没有空闲槽时丢弃本次显示更新，不阻塞渲染线程等待 Java。
+- Java FFM 将 Native 指针重新解释为受限 `ByteBuffer`，`AcquiredFrame.close()` 先使 Java view 失效，再释放 Native token。消费者必须使用 try-with-resources，且不得跨 `NativeBridge.close()` 保存租约。
+- F10 新增 active/peak lease、槽位数和因槽位繁忙而丢弃的显示更新；Native smoke 验证 updated/unchanged acquire、RGBA16F 字节数、release 和租约遥测。

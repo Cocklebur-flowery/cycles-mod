@@ -23,7 +23,7 @@ import static java.lang.foreign.ValueLayout.JAVA_INT;
 import static java.lang.foreign.ValueLayout.JAVA_LONG;
 
 public final class NativeBridge {
-    public static final int ABI_VERSION = 11;
+    public static final int ABI_VERSION = 12;
 
     private static final String LIBRARY_PATH_PROPERTY = "cyclesrenderer.nativeLibrary";
     private static final int STRUCT_VERSION = 1;
@@ -96,6 +96,21 @@ public final class NativeBridge {
             JAVA_INT.withName("flags"),
             JAVA_INT.withName("sample_count"),
             JAVA_INT.withName("reserved"));
+    private static final MemoryLayout FRAME_VIEW_LAYOUT = MemoryLayout.structLayout(
+            JAVA_INT.withName("struct_size"),
+            JAVA_INT.withName("struct_version"),
+            JAVA_INT.withName("width"),
+            JAVA_INT.withName("height"),
+            JAVA_LONG.withName("generation"),
+            JAVA_INT.withName("sample_count"),
+            JAVA_INT.withName("pixel_format"),
+            JAVA_LONG.withName("pixel_byte_count"),
+            JAVA_LONG.withName("token"),
+            ADDRESS.withName("pixels"),
+            JAVA_INT.withName("flags"),
+            JAVA_INT.withName("reserved_0"),
+            JAVA_INT.withName("reserved_1"),
+            JAVA_INT.withName("reserved_2"));
     private static final MemoryLayout SETTINGS_LAYOUT = MemoryLayout.structLayout(
             JAVA_INT.withName("struct_size"),
             JAVA_INT.withName("struct_version"),
@@ -168,7 +183,10 @@ public final class NativeBridge {
             JAVA_INT.withName("section_count"),
             JAVA_INT.withName("reset_level"),
             JAVA_INT.withName("frame_ready"),
-            MemoryLayout.sequenceLayout(4, JAVA_INT).withName("reserved"),
+            JAVA_INT.withName("active_frame_leases"),
+            JAVA_INT.withName("peak_frame_leases"),
+            JAVA_INT.withName("frame_slot_count"),
+            JAVA_INT.withName("dropped_display_updates"),
             JAVA_INT.withName("target_sample_count"),
             JAVA_INT.withName("sampling_state"),
             JAVA_FLOAT.withName("sample_rate"),
@@ -240,6 +258,7 @@ public final class NativeBridge {
                 || RESOURCES_LAYOUT.byteSize() != 48L
                 || SECTION_LAYOUT.byteSize() != 48L
                 || FRAME_LAYOUT.byteSize() != 40L
+                || FRAME_VIEW_LAYOUT.byteSize() != 72L
                 || SETTINGS_LAYOUT.byteSize() != 208L
                 || CAPABILITIES_LAYOUT.byteSize() != 64L
                 || DIAGNOSTICS_LAYOUT.byteSize() != 240L
@@ -325,6 +344,16 @@ public final class NativeBridge {
         } catch (Throwable error) {
             rethrowFatalError(error);
             throw new IllegalStateException("native camera update failed: " + describe(error), error);
+        }
+    }
+
+    public static AcquiredFrame acquireFrame(long previousGeneration) {
+        BridgeState state = requireState();
+        try {
+            return state.acquireFrame(previousGeneration);
+        } catch (Throwable error) {
+            rethrowFatalError(error);
+            throw new IllegalStateException("native frame acquire failed: " + describe(error), error);
         }
     }
 
@@ -451,10 +480,13 @@ public final class NativeBridge {
         private final MethodHandle removeSection;
         private final MethodHandle commitScene;
         private final MethodHandle updateCamera;
+        private final MethodHandle acquireFrame;
+        private final MethodHandle releaseFrame;
         private final MethodHandle renderFrame;
         private final MemorySegment renderer;
         private final MemorySegment cameraSegment;
         private final MemorySegment frameInfoSegment;
+        private final MemorySegment frameViewSegment;
         private final MemorySegment settingsSegment;
         private final MemorySegment capabilitiesSegment;
         private final MemorySegment diagnosticsSegment;
@@ -478,6 +510,8 @@ public final class NativeBridge {
                 MethodHandle removeSection,
                 MethodHandle commitScene,
                 MethodHandle updateCamera,
+                MethodHandle acquireFrame,
+                MethodHandle releaseFrame,
                 MethodHandle renderFrame,
                 MemorySegment renderer,
                 String buildInfo) {
@@ -493,10 +527,13 @@ public final class NativeBridge {
             this.removeSection = removeSection;
             this.commitScene = commitScene;
             this.updateCamera = updateCamera;
+            this.acquireFrame = acquireFrame;
+            this.releaseFrame = releaseFrame;
             this.renderFrame = renderFrame;
             this.renderer = renderer;
             this.cameraSegment = libraryArena.allocate(CAMERA_LAYOUT);
             this.frameInfoSegment = libraryArena.allocate(FRAME_LAYOUT);
+            this.frameViewSegment = libraryArena.allocate(FRAME_VIEW_LAYOUT);
             this.settingsSegment = libraryArena.allocate(SETTINGS_LAYOUT);
             this.capabilitiesSegment = libraryArena.allocate(CAPABILITIES_LAYOUT);
             this.diagnosticsSegment = libraryArena.allocate(DIAGNOSTICS_LAYOUT);
@@ -552,6 +589,12 @@ public final class NativeBridge {
                 MethodHandle updateCamera = downcall(linker, symbols,
                         "cycles_bridge_update_camera",
                         FunctionDescriptor.of(JAVA_INT, ADDRESS, ADDRESS));
+                MethodHandle acquireFrame = downcall(linker, symbols,
+                        "cycles_bridge_acquire_frame",
+                        FunctionDescriptor.of(JAVA_INT, ADDRESS, JAVA_LONG, ADDRESS));
+                MethodHandle releaseFrame = downcall(linker, symbols,
+                        "cycles_bridge_release_frame",
+                        FunctionDescriptor.of(JAVA_INT, ADDRESS, JAVA_LONG));
                 MethodHandle renderFrame = downcall(linker, symbols,
                         "cycles_bridge_render_frame",
                         FunctionDescriptor.of(
@@ -590,6 +633,8 @@ public final class NativeBridge {
                         removeSection,
                         commitScene,
                         updateCamera,
+                        acquireFrame,
+                        releaseFrame,
                         renderFrame,
                         renderer,
                         buildInfo);
@@ -769,6 +814,10 @@ public final class NativeBridge {
                     diagnosticsSegment.get(JAVA_INT, 68L),
                     diagnosticsSegment.get(JAVA_INT, 72L),
                     diagnosticsSegment.get(JAVA_INT, 76L) != 0,
+                    diagnosticsSegment.get(JAVA_INT, 80L),
+                    diagnosticsSegment.get(JAVA_INT, 84L),
+                    diagnosticsSegment.get(JAVA_INT, 88L),
+                    diagnosticsSegment.get(JAVA_INT, 92L),
                     diagnosticsSegment.get(JAVA_INT, 96L),
                     diagnosticsSegment.get(JAVA_INT, 100L),
                     diagnosticsSegment.get(JAVA_FLOAT, 104L),
@@ -855,6 +904,69 @@ public final class NativeBridge {
             writeCamera(cameraSegment, width, height, frameId, input);
             int status = (int) updateCamera.invokeExact(renderer, cameraSegment);
             checkRendererStatus(status, "renderer camera update");
+        }
+
+        private AcquiredFrame acquireFrame(long previousGeneration) throws Throwable {
+            frameViewSegment.fill((byte) 0);
+            frameViewSegment.set(
+                    JAVA_INT, 0L, Math.toIntExact(FRAME_VIEW_LAYOUT.byteSize()));
+            frameViewSegment.set(JAVA_INT, 4L, STRUCT_VERSION);
+            checkRendererStatus(
+                    (int) acquireFrame.invokeExact(
+                            renderer, previousGeneration, frameViewSegment),
+                    "renderer frame acquire");
+            int width = frameViewSegment.get(JAVA_INT, 8L);
+            int height = frameViewSegment.get(JAVA_INT, 12L);
+            long generation = frameViewSegment.get(JAVA_LONG, 16L);
+            int sampleCount = frameViewSegment.get(JAVA_INT, 24L);
+            int pixelFormat = frameViewSegment.get(JAVA_INT, 28L);
+            long pixelBytes = frameViewSegment.get(JAVA_LONG, 32L);
+            long token = frameViewSegment.get(JAVA_LONG, 40L);
+            MemorySegment pointer = frameViewSegment.get(ADDRESS, 48L);
+            int flags = frameViewSegment.get(JAVA_INT, 56L);
+            if ((flags & FRAME_UPDATED) == 0) {
+                return new AcquiredFrame(
+                        null, null, readyFlag(flags), false, width, height,
+                        generation, sampleCount, pixelFormat, 0L, null);
+            }
+            long expectedBytes = Math.multiplyExact(Math.multiplyExact((long) width, height), 8L);
+            if (width <= 0 || height <= 0 || pixelFormat != 2
+                    || pixelBytes != expectedBytes || token == 0L || pointer.address() == 0L) {
+                if (token != 0L) {
+                    releaseFrameLease(token);
+                }
+                throw new IllegalStateException("invalid native RGBA16F frame lease");
+            }
+            Arena leaseArena = Arena.ofConfined();
+            ByteBuffer pixels;
+            try {
+                pixels = pointer.reinterpret(pixelBytes, leaseArena, ignored -> {})
+                        .asByteBuffer()
+                        .order(ByteOrder.nativeOrder());
+            } catch (Throwable error) {
+                leaseArena.close();
+                releaseFrameLease(token);
+                throw error;
+            }
+            return new AcquiredFrame(
+                    this, leaseArena, true, true, width, height,
+                    generation, sampleCount, pixelFormat, token, pixels);
+        }
+
+        private static boolean readyFlag(int flags) {
+            return (flags & FRAME_READY) != 0;
+        }
+
+        private void releaseFrameLease(long token) {
+            try {
+                checkRendererStatus(
+                        (int) releaseFrame.invokeExact(renderer, token),
+                        "renderer frame release");
+            } catch (Throwable error) {
+                rethrowFatalError(error);
+                throw new IllegalStateException(
+                        "native frame release failed: " + describe(error), error);
+            }
         }
 
         private ByteBuffer fillTestFrame(int width, int height, long frameId) throws Throwable {
@@ -1026,6 +1138,102 @@ public final class NativeBridge {
             ByteBuffer pixels) {
     }
 
+    public static final class AcquiredFrame implements AutoCloseable {
+        private BridgeState owner;
+        private Arena arena;
+        private final boolean ready;
+        private final boolean updated;
+        private final int width;
+        private final int height;
+        private final long generation;
+        private final int sampleCount;
+        private final int pixelFormat;
+        private final long token;
+        private final ByteBuffer pixels;
+        private boolean closed;
+
+        private AcquiredFrame(
+                BridgeState owner,
+                Arena arena,
+                boolean ready,
+                boolean updated,
+                int width,
+                int height,
+                long generation,
+                int sampleCount,
+                int pixelFormat,
+                long token,
+                ByteBuffer pixels) {
+            this.owner = owner;
+            this.arena = arena;
+            this.ready = ready;
+            this.updated = updated;
+            this.width = width;
+            this.height = height;
+            this.generation = generation;
+            this.sampleCount = sampleCount;
+            this.pixelFormat = pixelFormat;
+            this.token = token;
+            this.pixels = pixels;
+        }
+
+        public boolean ready() {
+            return ready;
+        }
+
+        public boolean updated() {
+            return updated;
+        }
+
+        public int width() {
+            return width;
+        }
+
+        public int height() {
+            return height;
+        }
+
+        public long generation() {
+            return generation;
+        }
+
+        public int sampleCount() {
+            return sampleCount;
+        }
+
+        public int pixelFormat() {
+            return pixelFormat;
+        }
+
+        public ByteBuffer pixels() {
+            if (closed) {
+                throw new IllegalStateException("native frame lease is closed");
+            }
+            return pixels;
+        }
+
+        @Override
+        public void close() {
+            if (closed) {
+                return;
+            }
+            closed = true;
+            BridgeState currentOwner = owner;
+            Arena currentArena = arena;
+            owner = null;
+            arena = null;
+            try {
+                if (currentArena != null) {
+                    currentArena.close();
+                }
+            } finally {
+                if (currentOwner != null) {
+                    currentOwner.releaseFrameLease(token);
+                }
+            }
+        }
+    }
+
     public record Capabilities(
             long flags,
             long passMask,
@@ -1075,6 +1283,10 @@ public final class NativeBridge {
             int sectionCount,
             int resetLevel,
             boolean frameReady,
+            int activeFrameLeases,
+            int peakFrameLeases,
+            int frameSlotCount,
+            int droppedDisplayUpdates,
             int targetSampleCount,
             int samplingState,
             float sampleRate,

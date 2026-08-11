@@ -370,6 +370,17 @@ std::uint32_t update_ema(std::uint32_t previous, std::uint32_t value) {
         (static_cast<std::uint64_t>(previous) * 7U + value) / 8U);
 }
 
+constexpr std::size_t kFrameSlotCount = 3U;
+
+struct FrameSlot {
+    std::vector<ccl::half4> pixels;
+    std::uint32_t width = 0;
+    std::uint32_t height = 0;
+    std::uint32_t sample_count = 0;
+    std::uint32_t readers = 0;
+    std::uint64_t generation = 0;
+};
+
 class FrameStore final {
  public:
     void clear() {
@@ -378,7 +389,9 @@ class FrameStore final {
         height_ = 0;
         sample_count_ = 0;
         last_frame_completed_ = {};
-        rgba_half_.clear();
+        published_slot_ = -1;
+        writing_slot_ = -1;
+        zero_next_display_ = true;
         generation_++;
     }
 
@@ -422,44 +435,73 @@ class FrameStore final {
             mutex_.unlock();
             return false;
         }
+        int next_slot = -1;
+        for (std::size_t index = 0; index < slots_.size(); ++index) {
+            const FrameSlot& slot = slots_[index];
+            if (static_cast<int>(index) != published_slot_ && slot.readers == 0U) {
+                next_slot = static_cast<int>(index);
+                break;
+            }
+        }
+        if (next_slot < 0) {
+            dropped_display_updates_++;
+            mutex_.unlock();
+            return false;
+        }
         display_update_active_ = true;
+        writing_slot_ = next_slot;
         display_update_started_ = std::chrono::steady_clock::now();
         const auto width = static_cast<std::uint32_t>(params.full_size.x);
         const auto height = static_cast<std::uint32_t>(params.full_size.y);
-        if (width_ != width || height_ != height) {
-            width_ = width;
-            height_ = height;
+        FrameSlot& slot = slots_[static_cast<std::size_t>(writing_slot_)];
+        slot.width = width;
+        slot.height = height;
+        const std::size_t pixel_count = static_cast<std::size_t>(width) * height;
+        if (slot.pixels.size() != pixel_count) {
             const ccl::half zero(0U);
-            rgba_half_.assign(
-                static_cast<std::size_t>(width_) * height_,
+            slot.pixels.assign(
+                pixel_count,
+                ccl::half4{zero, zero, zero, zero});
+        } else if (zero_next_display_) {
+            const ccl::half zero(0U);
+            std::fill(
+                slot.pixels.begin(),
+                slot.pixels.end(),
                 ccl::half4{zero, zero, zero, zero});
         }
+        zero_next_display_ = false;
         return true;
     }
 
     ccl::half4* display_buffer() {
-        return rgba_half_.empty() ? nullptr : rgba_half_.data();
+        if (writing_slot_ < 0) {
+            return nullptr;
+        }
+        FrameSlot& slot = slots_[static_cast<std::size_t>(writing_slot_)];
+        return slot.pixels.empty() ? nullptr : slot.pixels.data();
     }
 
     void display_update_end() {
         const auto completed = std::chrono::steady_clock::now();
+        FrameSlot& slot = slots_[static_cast<std::size_t>(writing_slot_)];
+        slot.generation = ++generation_;
+        slot.sample_count = static_cast<std::uint32_t>(std::max(0, sample_count_));
+        width_ = slot.width;
+        height_ = slot.height;
+        published_slot_ = writing_slot_;
+        writing_slot_ = -1;
         last_convert_micros_ = elapsed_micros(display_update_started_, completed);
         ema_convert_micros_ = update_ema(ema_convert_micros_, last_convert_micros_);
         max_convert_micros_ = std::max(max_convert_micros_, last_convert_micros_);
         produced_frame_count_++;
         last_frame_completed_ = completed;
-        generation_++;
         display_update_active_ = false;
         mutex_.unlock();
     }
 
     void zero_display() {
         std::lock_guard lock(mutex_);
-        const ccl::half zero(0U);
-        std::fill(
-            rgba_half_.begin(),
-            rgba_half_.end(),
-            ccl::half4{zero, zero, zero, zero});
+        zero_next_display_ = true;
     }
 
     void set_sample_count(int sample_count) {
@@ -480,7 +522,8 @@ class FrameStore final {
         frame.sample_count = static_cast<std::uint32_t>(std::max(0, sample_count_));
         frame.pixel_byte_count = 0;
         frame.flags = 0;
-        if (rgba_half_.empty() || width_ == 0 || height_ == 0) {
+        const FrameSlot* slot = published_frame_locked();
+        if (slot == nullptr) {
             return true;
         }
 
@@ -489,15 +532,14 @@ class FrameStore final {
             unchanged_poll_count_++;
             return true;
         }
-        const std::size_t output_size =
-            static_cast<std::size_t>(width_) * height_ * 4U;
+        const std::size_t output_size = slot->pixels.size() * 4U;
         if (output == nullptr || capacity < output_size) {
             error = "native frame output buffer is too small";
             return false;
         }
         const auto copy_start = std::chrono::steady_clock::now();
-        for (std::size_t index = 0; index < rgba_half_.size(); ++index) {
-            write_compatibility_pixel(output + index * 4U, rgba_half_[index]);
+        for (std::size_t index = 0; index < slot->pixels.size(); ++index) {
+            write_compatibility_pixel(output + index * 4U, slot->pixels[index]);
         }
         const auto copy_end = std::chrono::steady_clock::now();
         last_copy_micros_ = elapsed_micros(copy_start, copy_end);
@@ -512,7 +554,8 @@ class FrameStore final {
 
     void copy_scaled(std::uint8_t* output, std::uint32_t width, std::uint32_t height) const {
         std::lock_guard lock(mutex_);
-        if (rgba_half_.empty() || width_ == 0 || height_ == 0) {
+        const FrameSlot* slot = published_frame_locked();
+        if (slot == nullptr) {
             for (std::uint64_t pixel = 0; pixel < static_cast<std::uint64_t>(width) * height;
                  ++pixel) {
                 output[pixel * 4U] = 104U;
@@ -535,14 +578,14 @@ class FrameStore final {
                     static_cast<std::size_t>(source_y) * width_ + source_x;
                 const std::size_t target =
                     (static_cast<std::size_t>(y) * width + x) * 4U;
-                write_compatibility_pixel(output + target, rgba_half_[source]);
+                write_compatibility_pixel(output + target, slot->pixels[source]);
             }
         }
     }
 
     [[nodiscard]] bool ready() const {
         std::lock_guard lock(mutex_);
-        return !rgba_half_.empty();
+        return published_frame_locked() != nullptr;
     }
 
     [[nodiscard]] std::uint64_t generation() const {
@@ -560,13 +603,72 @@ class FrameStore final {
         return sample_count_;
     }
 
+    bool acquire_frame(
+        std::uint64_t previous_generation,
+        CyclesBridgeFrameView& view,
+        std::string&) {
+        std::lock_guard lock(mutex_);
+        view.width = width_;
+        view.height = height_;
+        view.generation = generation_;
+        view.sample_count = static_cast<std::uint32_t>(std::max(0, sample_count_));
+        view.pixel_format = CYCLES_BRIDGE_PIXEL_FORMAT_RGBA16_FLOAT;
+        view.pixel_byte_count = 0U;
+        view.token = 0U;
+        view.pixels = nullptr;
+        view.flags = 0U;
+        FrameSlot* slot = published_frame_locked();
+        if (slot == nullptr) {
+            return true;
+        }
+        view.flags |= CYCLES_BRIDGE_FRAME_READY;
+        view.sample_count = slot->sample_count;
+        if (slot->generation == previous_generation) {
+            unchanged_poll_count_++;
+            return true;
+        }
+        const std::size_t slot_index = static_cast<std::size_t>(published_slot_);
+        slot->readers++;
+        active_frame_leases_++;
+        peak_frame_leases_ = std::max(peak_frame_leases_, active_frame_leases_);
+        view.width = slot->width;
+        view.height = slot->height;
+        view.generation = slot->generation;
+        view.pixel_byte_count = slot->pixels.size() * sizeof(ccl::half4);
+        view.token = (slot->generation << 2U) | (slot_index + 1U);
+        view.pixels = reinterpret_cast<const std::uint8_t*>(slot->pixels.data());
+        view.flags |= CYCLES_BRIDGE_FRAME_UPDATED;
+        return true;
+    }
+
+    bool release_frame(std::uint64_t token, std::string& error) {
+        std::lock_guard lock(mutex_);
+        const std::uint64_t encoded_slot = token & 3U;
+        if (encoded_slot == 0U || encoded_slot > slots_.size()) {
+            error = "invalid frame lease token";
+            return false;
+        }
+        FrameSlot& slot = slots_[static_cast<std::size_t>(encoded_slot - 1U)];
+        if (slot.readers == 0U || slot.generation != (token >> 2U)) {
+            error = "expired frame lease token";
+            return false;
+        }
+        slot.readers--;
+        active_frame_leases_--;
+        return true;
+    }
+
     void fill_diagnostics(CyclesBridgeDiagnostics& diagnostics) const {
         std::lock_guard lock(mutex_);
         diagnostics.frame_generation = generation_;
         diagnostics.width = width_;
         diagnostics.height = height_;
         diagnostics.sample_count = static_cast<std::uint32_t>(std::max(0, sample_count_));
-        diagnostics.frame_ready = rgba_half_.empty() ? 0U : 1U;
+        diagnostics.frame_ready = published_frame_locked() == nullptr ? 0U : 1U;
+        diagnostics.active_frame_leases = active_frame_leases_;
+        diagnostics.peak_frame_leases = peak_frame_leases_;
+        diagnostics.frame_slot_count = static_cast<std::uint32_t>(slots_.size());
+        diagnostics.dropped_display_updates = dropped_display_updates_;
         diagnostics.produced_frame_count = produced_frame_count_;
         diagnostics.copied_frame_count = copied_frame_count_;
         diagnostics.copied_byte_count = copied_byte_count_;
@@ -585,6 +687,22 @@ class FrameStore final {
     }
 
  private:
+    FrameSlot* published_frame_locked() {
+        if (published_slot_ < 0) {
+            return nullptr;
+        }
+        FrameSlot& slot = slots_[static_cast<std::size_t>(published_slot_)];
+        return slot.pixels.empty() ? nullptr : &slot;
+    }
+
+    const FrameSlot* published_frame_locked() const {
+        if (published_slot_ < 0) {
+            return nullptr;
+        }
+        const FrameSlot& slot = slots_[static_cast<std::size_t>(published_slot_)];
+        return slot.pixels.empty() ? nullptr : &slot;
+    }
+
     void rebuild_display_luts_locked() {
         for (std::uint32_t bits = 0; bits <= std::numeric_limits<std::uint16_t>::max(); ++bits) {
             const ccl::half encoded(static_cast<std::uint16_t>(bits));
@@ -632,11 +750,17 @@ class FrameStore final {
     std::uint32_t view_transform_ = 0;
     float depth_far_ = 1.0F;
     int target_samples_ = 1;
-    std::vector<ccl::half4> rgba_half_;
+    std::array<FrameSlot, kFrameSlotCount> slots_{};
     std::array<std::uint8_t, 65536> display_lut_{};
     std::array<std::uint8_t, 65536> alpha_lut_{};
     bool display_lut_ready_ = false;
     bool display_update_active_ = false;
+    bool zero_next_display_ = true;
+    int published_slot_ = -1;
+    int writing_slot_ = -1;
+    std::uint32_t active_frame_leases_ = 0;
+    std::uint32_t peak_frame_leases_ = 0;
+    std::uint32_t dropped_display_updates_ = 0;
     std::chrono::steady_clock::time_point display_update_started_{};
     std::uint64_t produced_frame_count_ = 0;
     std::uint64_t copied_frame_count_ = 0;
@@ -1536,6 +1660,17 @@ class CyclesEngine::Impl final {
         return queue_camera(camera, error);
     }
 
+    bool acquire_frame(
+        std::uint64_t previous_generation,
+        CyclesBridgeFrameView& frame_view,
+        std::string& error) {
+        return frames_.acquire_frame(previous_generation, frame_view, error);
+    }
+
+    bool release_frame(std::uint64_t token, std::string& error) {
+        return frames_.release_frame(token, error);
+    }
+
     [[nodiscard]] std::string info() const {
         ccl::DeviceInfo selected;
         std::string state;
@@ -2127,6 +2262,17 @@ bool CyclesEngine::update_camera(
     const CyclesBridgeCamera& camera,
     std::string& error) {
     return impl_->update_camera(camera, error);
+}
+
+bool CyclesEngine::acquire_frame(
+    std::uint64_t previous_generation,
+    CyclesBridgeFrameView& frame_view,
+    std::string& error) {
+    return impl_->acquire_frame(previous_generation, frame_view, error);
+}
+
+bool CyclesEngine::release_frame(std::uint64_t token, std::string& error) {
+    return impl_->release_frame(token, error);
 }
 
 std::string CyclesEngine::renderer_info() const {

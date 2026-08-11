@@ -422,6 +422,14 @@ public final class CyclesRendererMod {
             y += 10;
             graphics.text(
                     minecraft.font,
+                    "frame leases=" + diagnostics.activeFrameLeases()
+                            + "/" + diagnostics.peakFrameLeases()
+                            + " slots=" + diagnostics.frameSlotCount()
+                            + " dropped=" + diagnostics.droppedDisplayUpdates(),
+                    6, y, 0xFFE0E0E0);
+            y += 10;
+            graphics.text(
+                    minecraft.font,
                     "native display us=" + diagnostics.lastConvertMicros()
                             + "/" + diagnostics.emaConvertMicros()
                             + "/" + diagnostics.maxConvertMicros()

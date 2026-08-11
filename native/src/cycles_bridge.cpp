@@ -16,9 +16,9 @@ struct CyclesBridgeRenderer {
 
 namespace {
 
-constexpr std::uint32_t kAbiVersion = 11;
+constexpr std::uint32_t kAbiVersion = 12;
 constexpr std::uint32_t kStructVersion = 1;
-constexpr char kBuildInfo[] = "cyclesrenderer-native/cycles-5.2;abi=11";
+constexpr char kBuildInfo[] = "cyclesrenderer-native/cycles-5.2;abi=12";
 
 static_assert(sizeof(CyclesBridgeCamera) == 80);
 static_assert(offsetof(CyclesBridgeCamera, frame_id) == 8);
@@ -31,6 +31,9 @@ static_assert(offsetof(CyclesBridgeScene, vertex_count) == 20);
 static_assert(sizeof(CyclesBridgeSceneResources) == 48);
 static_assert(sizeof(CyclesBridgeSection) == 48);
 static_assert(sizeof(CyclesBridgeFrame) == 40);
+static_assert(sizeof(CyclesBridgeFrameView) == 72);
+static_assert(offsetof(CyclesBridgeFrameView, generation) == 16);
+static_assert(offsetof(CyclesBridgeFrameView, pixels) == 48);
 static_assert(sizeof(CyclesBridgeRenderSettings) == 208);
 static_assert(sizeof(CyclesBridgeCapabilities) == 64);
 static_assert(sizeof(CyclesBridgeDiagnostics) == 240);
@@ -493,6 +496,43 @@ std::uint32_t cycles_bridge_update_camera(
             : CYCLES_BRIDGE_STATUS_RENDER_ERROR;
     } catch (const std::bad_alloc&) {
         return CYCLES_BRIDGE_STATUS_OUT_OF_MEMORY;
+    } catch (...) {
+        return CYCLES_BRIDGE_STATUS_RENDER_ERROR;
+    }
+}
+
+std::uint32_t cycles_bridge_acquire_frame(
+    CyclesBridgeRenderer* renderer,
+    std::uint64_t previous_generation,
+    CyclesBridgeFrameView* frame_view) {
+    if (renderer == nullptr || renderer->engine == nullptr || frame_view == nullptr
+        || frame_view->struct_size < sizeof(CyclesBridgeFrameView)
+        || frame_view->struct_version != kStructVersion) {
+        return CYCLES_BRIDGE_STATUS_INVALID_ARGUMENT;
+    }
+    try {
+        std::string error;
+        return renderer->engine->acquire_frame(previous_generation, *frame_view, error)
+            ? CYCLES_BRIDGE_STATUS_OK
+            : CYCLES_BRIDGE_STATUS_RENDER_ERROR;
+    } catch (const std::bad_alloc&) {
+        return CYCLES_BRIDGE_STATUS_OUT_OF_MEMORY;
+    } catch (...) {
+        return CYCLES_BRIDGE_STATUS_RENDER_ERROR;
+    }
+}
+
+std::uint32_t cycles_bridge_release_frame(
+    CyclesBridgeRenderer* renderer,
+    std::uint64_t token) {
+    if (renderer == nullptr || renderer->engine == nullptr || token == 0U) {
+        return CYCLES_BRIDGE_STATUS_INVALID_ARGUMENT;
+    }
+    try {
+        std::string error;
+        return renderer->engine->release_frame(token, error)
+            ? CYCLES_BRIDGE_STATUS_OK
+            : CYCLES_BRIDGE_STATUS_RENDER_ERROR;
     } catch (...) {
         return CYCLES_BRIDGE_STATUS_RENDER_ERROR;
     }

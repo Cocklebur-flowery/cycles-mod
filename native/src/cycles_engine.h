@@ -58,6 +58,13 @@ class CyclesEngine final {
         const CyclesBridgeCamera& camera,
         std::string& error);
 
+    bool acquire_frame(
+        std::uint64_t previous_generation,
+        CyclesBridgeFrameView& frame_view,
+        std::string& error);
+
+    bool release_frame(std::uint64_t token, std::string& error);
+
     bool render_frame(
         const CyclesBridgeCamera& camera,
         CyclesBridgeFrame& frame,

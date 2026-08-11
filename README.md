@@ -6,7 +6,7 @@
 
 ## 当前阶段
 
-- Cycles 5.2 已通过 C ABI v11 接入 Java Foreign Function & Memory API；v11 使用 Cycles DisplayDriver 保存 scene-linear RGBA16F，并保留 v10 的独立相机更新。
+- Cycles 5.2 已通过 C ABI v12 接入 Java Foreign Function & Memory API；v12 在 RGBA16F DisplayDriver 后加入三槽帧环与显式 acquire/release 租约。
 - 近景不再扫描固定 `64 × 32 × 64` 方块盒，而是直接复制 Minecraft `SectionCompiler` 生成的 16³ Section 网格。
 - 活跃 Section 范围跟随游戏的“有效渲染距离”；水平判定复用原版区块距离规则，垂直范围复用原版渲染器的 Section 范围和世界高度边界。
 - 方块放置/破坏、光照更新、区块装卸和视距移动触发原版 Section 重编译后，会以稳定 Section ID 增量替换或移除 Native 几何。
@@ -92,7 +92,7 @@ run-client.cmd runClient
 
 `buildNative` 会构建 native DLL 和冒烟程序，并把 `.deps/cycles-install` 中的运行时 DLL 与 `lib/kernel_*.zst` 自动部署到 `build/native/bin/`。不需要手工复制 JAR、DLL 或 GPU 内核。
 
-`runNativeSmoke` 会构造一个带 UV、彩色纹理与 Alpha Clip 的小型网格场景，验证 ABI v11 的 RGBA16F DisplayDriver、独立相机更新、能力/诊断、实际/目标 sample、帧与场景更新计数、全部 7 个 Pass、Combined 恢复、检测到的 OptiX 降噪，以及 Section 创建、修改和删除，然后输出实际后端、设备、分辨率和帧校验和。
+`runNativeSmoke` 会构造一个带 UV、彩色纹理与 Alpha Clip 的小型网格场景，验证 ABI v12 的 RGBA16F DisplayDriver、帧租约 acquire/release、独立相机更新、能力/诊断、实际/目标 sample、全部 7 个 Pass、OptiX 降噪，以及 Section 创建、修改和删除，然后输出实际后端、设备、分辨率和帧校验和。
 
 `runClient` 只会为启动出的 Minecraft 进程把 `build/native/bin/` 加入 `PATH`，使 Windows 能找到 Cycles 的二级 DLL 依赖；它不会修改系统或用户环境变量。修改 native 运行时文件后必须重新启动客户端。
 
@@ -103,7 +103,7 @@ Minecraft SectionCompiler（16³ Section、流体、NeoForge 追加几何）
   -> SectionCompilerMixin 在 MeshData 关闭前复制 CPU 顶点
   -> SectionGeometryCollector（按 Section ID 合并最新重编译结果）
   -> SectionSceneManager（原版视距、装卸、资源代次、批量提交）
-  -> NativeBridge（ABI v11：共享资源 + Section 流送 + RGBA16F DisplayDriver + 独立相机更新 + 遥测）
+  -> NativeBridge（ABI v12：Section 流送 + RGBA16F DisplayDriver + 三槽帧租约 + 独立相机更新）
   -> CyclesEngine 后台场景请求
   -> 现有 Cycles Session 内按 Section ID 新建、原地更新或删除 Mesh/Object
   -> 共享图集与 Opaque/Cutout/Blend 材质
@@ -144,7 +144,7 @@ DH Provider 代码仍隔离保留，但本阶段不再把其低模高度场合�
 
 ## ABI 与运行时约束
 
-ABI v11 保留旧的整场景入口、v5 Section 布局和 v6 设置/能力字段；`CyclesBridgeRenderSettings` 固定 208 字节、`CyclesBridgeCapabilities` 固定 64 字节，`CyclesBridgeDiagnostics` 固定 240 字节。v7 字段报告实际/目标 sample、采样状态和 sample/s；v8 追加帧管线统计；v9 追加场景更新时间；v10 新增 `update_camera`；v11 将 Cycles 交互输出切换为 scene-linear `half4`，并利用原 reserved 尾字段报告内部像素格式。`render_frame` 暂时把 half4 通过预计算查找表兼容转换为 RGBA8；P6/P7 将让 Java/Vulkan 直接消费 RGBA16F。Java 与 DLL 的 ABI 版本不一致时会在启用前拒绝运行。
+ABI v12 保留旧的整场景入口、v5 Section 布局和 v6 设置/能力字段；`CyclesBridgeRenderSettings` 固定 208 字节、`CyclesBridgeCapabilities` 固定 64 字节，`CyclesBridgeDiagnostics` 固定 240 字节。v7 报告实际采样；v8 追加帧管线统计；v9 追加场景更新时间；v10 新增 `update_camera`；v11 切换 scene-linear `half4`；v12 新增 `CyclesBridgeFrameView` 与 `acquire_frame/release_frame`。租约持有期间对应槽位不会被 Cycles 覆写，Java `AcquiredFrame` 必须用 try-with-resources 在 `NativeBridge.close()` 前释放。旧 `render_frame` 继续兼容转换 RGBA8；P7 将让 Vulkan 直接消费租约中的 RGBA16F。Java 与 DLL 的 ABI 版本不一致时会在启用前拒绝运行。
 
 Cycles 的 GPU 内核通过 `path_init()` 相对于 `cyclesrenderer_native.dll` 查找。因此以下布局是运行时契约：
 

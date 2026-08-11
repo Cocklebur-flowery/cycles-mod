@@ -153,6 +153,21 @@ struct CyclesBridgeFrame {
     std::uint32_t reserved;
 };
 
+struct CyclesBridgeFrameView {
+    std::uint32_t struct_size;
+    std::uint32_t struct_version;
+    std::uint32_t width;
+    std::uint32_t height;
+    std::uint64_t generation;
+    std::uint32_t sample_count;
+    std::uint32_t pixel_format;
+    std::uint64_t pixel_byte_count;
+    std::uint64_t token;
+    const std::uint8_t* pixels;
+    std::uint32_t flags;
+    std::uint32_t reserved[3];
+};
+
 struct CyclesBridgeRenderSettings {
     std::uint32_t struct_size;
     std::uint32_t struct_version;
@@ -229,7 +244,10 @@ struct CyclesBridgeDiagnostics {
     std::uint32_t section_count;
     std::uint32_t reset_level;
     std::uint32_t frame_ready;
-    std::uint32_t reserved[4];
+    std::uint32_t active_frame_leases;
+    std::uint32_t peak_frame_leases;
+    std::uint32_t frame_slot_count;
+    std::uint32_t dropped_display_updates;
     std::uint32_t target_sample_count;
     std::uint32_t sampling_state;
     float sample_rate;
@@ -372,6 +390,15 @@ CYCLES_BRIDGE_API std::uint32_t cycles_bridge_render(
 CYCLES_BRIDGE_API std::uint32_t cycles_bridge_update_camera(
     CyclesBridgeRenderer* renderer,
     const CyclesBridgeCamera* camera);
+
+CYCLES_BRIDGE_API std::uint32_t cycles_bridge_acquire_frame(
+    CyclesBridgeRenderer* renderer,
+    std::uint64_t previous_generation,
+    CyclesBridgeFrameView* frame_view);
+
+CYCLES_BRIDGE_API std::uint32_t cycles_bridge_release_frame(
+    CyclesBridgeRenderer* renderer,
+    std::uint64_t token);
 
 CYCLES_BRIDGE_API std::uint32_t cycles_bridge_render_frame(
     CyclesBridgeRenderer* renderer,
