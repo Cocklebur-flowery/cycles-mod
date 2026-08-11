@@ -452,6 +452,30 @@ public final class CyclesRendererMod {
                             + "/" + scene.emaCommitMicros()
                             + "/" + scene.maxCommitMicros(),
                     6, y, 0xFFE0E0E0);
+            y += 10;
+            graphics.text(
+                    minecraft.font,
+                    "native scene commit us=" + diagnostics.lastSceneCommitMicros()
+                            + "/" + diagnostics.emaSceneCommitMicros()
+                            + "/" + diagnostics.maxSceneCommitMicros()
+                            + " count=" + diagnostics.sceneCommitCount(),
+                    6, y, 0xFFE0E0E0);
+            y += 10;
+            graphics.text(
+                    minecraft.font,
+                    "cycles delta us=" + diagnostics.lastSceneDeltaMicros()
+                            + "/" + diagnostics.emaSceneDeltaMicros()
+                            + "/" + diagnostics.maxSceneDeltaMicros()
+                            + " count=" + diagnostics.sceneDeltaCount(),
+                    6, y, 0xFFE0E0E0);
+            y += 10;
+            graphics.text(
+                    minecraft.font,
+                    "render start us=" + diagnostics.lastRenderStartMicros()
+                            + "/" + diagnostics.emaRenderStartMicros()
+                            + "/" + diagnostics.maxRenderStartMicros()
+                            + " count=" + diagnostics.renderStartCount(),
+                    6, y, 0xFFE0E0E0);
         } catch (RuntimeException error) {
             graphics.text(
                     minecraft.font,

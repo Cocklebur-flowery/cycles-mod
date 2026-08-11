@@ -23,7 +23,7 @@ import static java.lang.foreign.ValueLayout.JAVA_INT;
 import static java.lang.foreign.ValueLayout.JAVA_LONG;
 
 public final class NativeBridge {
-    public static final int ABI_VERSION = 8;
+    public static final int ABI_VERSION = 9;
 
     private static final String LIBRARY_PATH_PROPERTY = "cyclesrenderer.nativeLibrary";
     private static final int STRUCT_VERSION = 1;
@@ -184,7 +184,20 @@ public final class NativeBridge {
             JAVA_INT.withName("ema_copy_micros"),
             JAVA_INT.withName("max_copy_micros"),
             JAVA_INT.withName("frame_age_micros"),
-            JAVA_INT.withName("reserved_v8"));
+            JAVA_INT.withName("reserved_v8"),
+            JAVA_LONG.withName("scene_commit_count"),
+            JAVA_LONG.withName("scene_delta_count"),
+            JAVA_LONG.withName("render_start_count"),
+            JAVA_INT.withName("last_scene_commit_micros"),
+            JAVA_INT.withName("ema_scene_commit_micros"),
+            JAVA_INT.withName("max_scene_commit_micros"),
+            JAVA_INT.withName("last_scene_delta_micros"),
+            JAVA_INT.withName("ema_scene_delta_micros"),
+            JAVA_INT.withName("max_scene_delta_micros"),
+            JAVA_INT.withName("last_render_start_micros"),
+            JAVA_INT.withName("ema_render_start_micros"),
+            JAVA_INT.withName("max_render_start_micros"),
+            JAVA_INT.withName("reserved_v9"));
     private static final MemoryLayout VERTEX_LAYOUT = MemoryLayout.structLayout(
             JAVA_FLOAT.withName("position_x"),
             JAVA_FLOAT.withName("position_y"),
@@ -229,7 +242,7 @@ public final class NativeBridge {
                 || FRAME_LAYOUT.byteSize() != 40L
                 || SETTINGS_LAYOUT.byteSize() != 208L
                 || CAPABILITIES_LAYOUT.byteSize() != 64L
-                || DIAGNOSTICS_LAYOUT.byteSize() != 176L
+                || DIAGNOSTICS_LAYOUT.byteSize() != 240L
                 || VERTEX_LAYOUT.byteSize() != 40L
                 || TRIANGLE_LAYOUT.byteSize() != 16L
                 || MATERIAL_LAYOUT.byteSize() != 32L
@@ -748,7 +761,19 @@ public final class NativeBridge {
                     diagnosticsSegment.get(JAVA_INT, 156L),
                     diagnosticsSegment.get(JAVA_INT, 160L),
                     diagnosticsSegment.get(JAVA_INT, 164L),
-                    diagnosticsSegment.get(JAVA_INT, 168L));
+                    diagnosticsSegment.get(JAVA_INT, 168L),
+                    diagnosticsSegment.get(JAVA_LONG, 176L),
+                    diagnosticsSegment.get(JAVA_LONG, 184L),
+                    diagnosticsSegment.get(JAVA_LONG, 192L),
+                    diagnosticsSegment.get(JAVA_INT, 200L),
+                    diagnosticsSegment.get(JAVA_INT, 204L),
+                    diagnosticsSegment.get(JAVA_INT, 208L),
+                    diagnosticsSegment.get(JAVA_INT, 212L),
+                    diagnosticsSegment.get(JAVA_INT, 216L),
+                    diagnosticsSegment.get(JAVA_INT, 220L),
+                    diagnosticsSegment.get(JAVA_INT, 224L),
+                    diagnosticsSegment.get(JAVA_INT, 228L),
+                    diagnosticsSegment.get(JAVA_INT, 232L));
         }
 
         private RenderedFrame renderFrame(
@@ -1028,7 +1053,19 @@ public final class NativeBridge {
             int lastCopyMicros,
             int emaCopyMicros,
             int maxCopyMicros,
-            int frameAgeMicros) {
+            int frameAgeMicros,
+            long sceneCommitCount,
+            long sceneDeltaCount,
+            long renderStartCount,
+            int lastSceneCommitMicros,
+            int emaSceneCommitMicros,
+            int maxSceneCommitMicros,
+            int lastSceneDeltaMicros,
+            int emaSceneDeltaMicros,
+            int maxSceneDeltaMicros,
+            int lastRenderStartMicros,
+            int emaRenderStartMicros,
+            int maxRenderStartMicros) {
         public String stateName() {
             return switch (stateCode) {
                 case 1 -> "scene-staging";

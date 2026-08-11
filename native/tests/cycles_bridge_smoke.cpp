@@ -235,7 +235,7 @@ bool wait_for_actual_sample(
 int main(int argc, char** argv) {
     const bool require_optix = argc > 1 && std::strcmp(argv[1], "--require-optix") == 0;
     std::cerr << "[smoke] ABI check\n";
-    if (cycles_bridge_abi_version() != 8U) {
+    if (cycles_bridge_abi_version() != 9U) {
         std::cerr << "unexpected native ABI " << cycles_bridge_abi_version() << '\n';
         return 1;
     }
@@ -533,6 +533,19 @@ int main(int argc, char** argv) {
     }
     if (frame.generation <= updated_generation) {
         std::cerr << "section removal did not advance the rendered frame\n";
+        cycles_bridge_destroy_renderer(renderer);
+        return 1;
+    }
+    if (!require_ok(
+            cycles_bridge_query_diagnostics(renderer, &diagnostics),
+            "scene timing diagnostics")
+        || diagnostics.scene_commit_count < 3U
+        || diagnostics.scene_delta_count < 2U
+        || diagnostics.render_start_count == 0U) {
+        std::cerr << "missing scene timing telemetry: commits="
+                  << diagnostics.scene_commit_count
+                  << ";deltas=" << diagnostics.scene_delta_count
+                  << ";starts=" << diagnostics.render_start_count << '\n';
         cycles_bridge_destroy_renderer(renderer);
         return 1;
     }

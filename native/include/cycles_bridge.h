@@ -240,6 +240,19 @@ struct CyclesBridgeDiagnostics {
     std::uint32_t max_copy_micros;
     std::uint32_t frame_age_micros;
     std::uint32_t reserved_v8;
+    std::uint64_t scene_commit_count;
+    std::uint64_t scene_delta_count;
+    std::uint64_t render_start_count;
+    std::uint32_t last_scene_commit_micros;
+    std::uint32_t ema_scene_commit_micros;
+    std::uint32_t max_scene_commit_micros;
+    std::uint32_t last_scene_delta_micros;
+    std::uint32_t ema_scene_delta_micros;
+    std::uint32_t max_scene_delta_micros;
+    std::uint32_t last_render_start_micros;
+    std::uint32_t ema_render_start_micros;
+    std::uint32_t max_render_start_micros;
+    std::uint32_t reserved_v9;
 };
 
 struct CyclesBridgeVertex {

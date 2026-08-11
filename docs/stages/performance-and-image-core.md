@@ -90,7 +90,7 @@ F10 叠加层采用“当前值 + 最近窗口统计”，不把目标值伪装�
 | P0 | `docs: record performance and image pipeline stage` | 本文档、指标字典、瓶颈假设 | 已完成（`7afa984`） |
 | P1 | `feat: report actual render sampling` | ABI v7、实际/目标 sample、sample state/rate、F10 | 已完成（本提交） |
 | P2 | `perf: add frame pipeline telemetry` | Native convert/copy、Java/Vulkan upload、帧计数 | 已完成（本提交） |
-| P3 | `perf: trace section update latency` | 捕获/upsert/commit/队列与卡顿热点 | Java 路径已完成，Native 待开始 |
+| P3 | `perf: trace section update latency` | 捕获/upsert/commit/队列与卡顿热点 | 已完成（Java `89d5c0d`，Native 本提交） |
 | P4 | `perf: throttle display frame delivery` | 上传限频、latest-only、保留上一有效帧 | 待开始 |
 | P5 | `perf: adopt cycles half-float display driver` | Cycles DisplayDriver、RGBA16F、移除 CPU RGBA8/pow | 待开始 |
 | P6 | `perf: add acquired frame ring buffers` | Native 双/三缓冲、FFM acquire/release | 待开始 |
@@ -145,3 +145,9 @@ P1 至 P4 完成后进行一次 1080p 游戏人工里程碑：观察实际 sampl
 - `SectionGeometryCollector` 以原子计数记录编译网格 decode/copy 的 last/EMA/max、捕获数、等待数和同 Section 覆盖数。
 - `SectionSceneManager` 记录每个渲染帧的场景筛选总时间，以及 FFM upsert/remove/commit 各自的 last/EMA/max。
 - F10 将这些值与帧管线值同时显示；方块更新卡顿时可先判断峰值发生在 Minecraft 网格捕获、Java/FFM，还是后续 Native/Cycles 场景应用。
+
+### P3b：Native/Cycles 场景更新遥测
+
+- ABI v9 追加 Native `commit_scene` 整 Section 映射快照复制、Cycles `apply_scene_delta` 和 `session.reset/start` 三段计时与计数。
+- `commit_scene` 在调用线程复制常驻 Section 映射，理论成本会随视距和 Section 数增长；现在可将 Java FFI commit 与 Native commit 两行对照，判断它是否就是 0.1 秒主线程热点。
+- scene delta 和 render start 在 Cycles worker 上执行，可能通过 CPU 竞争造成帧时间尖峰，但不会被误记为主线程 FFI 时间。

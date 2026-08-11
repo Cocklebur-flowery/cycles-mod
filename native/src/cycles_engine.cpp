@@ -1305,6 +1305,7 @@ class CyclesEngine::Impl final {
     }
 
     bool commit_scene(std::string& error) {
+        const auto commit_start = std::chrono::steady_clock::now();
         auto request = std::make_shared<SceneRequest>();
         {
             std::lock_guard lock(request_mutex_);
@@ -1330,6 +1331,8 @@ class CyclesEngine::Impl final {
                 last_camera_generation_ = frames_.generation();
             }
         }
+        record_scene_commit(elapsed_micros(
+            commit_start, std::chrono::steady_clock::now()));
         set_state("scene-queued", {});
         request_changed_.notify_all();
         return true;
@@ -1460,6 +1463,18 @@ class CyclesEngine::Impl final {
             diagnostics.target_sample_count = target_sample_count_diagnostic_;
             diagnostics.sampling_state = sampling_state_diagnostic_;
             diagnostics.sample_rate = sample_rate_diagnostic_;
+            diagnostics.scene_commit_count = scene_commit_count_;
+            diagnostics.scene_delta_count = scene_delta_count_;
+            diagnostics.render_start_count = render_start_count_;
+            diagnostics.last_scene_commit_micros = last_scene_commit_micros_;
+            diagnostics.ema_scene_commit_micros = ema_scene_commit_micros_;
+            diagnostics.max_scene_commit_micros = max_scene_commit_micros_;
+            diagnostics.last_scene_delta_micros = last_scene_delta_micros_;
+            diagnostics.ema_scene_delta_micros = ema_scene_delta_micros_;
+            diagnostics.max_scene_delta_micros = max_scene_delta_micros_;
+            diagnostics.last_render_start_micros = last_render_start_micros_;
+            diagnostics.ema_render_start_micros = ema_render_start_micros_;
+            diagnostics.max_render_start_micros = max_render_start_micros_;
         }
         frames_.fill_diagnostics(diagnostics);
     }
@@ -1703,9 +1718,14 @@ class CyclesEngine::Impl final {
         ccl::Session& session,
         const SceneRequest& scene_request,
         SceneRuntime& runtime) {
+        const auto delta_start = std::chrono::steady_clock::now();
         set_state("scene-updating", {});
-        const ccl::thread_scoped_lock scene_lock(session.scene->mutex);
-        apply_scene_delta(session.scene.get(), scene_request, runtime);
+        {
+            const ccl::thread_scoped_lock scene_lock(session.scene->mutex);
+            apply_scene_delta(session.scene.get(), scene_request, runtime);
+        }
+        record_scene_delta(elapsed_micros(
+            delta_start, std::chrono::steady_clock::now()));
         set_state("scene-ready", {});
     }
 
@@ -1715,6 +1735,7 @@ class CyclesEngine::Impl final {
         const SceneRequest& scene_request,
         const CameraRequest& camera_request,
         const CyclesBridgeRenderSettings& settings) {
+        const auto start_time = std::chrono::steady_clock::now();
         ccl::BufferParams buffer;
         std::uint32_t effective_denoiser = 0;
         {
@@ -1750,7 +1771,33 @@ class CyclesEngine::Impl final {
         }
         session.reset(render_params, buffer);
         session.start();
+        record_render_start(elapsed_micros(
+            start_time, std::chrono::steady_clock::now()));
         set_state("rendering", {});
+    }
+
+    void record_scene_commit(std::uint32_t micros) {
+        std::lock_guard lock(state_mutex_);
+        last_scene_commit_micros_ = micros;
+        ema_scene_commit_micros_ = update_ema(ema_scene_commit_micros_, micros);
+        max_scene_commit_micros_ = std::max(max_scene_commit_micros_, micros);
+        scene_commit_count_++;
+    }
+
+    void record_scene_delta(std::uint32_t micros) {
+        std::lock_guard lock(state_mutex_);
+        last_scene_delta_micros_ = micros;
+        ema_scene_delta_micros_ = update_ema(ema_scene_delta_micros_, micros);
+        max_scene_delta_micros_ = std::max(max_scene_delta_micros_, micros);
+        scene_delta_count_++;
+    }
+
+    void record_render_start(std::uint32_t micros) {
+        std::lock_guard lock(state_mutex_);
+        last_render_start_micros_ = micros;
+        ema_render_start_micros_ = update_ema(ema_render_start_micros_, micros);
+        max_render_start_micros_ = std::max(max_render_start_micros_, micros);
+        render_start_count_++;
     }
 
     void update_sampling_progress(ccl::Session& session) {
@@ -1965,6 +2012,18 @@ class CyclesEngine::Impl final {
     std::uint32_t target_sample_count_diagnostic_ = 0;
     std::uint32_t sampling_state_diagnostic_ = CYCLES_BRIDGE_SAMPLING_IDLE;
     float sample_rate_diagnostic_ = 0.0F;
+    std::uint64_t scene_commit_count_ = 0;
+    std::uint64_t scene_delta_count_ = 0;
+    std::uint64_t render_start_count_ = 0;
+    std::uint32_t last_scene_commit_micros_ = 0;
+    std::uint32_t ema_scene_commit_micros_ = 0;
+    std::uint32_t max_scene_commit_micros_ = 0;
+    std::uint32_t last_scene_delta_micros_ = 0;
+    std::uint32_t ema_scene_delta_micros_ = 0;
+    std::uint32_t max_scene_delta_micros_ = 0;
+    std::uint32_t last_render_start_micros_ = 0;
+    std::uint32_t ema_render_start_micros_ = 0;
+    std::uint32_t max_render_start_micros_ = 0;
     std::string state_;
     std::string terminal_error_;
 
