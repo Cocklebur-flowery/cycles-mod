@@ -13,12 +13,18 @@ $cyclesRevision = 'v5.2.0'
 $cyclesCommit = '3b97e190c5ff1a2ed2160d879ad5bf95bea7b8ba'
 $cyclesLibrariesCommit = '60d6e96b917568278d400a4024c98da0fb777338'
 $cyclesRepository = 'https://projects.blender.org/blender/cycles.git'
+$blenderRevision = 'v5.2.0'
+$blenderCommit = 'fbe6228777e7d9afefcd61a413844e790ae75db7'
+$blenderRepository = 'https://projects.blender.org/blender/blender.git'
 $projectRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 $dependencyRoot = Join-Path $projectRoot '.deps'
 $cyclesSource = Join-Path $dependencyRoot 'cycles'
 $cyclesLibraries = Join-Path $cyclesSource 'lib\windows_x64'
 $cyclesBuild = Join-Path $dependencyRoot 'cycles-build'
 $cyclesInstall = Join-Path $dependencyRoot 'cycles-install'
+$blenderSource = Join-Path $dependencyRoot 'blender'
+$colorManagementSource = Join-Path $blenderSource 'release\datafiles\colormanagement'
+$colorManagementInstall = Join-Path $cyclesInstall 'color\ocio'
 $requiredLibraryDirectories = @(
     'OpenImageIO',
     'aom',
@@ -203,8 +209,29 @@ if ($missingObjects.Count -gt 0) {
 }
 Write-Host "[cycles] Libraries: $cyclesLibraries ($cyclesLibrariesCommit)"
 
+if (-not (Test-Path -LiteralPath $blenderSource)) {
+    Invoke-Checked $git clone --filter=blob:none --no-checkout --depth 1 --branch $blenderRevision $blenderRepository $blenderSource
+    Invoke-Checked $git -C $blenderSource sparse-checkout set release/datafiles/colormanagement
+    Invoke-Checked $git -C $blenderSource checkout
+} elseif (-not (Test-Path -LiteralPath (Join-Path $blenderSource '.git'))) {
+    throw "Existing Blender source is not a Git checkout: $blenderSource"
+}
+
+$actualBlenderCommit = & $git -C $blenderSource rev-parse HEAD
+if ($LASTEXITCODE -ne 0) {
+    throw "Unable to inspect Blender revision at $blenderSource"
+}
+$actualBlenderCommit = $actualBlenderCommit.Trim()
+if ($actualBlenderCommit -ne $blenderCommit) {
+    throw "Unexpected Blender revision at ${blenderSource}: expected $blenderCommit, got $actualBlenderCommit"
+}
+if (-not (Test-Path -LiteralPath (Join-Path $colorManagementSource 'config.ocio') -PathType Leaf)) {
+    throw "Blender color-management assets are missing: $colorManagementSource"
+}
+Write-Host "[cycles] OCIO     : $colorManagementSource ($blenderCommit)"
+
 if ($FetchOnly) {
-    Write-Host '[cycles] Source and minimal Windows dependencies are ready.'
+    Write-Host '[cycles] Source, minimal Windows dependencies, and Blender OCIO assets are ready.'
     exit 0
 }
 
@@ -248,6 +275,14 @@ $configureArguments = @(
 )
 Invoke-Checked $cmake @configureArguments
 Invoke-Checked $cmake --build $cyclesBuild --config Release --target install --parallel $BuildJobs
+
+if (-not (Test-Path -LiteralPath $colorManagementInstall -PathType Container)) {
+    New-Item -ItemType Directory -Path $colorManagementInstall | Out-Null
+}
+Copy-Item -LiteralPath (Join-Path $colorManagementSource 'config.ocio') -Destination $colorManagementInstall -Force
+foreach ($assetDirectory in @('filmic', 'icc', 'luts')) {
+    Copy-Item -LiteralPath (Join-Path $colorManagementSource $assetDirectory) -Destination $colorManagementInstall -Recurse -Force
+}
 
 $cyclesExecutable = Join-Path $cyclesInstall 'cycles.exe'
 if (-not (Test-Path -LiteralPath $cyclesExecutable -PathType Leaf)) {

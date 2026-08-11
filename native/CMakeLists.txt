@@ -21,6 +21,7 @@ require_file("${CYCLES_SOURCE_DIR}/src/session/session.h" "Cycles headers")
 require_file("${CYCLES_RELEASE_LIB_DIR}/cycles_session.lib" "Cycles Release libraries")
 require_file("${CYCLES_INSTALL_DIR}/lib/kernel_optix.ptx.zst" "Cycles OptiX kernel")
 require_file("${OIDN_ROOT_DIR}/lib/OpenImageDenoise.lib" "OpenImageDenoise import library")
+require_file("${CYCLES_INSTALL_DIR}/color/ocio/config.ocio" "Blender OpenColorIO configuration")
 
 set(OIDN_RUNTIME_DLLS
     "${OIDN_ROOT_DIR}/bin/OpenImageDenoise.dll"
@@ -156,6 +157,12 @@ add_custom_command(TARGET cyclesrenderer_native POST_BUILD
     COMMAND "${CMAKE_COMMAND}" -E copy_directory
         "${CYCLES_INSTALL_DIR}/lib"
         "$<TARGET_FILE_DIR:cyclesrenderer_native>/lib"
+    VERBATIM
+)
+add_custom_command(TARGET cyclesrenderer_native POST_BUILD
+    COMMAND "${CMAKE_COMMAND}" -E copy_directory
+        "${CYCLES_INSTALL_DIR}/color"
+        "$<TARGET_FILE_DIR:cyclesrenderer_native>/color"
     VERBATIM
 )
 
