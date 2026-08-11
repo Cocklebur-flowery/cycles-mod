@@ -181,6 +181,9 @@ bool valid_settings(const CyclesBridgeRenderSettings& settings) {
         && settings.render_width >= 160U && settings.render_width <= 3840U
         && settings.render_height >= 90U && settings.render_height <= 2160U
         && settings.resolution_percentage >= 25U && settings.resolution_percentage <= 100U
+        && valid_bool(settings.dynamic_resolution)
+        && settings.interactive_resolution_percentage >= 25U
+        && settings.interactive_resolution_percentage <= 100U
         && settings.interactive_samples >= 1U && settings.interactive_samples <= 4096U
         && settings.still_samples >= 1U && settings.still_samples <= 4096U
         && settings.stationary_delay_millis <= 10000U
