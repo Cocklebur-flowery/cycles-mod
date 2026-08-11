@@ -40,6 +40,14 @@ class CyclesEngine final {
 
     bool commit_scene(std::string& error);
 
+    bool apply_settings(
+        const CyclesBridgeRenderSettings& settings,
+        std::string& error);
+
+    void query_capabilities(CyclesBridgeCapabilities& capabilities) const;
+
+    void query_diagnostics(CyclesBridgeDiagnostics& diagnostics) const;
+
     bool render(
         const CyclesBridgeCamera& camera,
         std::uint8_t* rgba,

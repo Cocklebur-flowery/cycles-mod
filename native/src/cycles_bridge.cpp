@@ -16,9 +16,9 @@ struct CyclesBridgeRenderer {
 
 namespace {
 
-constexpr std::uint32_t kAbiVersion = 5;
+constexpr std::uint32_t kAbiVersion = 6;
 constexpr std::uint32_t kStructVersion = 1;
-constexpr char kBuildInfo[] = "cyclesrenderer-native/cycles-5.2;abi=5";
+constexpr char kBuildInfo[] = "cyclesrenderer-native/cycles-5.2;abi=6";
 
 static_assert(sizeof(CyclesBridgeCamera) == 80);
 static_assert(offsetof(CyclesBridgeCamera, frame_id) == 8);
@@ -31,6 +31,9 @@ static_assert(offsetof(CyclesBridgeScene, vertex_count) == 20);
 static_assert(sizeof(CyclesBridgeSceneResources) == 48);
 static_assert(sizeof(CyclesBridgeSection) == 48);
 static_assert(sizeof(CyclesBridgeFrame) == 40);
+static_assert(sizeof(CyclesBridgeRenderSettings) == 208);
+static_assert(sizeof(CyclesBridgeCapabilities) == 64);
+static_assert(sizeof(CyclesBridgeDiagnostics) == 96);
 static_assert(sizeof(CyclesBridgeVertex) == 40);
 static_assert(offsetof(CyclesBridgeVertex, packed_rgba) == 32);
 static_assert(sizeof(CyclesBridgeTriangle) == 16);
@@ -167,6 +170,56 @@ bool valid_section_data(
     return true;
 }
 
+bool valid_settings(const CyclesBridgeRenderSettings& settings) {
+    const auto valid_bool = [](std::uint32_t value) { return value <= 1U; };
+    return settings.revision >= 1U
+        && settings.device_policy <= 3U
+        && settings.resolution_mode <= 1U
+        && settings.render_width >= 160U && settings.render_width <= 3840U
+        && settings.render_height >= 90U && settings.render_height <= 2160U
+        && settings.resolution_percentage >= 25U && settings.resolution_percentage <= 100U
+        && settings.interactive_samples >= 1U && settings.interactive_samples <= 4096U
+        && settings.still_samples >= 1U && settings.still_samples <= 4096U
+        && settings.stationary_delay_millis <= 10000U
+        && valid_bool(settings.adaptive_sampling)
+        && settings.minimum_samples <= 4096U
+        && std::isfinite(settings.noise_threshold)
+        && settings.noise_threshold >= 0.0F && settings.noise_threshold <= 1.0F
+        && settings.interactive_time_limit_millis <= 60000U
+        && settings.still_time_limit_millis <= 600000U
+        && settings.minimum_bounce <= 64U && settings.maximum_bounce <= 64U
+        && settings.minimum_bounce <= settings.maximum_bounce
+        && settings.diffuse_bounces <= 64U && settings.glossy_bounces <= 64U
+        && settings.transmission_bounces <= 64U && settings.volume_bounces <= 64U
+        && settings.transparent_bounces <= 64U
+        && std::isfinite(settings.clamp_direct)
+        && settings.clamp_direct >= 0.0F && settings.clamp_direct <= 100000.0F
+        && std::isfinite(settings.clamp_indirect)
+        && settings.clamp_indirect >= 0.0F && settings.clamp_indirect <= 100000.0F
+        && std::isfinite(settings.filter_glossy)
+        && settings.filter_glossy >= 0.0F && settings.filter_glossy <= 100.0F
+        && valid_bool(settings.reflective_caustics)
+        && valid_bool(settings.refractive_caustics)
+        && settings.pixel_filter <= 2U
+        && std::isfinite(settings.filter_width)
+        && settings.filter_width >= 0.01F && settings.filter_width <= 10.0F
+        && settings.seed >= 0
+        && settings.denoiser_mode <= 3U
+        && settings.denoiser_start_sample >= 1U
+        && settings.denoiser_start_sample <= 4096U
+        && settings.denoiser_input <= 2U
+        && settings.denoiser_prefilter <= 2U
+        && settings.denoiser_quality <= 2U
+        && valid_bool(settings.denoiser_use_gpu)
+        && std::isfinite(settings.exposure_ev)
+        && settings.exposure_ev >= -20.0F && settings.exposure_ev <= 20.0F
+        && std::isfinite(settings.gamma)
+        && settings.gamma >= 0.1F && settings.gamma <= 5.0F
+        && settings.view_transform <= 3U
+        && settings.active_pass < CYCLES_BRIDGE_PASS_COUNT
+        && valid_bool(settings.debug_overlay);
+}
+
 }  // namespace
 
 std::uint32_t cycles_bridge_abi_version() {
@@ -206,6 +259,57 @@ std::uint32_t cycles_bridge_write_renderer_info(
         return CYCLES_BRIDGE_STATUS_INVALID_ARGUMENT;
     }
     return write_string(renderer->engine->renderer_info(), output, capacity);
+}
+
+std::uint32_t cycles_bridge_query_capabilities(
+    const CyclesBridgeRenderer* renderer,
+    CyclesBridgeCapabilities* capabilities) {
+    if (renderer == nullptr || renderer->engine == nullptr || capabilities == nullptr
+        || capabilities->struct_size < sizeof(CyclesBridgeCapabilities)
+        || capabilities->struct_version != kStructVersion) {
+        return CYCLES_BRIDGE_STATUS_INVALID_ARGUMENT;
+    }
+    try {
+        renderer->engine->query_capabilities(*capabilities);
+        return CYCLES_BRIDGE_STATUS_OK;
+    } catch (...) {
+        return CYCLES_BRIDGE_STATUS_RENDER_ERROR;
+    }
+}
+
+std::uint32_t cycles_bridge_apply_settings(
+    CyclesBridgeRenderer* renderer,
+    const CyclesBridgeRenderSettings* settings) {
+    if (renderer == nullptr || renderer->engine == nullptr || settings == nullptr
+        || settings->struct_size < sizeof(CyclesBridgeRenderSettings)
+        || settings->struct_version != kStructVersion
+        || !valid_settings(*settings)) {
+        return CYCLES_BRIDGE_STATUS_INVALID_ARGUMENT;
+    }
+    try {
+        std::string error;
+        return renderer->engine->apply_settings(*settings, error)
+            ? CYCLES_BRIDGE_STATUS_OK
+            : CYCLES_BRIDGE_STATUS_RENDER_ERROR;
+    } catch (...) {
+        return CYCLES_BRIDGE_STATUS_RENDER_ERROR;
+    }
+}
+
+std::uint32_t cycles_bridge_query_diagnostics(
+    const CyclesBridgeRenderer* renderer,
+    CyclesBridgeDiagnostics* diagnostics) {
+    if (renderer == nullptr || renderer->engine == nullptr || diagnostics == nullptr
+        || diagnostics->struct_size < sizeof(CyclesBridgeDiagnostics)
+        || diagnostics->struct_version != kStructVersion) {
+        return CYCLES_BRIDGE_STATUS_INVALID_ARGUMENT;
+    }
+    try {
+        renderer->engine->query_diagnostics(*diagnostics);
+        return CYCLES_BRIDGE_STATUS_OK;
+    } catch (...) {
+        return CYCLES_BRIDGE_STATUS_RENDER_ERROR;
+    }
 }
 
 std::uint32_t cycles_bridge_upload_scene(

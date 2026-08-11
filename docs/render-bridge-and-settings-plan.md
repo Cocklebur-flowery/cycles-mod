@@ -1,7 +1,7 @@
 # 渲染数据桥与 Cycles 画面控制里程碑
 
-状态：已确认，实施中（单元 A 已验收；单元 D 基础接入已收口；Section 流送与低分辨率 Vulkan 展示实现待游戏验收）
-基线：Minecraft 26.2 / NeoForge 26.2.0.58 / Cycles 5.2 / C ABI v5
+状态：已确认，实施中（单元 A/A2 已验收；单元 D 基础接入已收口；设置、能力检测与 Pass 查看器已完成自动验证，等待游戏验收）
+基线：Minecraft 26.2 / NeoForge 26.2.0.58 / Cycles 5.2 / C ABI v6
 
 ## 1. 目标
 
@@ -175,7 +175,7 @@ Provider 必须读取 DH 对外提供或能够稳定适配的最终 LOD 网格/�
 
 场景格式和设置都会成为稳定契约，修改时必须同步升级 ABI。
 
-单元 A 冻结的 ABI v4 整场景入口继续保留；Section 流送阶段将协议升级为 ABI v5，并继续避免把 C++ 类型暴露给 Java：
+单元 A 冻结的 ABI v4 整场景入口继续保留；Section 流送阶段升级为 ABI v5；设置阶段升级为 ABI v6，并继续避免把 C++ 类型暴露给 Java：
 
 - `CyclesBridgeCamera`：80 字节，沿用已验证的相机坐标约定。
 - `CyclesBridgeScene`：48 字节，场景原点和各数组计数。
@@ -186,12 +186,14 @@ Provider 必须读取 DH 对外提供或能够稳定适配的最终 LOD 网格/�
 - `CyclesBridgeSceneResources`：48 字节，共享场景原点、材质、纹理和像素计数。
 - `CyclesBridgeSection`：48 字节，稳定 ID、局部原点和几何计数。
 - `CyclesBridgeFrame`：40 字节，低分辨率尺寸、generation、状态标记和实际 sample 数。
-- `CyclesBridgeRenderSettings`：由后续设置单元新增并升级 ABI。
+- `CyclesBridgeRenderSettings`：ABI v6 新增，固定 208 字节；包含稳定的设置 revision、设备/分辨率/采样/光程/过滤/降噪/显示/Pass ID。
+- `CyclesBridgeCapabilities`：ABI v6 新增，固定 64 字节；区分编译能力、枚举到的设备、设备实际支持的降噪器、Pass mask 和最大输出尺寸。
+- `CyclesBridgeDiagnostics`：ABI v6 新增，固定 96 字节；报告当前已生效设置 revision、实际设备/降噪器/Pass、场景/相机/帧代次、尺寸、sample、Section 数和最近 reset 等级。
 - Pass 使用稳定枚举/位掩码，不用 UI 显示字符串作为协议键。
 
 每个结构继续包含 `struct_size`、`struct_version` 和保留字段。Java FFM 布局、C 头、参数校验和 Native 冒烟测试必须同时更新。
 
-Java 25 FFM 与 MSVC 对上述字节布局均有静态/启动时断言。v5 使用 `reset_scene` 设置共享资源、`upsert_section` / `remove_section` 修改暂存区、`commit_scene` 发布不可变请求；材质/图集通过共享所有权避免每次提交复制整张图集。`render_frame` 通过 generation 只复制变化后的低分辨率 RGBA。C 层先验证尺寸、版本、索引、像素范围和有限浮点值，再复制给 Native 工作线程。动画 revision、PBR 材质扩展和设置快照仍需要显式 ABI 升级。
+Java 25 FFM 与 MSVC 对上述字节布局均有静态/启动时断言。v5 使用 `reset_scene` 设置共享资源、`upsert_section` / `remove_section` 修改暂存区、`commit_scene` 发布不可变请求；v6 使用 `apply_settings`、`query_capabilities` 和 `query_diagnostics` 管理运行时画面控制。材质/图集通过共享所有权避免每次提交复制整张图集。`render_frame` 通过 generation 只复制变化后的 RGBA。C 层先验证尺寸、版本、枚举、范围和有限浮点值，再复制给 Native 工作线程。动画 revision 和 PBR 材质扩展仍需要后续显式 ABI 升级。
 
 ## 6. Cycles 画面设置
 
@@ -206,6 +208,8 @@ Java 25 FFM 与 MSVC 对上述字节布局均有静态/启动时断言。v5 使�
 - F8 仍只负责启用/关闭渲染器。
 
 界面第一版分为：性能与采样、降噪、色彩管理、多通道、高级、诊断。
+
+当前实现状态：NeoForge `CLIENT` 配置已经落到 `config/cyclesrenderer-client.toml`，带 schema version 和运行时 revision。F9 打开专用总览页，模组列表 Config 按钮进入同一页面；总览页再打开 NeoForge 自动生成的完整字段编辑器。F10 切换诊断叠加层。默认值继续保持 Fit Inside `480 × 270`、交互 1 sample、静止 8 samples 和 150 ms 静止延迟，用户可选择 Fixed `1920 × 1080`，native 上限为 `3840 × 2160`。
 
 ### 6.2 交互与静止双配置
 
@@ -252,6 +256,8 @@ Minecraft 相机持续运动，不能直接照搬 Blender 离线渲染的单一�
 - 查询实际可用性；界面不能显示一个运行时不可用的选项为“正常”。
 - 指定降噪器失败时按照设置决定自动回退或报告错误，不能导致 Minecraft 崩溃。
 
+当前实现状态：ABI v6 已区分“配置请求”“构建时编译能力”“设备枚举能力”和“当前实际生效降噪器”。OptiX 已在 RTX 5080 的 native 冒烟中实际启用并产出画面；当前 Cycles 静态库仍以 `WITH_CYCLES_OPENIMAGEDENOISE=OFF` 构建，因此 OIDN 会准确报告为不可用，未假装已经支持。重建 Cycles/OIDN 及部署 DLL 保留到后续独立阶段。
+
 ### 6.4 线性 HDR 与色彩管理
 
 FrameStore 改为保存 Scene Linear Float/half 数据，不在接收 Tile 时转换成 RGBA8。
@@ -284,6 +290,8 @@ Scene Linear Pass
 
 第一版最终仍写入 Minecraft 当前 SDR RGBA8 主纹理。HDR10/Display P3/Rec.2020 输出需要确认 Minecraft Vulkan swapchain 与操作系统 HDR 状态，属于后续范围。
 
+当前实现状态：设置 ID、EV、Gamma、Standard/Raw 输出路径已经接通，但 FrameStore 仍在接收 Tile 时转换并保存 RGBA8，没有建立可复用的 Scene Linear HDR Pass cache。`AgX` 与 `Khronos PBR Neutral` 已有稳定配置 ID 和 UI 选项，但在 Blender `config.ocio`/LUT 正式部署前按 Standard 显示；这不是 Blender AgX 的近似实现，也不能宣称 OCIO 色彩管理已经完成。
+
 ### 6.5 设置变更语义
 
 | 变更类别 | 示例 | 运行时行为 |
@@ -313,6 +321,8 @@ Native 端维护 Pass registry 和 HDR Pass cache。Java 默认只获取已经�
 - Emission。
 - Roughness。
 - Sample Count。
+
+当前实现状态：上述 7 个 Pass 已在 native 中按当前选择按需注册，Java/Vulkan 每次只接收一个活动显示 Pass。Depth、Normal、Roughness 和 Sample Count 使用明确的调试映射，Combined/Diffuse Color/Emission 走当前曝光与显示转换。native 冒烟逐一切换所有 Pass、恢复 Combined 后，再继续验证同一 Renderer 中的 Section 修改和删除。
 
 后续再开放：
 
@@ -409,6 +419,8 @@ Section 流送切换到 ABI v5 后，旧高度场暂不再合并进活动场景�
 - HDR 测试场景在 AgX 下保留高光层次，Raw/Standard 行为可对照。
 - 设置错误不会让 Minecraft 进程崩溃。
 
+当前状态：采样、分辨率、光程、过滤、设备策略、OptiX 降噪和基础显示参数已经通过 ABI v6 接通；真正的线性 HDR Pass cache、Blender OCIO 资产/AgX 和 OIDN 构建尚未完成，因此单元 B 只完成了控制面与一部分 Cycles 参数，不标记为整体验收。
+
 ### 单元 C：Minecraft 设置界面与 Pass 查看器
 
 结果：游戏内可以持久调整设置，查看当前有效后端/降噪器，并切换已启用的调试 Pass。
@@ -422,6 +434,8 @@ Section 流送切换到 ABI v5 后，旧高度场暂不再合并进活动场景�
 - UI 标明设置变更的重置等级。
 - Combined、Depth、Normal、Emission 等已启用 Pass 可以切换查看。
 - F8 关闭后原版渲染恢复，F9 设置界面不依赖 Cycles 已启用。
+
+当前状态：CLIENT 配置、F9/模组列表入口、F10 诊断、能力查询、运行时设置提交和 7 Pass 查看器已编码；Java 编译及 OptiX native 冒烟通过，等待游戏内持久化、1080p、所有 Pass、F8 回退和 UI 操作验收后提交。
 
 单元 A、D、A2、B、C 各自完成后创建一个本地 Git 提交。
 

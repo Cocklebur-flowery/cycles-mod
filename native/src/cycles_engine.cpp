@@ -25,6 +25,7 @@
 #include "device/device.h"
 #include "scene/attribute.h"
 #include "scene/camera.h"
+#include "scene/film.h"
 #include "scene/image.h"
 #include "scene/image_loader.h"
 #include "scene/integrator.h"
@@ -52,10 +53,89 @@ namespace {
 
 using namespace std::chrono_literals;
 
-constexpr std::uint32_t kMaximumRenderWidth = 480;
-constexpr std::uint32_t kMaximumRenderHeight = 270;
-constexpr int kRenderSamples = 8;
-constexpr char kCombinedPass[] = "combined";
+constexpr std::uint32_t kMaximumRenderWidth = 3840;
+constexpr std::uint32_t kMaximumRenderHeight = 2160;
+
+CyclesBridgeRenderSettings default_settings() {
+    CyclesBridgeRenderSettings settings{};
+    settings.struct_size = sizeof(settings);
+    settings.struct_version = 1;
+    settings.revision = 0;
+    settings.device_policy = 0;
+    settings.resolution_mode = 0;
+    settings.render_width = 480;
+    settings.render_height = 270;
+    settings.resolution_percentage = 100;
+    settings.interactive_samples = 1;
+    settings.still_samples = 8;
+    settings.stationary_delay_millis = 150;
+    settings.noise_threshold = 0.01F;
+    settings.maximum_bounce = 3;
+    settings.diffuse_bounces = 2;
+    settings.glossy_bounces = 1;
+    settings.clamp_indirect = 10.0F;
+    settings.pixel_filter = 0;
+    settings.filter_width = 1.0F;
+    settings.denoiser_start_sample = 1;
+    settings.denoiser_input = 2;
+    settings.denoiser_prefilter = 1;
+    settings.denoiser_quality = 1;
+    settings.denoiser_use_gpu = 1;
+    settings.gamma = 1.0F;
+    settings.active_pass = CYCLES_BRIDGE_PASS_COMBINED;
+    return settings;
+}
+
+bool same_render_settings(
+    CyclesBridgeRenderSettings first,
+    CyclesBridgeRenderSettings second) {
+    first.revision = 0;
+    second.revision = 0;
+    first.debug_overlay = 0;
+    second.debug_overlay = 0;
+    std::fill(std::begin(first.reserved), std::end(first.reserved), 0U);
+    std::fill(std::begin(second.reserved), std::end(second.reserved), 0U);
+    return std::memcmp(&first, &second, sizeof(first)) == 0;
+}
+
+const char* pass_name(std::uint32_t pass) {
+    switch (pass) {
+        case CYCLES_BRIDGE_PASS_DEPTH: return "depth";
+        case CYCLES_BRIDGE_PASS_NORMAL: return "normal";
+        case CYCLES_BRIDGE_PASS_DIFFUSE_COLOR: return "diffuse_color";
+        case CYCLES_BRIDGE_PASS_EMISSION: return "emission";
+        case CYCLES_BRIDGE_PASS_ROUGHNESS: return "roughness";
+        case CYCLES_BRIDGE_PASS_SAMPLE_COUNT: return "sample_count";
+        default: return "combined";
+    }
+}
+
+ccl::PassType pass_type(std::uint32_t pass) {
+    switch (pass) {
+        case CYCLES_BRIDGE_PASS_DEPTH: return ccl::PASS_DEPTH;
+        case CYCLES_BRIDGE_PASS_NORMAL: return ccl::PASS_NORMAL;
+        case CYCLES_BRIDGE_PASS_DIFFUSE_COLOR: return ccl::PASS_DIFFUSE_COLOR;
+        case CYCLES_BRIDGE_PASS_EMISSION: return ccl::PASS_EMISSION;
+        case CYCLES_BRIDGE_PASS_ROUGHNESS: return ccl::PASS_ROUGHNESS;
+        case CYCLES_BRIDGE_PASS_SAMPLE_COUNT: return ccl::PASS_SAMPLE_COUNT;
+        default: return ccl::PASS_COMBINED;
+    }
+}
+
+int pass_components(std::uint32_t pass) {
+    switch (pass) {
+        case CYCLES_BRIDGE_PASS_DEPTH:
+        case CYCLES_BRIDGE_PASS_ROUGHNESS:
+        case CYCLES_BRIDGE_PASS_SAMPLE_COUNT:
+            return 1;
+        case CYCLES_BRIDGE_PASS_NORMAL:
+        case CYCLES_BRIDGE_PASS_DIFFUSE_COLOR:
+        case CYCLES_BRIDGE_PASS_EMISSION:
+            return 3;
+        default:
+            return 4;
+    }
+}
 
 struct SectionRequest {
     CyclesBridgeSection section{};
@@ -178,6 +258,31 @@ std::vector<ccl::DeviceInfo> enumerate_devices() {
     return result;
 }
 
+std::uint32_t device_mask(const ccl::DeviceInfo& device) {
+    switch (device.type) {
+        case ccl::DEVICE_OPTIX: return CYCLES_BRIDGE_DEVICE_OPTIX;
+        case ccl::DEVICE_CUDA: return CYCLES_BRIDGE_DEVICE_CUDA;
+        case ccl::DEVICE_CPU: return CYCLES_BRIDGE_DEVICE_CPU;
+        default: return 0;
+    }
+}
+
+bool device_matches_policy(const ccl::DeviceInfo& device, std::uint32_t policy) {
+    return policy == 0U
+        || (policy == 1U && device.type == ccl::DEVICE_OPTIX)
+        || (policy == 2U && device.type == ccl::DEVICE_CUDA)
+        || (policy == 3U && device.type == ccl::DEVICE_CPU);
+}
+
+std::uint32_t device_diagnostic_id(const ccl::DeviceInfo& device) {
+    switch (device.type) {
+        case ccl::DEVICE_OPTIX: return 1U;
+        case ccl::DEVICE_CUDA: return 2U;
+        case ccl::DEVICE_CPU: return 3U;
+        default: return 0U;
+    }
+}
+
 bool finite_camera(const CyclesBridgeCamera& camera) {
     return std::isfinite(camera.position_x)
         && std::isfinite(camera.position_y)
@@ -192,11 +297,24 @@ bool finite_camera(const CyclesBridgeCamera& camera) {
 
 std::pair<std::uint32_t, std::uint32_t> render_dimensions(
     std::uint32_t viewport_width,
-    std::uint32_t viewport_height) {
+    std::uint32_t viewport_height,
+    const CyclesBridgeRenderSettings& settings) {
+    const double percentage = static_cast<double>(settings.resolution_percentage) / 100.0;
+    const std::uint32_t requested_width = std::clamp(
+        static_cast<std::uint32_t>(std::floor(settings.render_width * percentage)),
+        1U,
+        kMaximumRenderWidth);
+    const std::uint32_t requested_height = std::clamp(
+        static_cast<std::uint32_t>(std::floor(settings.render_height * percentage)),
+        1U,
+        kMaximumRenderHeight);
+    if (settings.resolution_mode == 1U) {
+        return {requested_width, requested_height};
+    }
     const double scale = std::min({
         1.0,
-        static_cast<double>(kMaximumRenderWidth) / viewport_width,
-        static_cast<double>(kMaximumRenderHeight) / viewport_height,
+        static_cast<double>(requested_width) / viewport_width,
+        static_cast<double>(requested_height) / viewport_height,
     });
     return {
         std::max(1U, static_cast<std::uint32_t>(std::floor(viewport_width * scale))),
@@ -257,15 +375,45 @@ class FrameStore final {
         generation_++;
     }
 
+    void configure(
+        const CyclesBridgeRenderSettings& settings,
+        float depth_far,
+        int target_samples) {
+        std::lock_guard lock(mutex_);
+        active_pass_ = settings.active_pass;
+        exposure_scale_ = std::exp2(settings.exposure_ev);
+        gamma_ = settings.gamma;
+        view_transform_ = settings.view_transform;
+        depth_far_ = std::max(1.0F, depth_far);
+        target_samples_ = std::max(1, target_samples);
+    }
+
     bool update(const ccl::OutputDriver::Tile& tile) {
         if (tile.size.x <= 0 || tile.size.y <= 0
             || tile.full_size.x <= 0 || tile.full_size.y <= 0) {
             return false;
         }
 
+        std::uint32_t active_pass;
+        float exposure_scale;
+        float gamma;
+        std::uint32_t view_transform;
+        float depth_far;
+        int target_samples;
+        {
+            std::lock_guard lock(mutex_);
+            active_pass = active_pass_;
+            exposure_scale = exposure_scale_;
+            gamma = gamma_;
+            view_transform = view_transform_;
+            depth_far = depth_far_;
+            target_samples = target_samples_;
+        }
+        const int components = pass_components(active_pass);
         std::vector<float> pixels(
-            static_cast<std::size_t>(tile.size.x) * tile.size.y * 4U);
-        if (!tile.get_pass_pixels(kCombinedPass, 4, pixels.data())) {
+            static_cast<std::size_t>(tile.size.x) * tile.size.y
+                * static_cast<std::size_t>(components));
+        if (!tile.get_pass_pixels(pass_name(active_pass), components, pixels.data())) {
             return false;
         }
 
@@ -289,13 +437,52 @@ class FrameStore final {
                     continue;
                 }
                 const std::size_t source =
-                    (static_cast<std::size_t>(source_y) * tile.size.x + tile_x) * 4U;
+                    (static_cast<std::size_t>(source_y) * tile.size.x + tile_x)
+                        * static_cast<std::size_t>(components);
                 const std::size_t target =
                     (static_cast<std::size_t>(target_y) * width_ + target_x) * 4U;
-                rgba_[target] = to_unorm(linear_to_srgb(pixels[source]));
-                rgba_[target + 1U] = to_unorm(linear_to_srgb(pixels[source + 1U]));
-                rgba_[target + 2U] = to_unorm(linear_to_srgb(pixels[source + 2U]));
-                rgba_[target + 3U] = to_unorm(pixels[source + 3U]);
+                float red = 0.0F;
+                float green = 0.0F;
+                float blue = 0.0F;
+                float alpha = 1.0F;
+                if (active_pass == CYCLES_BRIDGE_PASS_DEPTH) {
+                    const float depth = pixels[source];
+                    const float value = std::isfinite(depth)
+                        ? 1.0F - std::exp(-std::max(0.0F, depth) * 8.0F / depth_far)
+                        : 1.0F;
+                    red = green = blue = value;
+                } else if (active_pass == CYCLES_BRIDGE_PASS_NORMAL) {
+                    red = pixels[source] * 0.5F + 0.5F;
+                    green = pixels[source + 1U] * 0.5F + 0.5F;
+                    blue = pixels[source + 2U] * 0.5F + 0.5F;
+                } else if (active_pass == CYCLES_BRIDGE_PASS_ROUGHNESS) {
+                    red = green = blue = pixels[source];
+                } else if (active_pass == CYCLES_BRIDGE_PASS_SAMPLE_COUNT) {
+                    const float value = pixels[source] / static_cast<float>(target_samples);
+                    red = green = blue = value;
+                } else {
+                    red = pixels[source] * exposure_scale;
+                    green = pixels[source + 1U] * exposure_scale;
+                    blue = pixels[source + 2U] * exposure_scale;
+                    if (active_pass == CYCLES_BRIDGE_PASS_COMBINED) {
+                        alpha = pixels[source + 3U];
+                    }
+                    if (view_transform != 1U) {
+                        red = linear_to_srgb(red);
+                        green = linear_to_srgb(green);
+                        blue = linear_to_srgb(blue);
+                    }
+                    if (!nearly_equal(gamma, 1.0F, 1.0e-6)) {
+                        const float inverse_gamma = 1.0F / gamma;
+                        red = std::pow(std::max(0.0F, red), inverse_gamma);
+                        green = std::pow(std::max(0.0F, green), inverse_gamma);
+                        blue = std::pow(std::max(0.0F, blue), inverse_gamma);
+                    }
+                }
+                rgba_[target] = to_unorm(red);
+                rgba_[target + 1U] = to_unorm(green);
+                rgba_[target + 2U] = to_unorm(blue);
+                rgba_[target + 3U] = to_unorm(alpha);
             }
         }
         generation_++;
@@ -383,12 +570,23 @@ class FrameStore final {
         return {width_, height_};
     }
 
+    [[nodiscard]] int sample_count() const {
+        std::lock_guard lock(mutex_);
+        return sample_count_;
+    }
+
  private:
     mutable std::mutex mutex_;
     std::uint32_t width_ = 0;
     std::uint32_t height_ = 0;
     std::uint64_t generation_ = 0;
     int sample_count_ = 0;
+    std::uint32_t active_pass_ = CYCLES_BRIDGE_PASS_COMBINED;
+    float exposure_scale_ = 1.0F;
+    float gamma_ = 1.0F;
+    std::uint32_t view_transform_ = 0;
+    float depth_far_ = 1.0F;
+    int target_samples_ = 1;
     std::vector<std::uint8_t> rgba_;
 };
 
@@ -785,6 +983,90 @@ ccl::BufferParams configure_camera(
     return buffer;
 }
 
+std::uint32_t configure_scene_settings(
+    ccl::Scene* scene,
+    const ccl::DeviceInfo& device,
+    const CyclesBridgeRenderSettings& settings) {
+    ccl::Integrator* integrator = scene->integrator;
+    integrator->set_min_bounce(static_cast<int>(settings.minimum_bounce));
+    integrator->set_max_bounce(static_cast<int>(settings.maximum_bounce));
+    integrator->set_max_diffuse_bounce(static_cast<int>(settings.diffuse_bounces));
+    integrator->set_max_glossy_bounce(static_cast<int>(settings.glossy_bounces));
+    integrator->set_max_transmission_bounce(static_cast<int>(settings.transmission_bounces));
+    integrator->set_max_volume_bounce(static_cast<int>(settings.volume_bounces));
+    integrator->set_transparent_max_bounce(static_cast<int>(settings.transparent_bounces));
+    integrator->set_sample_clamp_direct(settings.clamp_direct);
+    integrator->set_sample_clamp_indirect(settings.clamp_indirect);
+    integrator->set_filter_glossy(settings.filter_glossy);
+    integrator->set_caustics_reflective(settings.reflective_caustics != 0U);
+    integrator->set_caustics_refractive(settings.refractive_caustics != 0U);
+    integrator->set_seed(settings.seed);
+    integrator->set_use_adaptive_sampling(settings.adaptive_sampling != 0U);
+    integrator->set_adaptive_min_samples(static_cast<int>(settings.minimum_samples));
+    integrator->set_adaptive_threshold(settings.noise_threshold);
+
+    std::uint32_t effective_denoiser = 0;
+    const bool optix_available = (device.denoisers & ccl::DENOISER_OPTIX) != 0;
+    const bool oidn_available = (device.denoisers & ccl::DENOISER_OPENIMAGEDENOISE) != 0;
+    if ((settings.denoiser_mode == 1U || settings.denoiser_mode == 2U)
+        && optix_available) {
+        effective_denoiser = 1U;
+        integrator->set_denoiser_type(ccl::DENOISER_OPTIX);
+    } else if ((settings.denoiser_mode == 1U || settings.denoiser_mode == 3U)
+               && oidn_available) {
+        effective_denoiser = 2U;
+        integrator->set_denoiser_type(ccl::DENOISER_OPENIMAGEDENOISE);
+    }
+    integrator->set_use_denoise(effective_denoiser != 0U);
+    integrator->set_denoise_start_sample(static_cast<int>(settings.denoiser_start_sample));
+    int denoiser_passes = ccl::DENOISER_PASS_NONE;
+    if (settings.denoiser_input >= 1U) {
+        denoiser_passes |= ccl::DENOISER_PASS_ALBEDO;
+    }
+    if (settings.denoiser_input >= 2U) {
+        denoiser_passes |= ccl::DENOISER_PASS_NORMAL;
+    }
+    integrator->set_denoiser_passes(denoiser_passes);
+    const std::array<ccl::DenoiserPrefilter, 3> prefilters = {
+        ccl::DENOISER_PREFILTER_NONE,
+        ccl::DENOISER_PREFILTER_FAST,
+        ccl::DENOISER_PREFILTER_ACCURATE,
+    };
+    integrator->set_denoiser_prefilter(prefilters[settings.denoiser_prefilter]);
+    const std::array<ccl::DenoiserQuality, 3> qualities = {
+        ccl::DENOISER_QUALITY_FAST,
+        ccl::DENOISER_QUALITY_BALANCED,
+        ccl::DENOISER_QUALITY_HIGH,
+    };
+    integrator->set_denoiser_quality(qualities[settings.denoiser_quality]);
+    integrator->set_denoise_use_gpu(settings.denoiser_use_gpu != 0U);
+
+    ccl::Film* film = scene->film;
+    const std::array<ccl::FilterType, 3> filters = {
+        ccl::FILTER_BOX,
+        ccl::FILTER_GAUSSIAN,
+        ccl::FILTER_BLACKMAN_HARRIS,
+    };
+    film->set_filter_type(filters[settings.pixel_filter]);
+    film->set_filter_width(settings.filter_width);
+    film->set_display_pass(pass_type(settings.active_pass));
+    film->set_use_sample_count(
+        settings.adaptive_sampling != 0U
+        || settings.active_pass == CYCLES_BRIDGE_PASS_SAMPLE_COUNT);
+    return effective_denoiser;
+}
+
+void create_output_passes(ccl::Scene* scene, const CyclesBridgeRenderSettings& settings) {
+    ccl::Pass* combined = scene->create_node<ccl::Pass>();
+    combined->set_name(ccl::ustring(pass_name(CYCLES_BRIDGE_PASS_COMBINED)));
+    combined->set_type(ccl::PASS_COMBINED);
+    if (settings.active_pass != CYCLES_BRIDGE_PASS_COMBINED) {
+        ccl::Pass* selected = scene->create_node<ccl::Pass>();
+        selected->set_name(ccl::ustring(pass_name(settings.active_pass)));
+        selected->set_type(pass_type(settings.active_pass));
+    }
+}
+
 }  // namespace
 
 class CyclesEngine::Impl final {
@@ -795,6 +1077,7 @@ class CyclesEngine::Impl final {
         if (devices_.empty()) {
             throw std::runtime_error("Cycles reported no OptiX, CUDA, or CPU devices");
         }
+        requested_settings_ = default_settings();
         selected_device_ = devices_.front();
         state_ = "waiting-scene";
         worker_ = std::thread([this] { worker_main(); });
@@ -970,7 +1253,8 @@ class CyclesEngine::Impl final {
             request->revision = ++scene_revision_;
             requested_scene_ = request;
             if (requested_camera_) {
-                requested_camera_->sample_count = 1;
+                requested_camera_->sample_count =
+                    static_cast<int>(requested_settings_.interactive_samples);
                 requested_camera_->revision = ++camera_revision_;
                 last_camera_change_ = std::chrono::steady_clock::now();
                 last_camera_generation_ = frames_.generation();
@@ -979,6 +1263,136 @@ class CyclesEngine::Impl final {
         set_state("scene-queued", {});
         request_changed_.notify_all();
         return true;
+    }
+
+    bool apply_settings(
+        const CyclesBridgeRenderSettings& settings,
+        std::string& error) {
+        std::uint32_t reset_level = CYCLES_BRIDGE_RESET_NONE;
+        bool display_only_no_op = false;
+        {
+            std::lock_guard lock(request_mutex_);
+            if (stopping_) {
+                error = "Cycles worker is stopping";
+                return false;
+            }
+            display_only_no_op = settings_revision_ > 0
+                && same_render_settings(settings, requested_settings_);
+            if (!display_only_no_op) {
+                if (settings.device_policy != requested_settings_.device_policy) {
+                    reset_level = CYCLES_BRIDGE_RESET_SESSION;
+                } else if (settings.active_pass != requested_settings_.active_pass
+                           || settings.resolution_mode != requested_settings_.resolution_mode
+                           || settings.render_width != requested_settings_.render_width
+                           || settings.render_height != requested_settings_.render_height
+                           || settings.resolution_percentage
+                               != requested_settings_.resolution_percentage) {
+                    reset_level = CYCLES_BRIDGE_RESET_BUFFER;
+                } else if (!same_render_settings(settings, requested_settings_)) {
+                    reset_level = CYCLES_BRIDGE_RESET_ACCUMULATION;
+                }
+                requested_settings_ = settings;
+                if (requested_settings_.revision <= settings_revision_) {
+                    requested_settings_.revision = settings_revision_ + 1U;
+                }
+                settings_revision_ = requested_settings_.revision;
+                requested_reset_level_ = reset_level;
+                if (requested_camera_) {
+                    std::tie(requested_camera_->render_width, requested_camera_->render_height) =
+                        render_dimensions(
+                            requested_camera_->camera.viewport_width,
+                            requested_camera_->camera.viewport_height,
+                            requested_settings_);
+                    requested_camera_->sample_count =
+                        static_cast<int>(requested_settings_.interactive_samples);
+                    requested_camera_->revision = ++camera_revision_;
+                    last_camera_change_ = std::chrono::steady_clock::now();
+                    last_camera_generation_ = frames_.generation();
+                }
+            }
+        }
+        if (display_only_no_op) {
+            std::lock_guard lock(state_mutex_);
+            last_reset_level_ = CYCLES_BRIDGE_RESET_NONE;
+            return true;
+        }
+        if (reset_level >= CYCLES_BRIDGE_RESET_BUFFER) {
+            frames_.clear();
+        }
+        {
+            std::lock_guard lock(state_mutex_);
+            last_reset_level_ = reset_level;
+        }
+        set_state("settings-queued", {});
+        request_changed_.notify_all();
+        return true;
+    }
+
+    void query_capabilities(CyclesBridgeCapabilities& capabilities) const {
+        capabilities = {};
+        capabilities.struct_size = sizeof(capabilities);
+        capabilities.struct_version = 1;
+        capabilities.capability_flags =
+            CYCLES_BRIDGE_CAPABILITY_SETTINGS
+            | CYCLES_BRIDGE_CAPABILITY_PASS_VIEWER
+            | CYCLES_BRIDGE_CAPABILITY_DENOISE;
+#if defined(WITH_OPTIX)
+        capabilities.capability_flags |= CYCLES_BRIDGE_CAPABILITY_OPTIX_COMPILED;
+#endif
+#if defined(WITH_CUDA)
+        capabilities.capability_flags |= CYCLES_BRIDGE_CAPABILITY_CUDA_COMPILED;
+#endif
+#if defined(WITH_OPENIMAGEDENOISE)
+        capabilities.capability_flags |= CYCLES_BRIDGE_CAPABILITY_OIDN_COMPILED;
+#endif
+#if defined(WITH_OCIO)
+        capabilities.capability_flags |= CYCLES_BRIDGE_CAPABILITY_OCIO_COMPILED;
+#endif
+        capabilities.pass_mask = (1ULL << CYCLES_BRIDGE_PASS_COUNT) - 1ULL;
+        capabilities.maximum_width = kMaximumRenderWidth;
+        capabilities.maximum_height = kMaximumRenderHeight;
+        capabilities.device_count = static_cast<std::uint32_t>(devices_.size());
+        for (const ccl::DeviceInfo& device : devices_) {
+            capabilities.device_mask |= device_mask(device);
+            if ((device.denoisers & ccl::DENOISER_OPTIX) != 0) {
+                capabilities.denoiser_mask |= CYCLES_BRIDGE_DENOISER_OPTIX;
+            }
+#if defined(WITH_OPENIMAGEDENOISE)
+            if ((device.denoisers & ccl::DENOISER_OPENIMAGEDENOISE) != 0) {
+                capabilities.denoiser_mask |= CYCLES_BRIDGE_DENOISER_OPENIMAGEDENOISE;
+            }
+#endif
+        }
+    }
+
+    void query_diagnostics(CyclesBridgeDiagnostics& diagnostics) const {
+        diagnostics = {};
+        diagnostics.struct_size = sizeof(diagnostics);
+        diagnostics.struct_version = 1;
+        {
+            std::lock_guard lock(request_mutex_);
+            diagnostics.scene_revision = requested_scene_ ? requested_scene_->revision : 0;
+            diagnostics.camera_revision = requested_camera_ ? requested_camera_->revision : 0;
+            diagnostics.section_count = requested_scene_
+                ? static_cast<std::uint32_t>(requested_scene_->sections.size())
+                : 0U;
+        }
+        {
+            std::lock_guard lock(state_mutex_);
+            diagnostics.state_code = state_code_;
+            diagnostics.device_type = device_diagnostic_id(selected_device_);
+            diagnostics.effective_denoiser = effective_denoiser_;
+            diagnostics.reset_level = last_reset_level_;
+            diagnostics.settings_revision = active_settings_revision_diagnostic_;
+            diagnostics.active_pass = active_pass_diagnostic_;
+        }
+        const auto [width, height] = frames_.size();
+        diagnostics.frame_generation = frames_.generation();
+        diagnostics.width = width;
+        diagnostics.height = height;
+        diagnostics.sample_count = static_cast<std::uint32_t>(
+            std::max(0, frames_.sample_count()));
+        diagnostics.frame_ready = frames_.ready() ? 1U : 0U;
     }
 
     bool render(
@@ -1067,8 +1481,6 @@ class CyclesEngine::Impl final {
 
         CameraRequest request;
         request.camera = camera;
-        std::tie(request.render_width, request.render_height) =
-            render_dimensions(camera.viewport_width, camera.viewport_height);
         const auto now = std::chrono::steady_clock::now();
         bool changed = false;
         {
@@ -1076,17 +1488,27 @@ class CyclesEngine::Impl final {
             if (!requested_scene_) {
                 return true;
             }
+            std::tie(request.render_width, request.render_height) = render_dimensions(
+                camera.viewport_width,
+                camera.viewport_height,
+                requested_settings_);
             if (!requested_camera_ || !same_camera(*requested_camera_, request)) {
-                request.sample_count = 1;
+                request.sample_count =
+                    static_cast<int>(requested_settings_.interactive_samples);
                 request.revision = ++camera_revision_;
                 requested_camera_ = request;
                 last_camera_change_ = now;
                 last_camera_generation_ = frames_.generation();
                 changed = true;
-            } else if (requested_camera_->sample_count == 1
-                       && now - last_camera_change_ >= 150ms
+            } else if (requested_camera_->sample_count
+                           == static_cast<int>(requested_settings_.interactive_samples)
+                       && requested_settings_.still_samples
+                           != requested_settings_.interactive_samples
+                       && now - last_camera_change_
+                           >= std::chrono::milliseconds(
+                               requested_settings_.stationary_delay_millis)
                        && frames_.generation() != last_camera_generation_) {
-                request.sample_count = kRenderSamples;
+                request.sample_count = static_cast<int>(requested_settings_.still_samples);
                 request.revision = ++camera_revision_;
                 requested_camera_ = request;
                 changed = true;
@@ -1107,6 +1529,15 @@ class CyclesEngine::Impl final {
 
     void set_state(std::string state, std::string terminal_error) {
         std::lock_guard lock(state_mutex_);
+        state_code_ = state == "failed" ? 7U
+            : state == "fallback" ? 6U
+            : state == "rendering" ? 5U
+            : state == "scene-ready" ? 4U
+            : state == "initializing" ? 3U
+            : (state == "camera-queued" || state == "scene-queued"
+               || state == "settings-queued") ? 2U
+            : state == "scene-staging" ? 1U
+            : 0U;
         state_ = std::move(state);
         terminal_error_ = std::move(terminal_error);
     }
@@ -1117,6 +1548,12 @@ class CyclesEngine::Impl final {
         std::string terminal_error = {}) {
         std::lock_guard lock(state_mutex_);
         selected_device_ = device;
+        state_code_ = state == "failed" ? 7U
+            : state == "fallback" ? 6U
+            : state == "rendering" ? 5U
+            : state == "scene-ready" ? 4U
+            : state == "initializing" ? 3U
+            : 0U;
         state_ = std::move(state);
         terminal_error_ = std::move(terminal_error);
     }
@@ -1136,6 +1573,7 @@ class CyclesEngine::Impl final {
     ccl::unique_ptr<ccl::Session> create_session(
         const ccl::DeviceInfo& device,
         const SceneRequest& scene_request,
+        const CyclesBridgeRenderSettings& settings,
         ccl::SessionParams& session_params,
         SceneRuntime& runtime) {
         session_params = make_session_params(device);
@@ -1143,10 +1581,14 @@ class CyclesEngine::Impl final {
         scene_params.background = false;
         auto session = ccl::make_unique<ccl::Session>(session_params, scene_params);
         session->set_output_driver(ccl::make_unique<FrameOutputDriver>(frames_));
-        ccl::Pass* pass = session->scene->create_node<ccl::Pass>();
-        pass->set_name(ccl::ustring(kCombinedPass));
-        pass->set_type(ccl::PASS_COMBINED);
+        create_output_passes(session->scene.get(), settings);
         build_scene(session->scene.get(), scene_request, runtime);
+        const std::uint32_t effective_denoiser =
+            configure_scene_settings(session->scene.get(), device, settings);
+        {
+            std::lock_guard lock(state_mutex_);
+            effective_denoiser_ = effective_denoiser;
+        }
         return session;
     }
 
@@ -1154,6 +1596,7 @@ class CyclesEngine::Impl final {
         ccl::unique_ptr<ccl::Session>& session,
         ccl::SessionParams& params,
         const SceneRequest& scene_request,
+        const CyclesBridgeRenderSettings& settings,
         SceneRuntime& runtime,
         std::size_t& device_index) {
         if (session) {
@@ -1163,9 +1606,13 @@ class CyclesEngine::Impl final {
         runtime.clear();
         while (device_index < devices_.size()) {
             const ccl::DeviceInfo device = devices_[device_index];
+            if (!device_matches_policy(device, settings.device_policy)) {
+                device_index++;
+                continue;
+            }
             try {
                 set_device_state(device, "initializing");
-                session = create_session(device, scene_request, params, runtime);
+                session = create_session(device, scene_request, settings, params, runtime);
                 set_device_state(device, "scene-ready");
                 return true;
             } catch (const std::exception& exception) {
@@ -1175,7 +1622,8 @@ class CyclesEngine::Impl final {
                 device_index++;
             }
         }
-        const std::string message = "all Cycles backends failed during session creation";
+        const std::string message =
+            "no usable Cycles backend matched the selected device policy";
         set_state("failed", message);
         return false;
     }
@@ -1194,15 +1642,33 @@ class CyclesEngine::Impl final {
         ccl::Session& session,
         const ccl::SessionParams& params,
         const SceneRequest& scene_request,
-        const CameraRequest& camera_request) {
+        const CameraRequest& camera_request,
+        const CyclesBridgeRenderSettings& settings) {
         ccl::BufferParams buffer;
+        std::uint32_t effective_denoiser = 0;
         {
             const ccl::thread_scoped_lock scene_lock(session.scene->mutex);
             buffer = configure_camera(session, scene_request, camera_request);
+            effective_denoiser =
+                configure_scene_settings(session.scene.get(), params.device, settings);
         }
         ccl::SessionParams render_params = params;
         render_params.samples = std::max(1, camera_request.sample_count);
+        const bool still = camera_request.sample_count
+            == static_cast<int>(settings.still_samples);
+        const std::uint32_t time_limit_millis = still
+            ? settings.still_time_limit_millis
+            : settings.interactive_time_limit_millis;
+        render_params.time_limit = static_cast<double>(time_limit_millis) / 1000.0;
+        frames_.configure(
+            settings,
+            camera_request.camera.depth_far,
+            render_params.samples);
         frames_.set_sample_count(render_params.samples);
+        {
+            std::lock_guard lock(state_mutex_);
+            effective_denoiser_ = effective_denoiser;
+        }
         session.reset(render_params, buffer);
         session.start();
         set_state("rendering", {});
@@ -1216,6 +1682,8 @@ class CyclesEngine::Impl final {
         std::uint64_t active_scene_revision = 0;
         std::uint64_t active_camera_revision = 0;
         std::uint64_t active_reset_revision = 0;
+        CyclesBridgeRenderSettings active_settings = default_settings();
+        std::uint64_t active_settings_revision = 0;
         std::uint64_t observed_scene_revision = 0;
         std::uint64_t observed_camera_revision = 0;
         std::uint64_t render_start_generation = 0;
@@ -1227,13 +1695,17 @@ class CyclesEngine::Impl final {
                 std::shared_ptr<const SceneRequest> requested_scene;
                 std::optional<CameraRequest> requested_camera;
                 std::uint64_t requested_reset_revision = 0;
+                CyclesBridgeRenderSettings requested_settings{};
+                std::uint32_t requested_settings_reset = CYCLES_BRIDGE_RESET_NONE;
                 {
                     std::unique_lock lock(request_mutex_);
                     request_changed_.wait_for(lock, 16ms, [this, observed_scene_revision,
                                                            observed_camera_revision,
-                                                           active_reset_revision] {
+                                                           active_reset_revision,
+                                                           active_settings_revision] {
                         return stopping_
                             || scene_reset_revision_ != active_reset_revision
+                            || settings_revision_ != active_settings_revision
                             || (requested_scene_
                                 && requested_scene_->revision != observed_scene_revision)
                             || (requested_camera_
@@ -1245,9 +1717,39 @@ class CyclesEngine::Impl final {
                     requested_scene = requested_scene_;
                     requested_camera = requested_camera_;
                     requested_reset_revision = scene_reset_revision_;
+                    requested_settings = requested_settings_;
+                    requested_settings_reset = requested_reset_level_;
                 }
                 observed_scene_revision = requested_scene ? requested_scene->revision : 0;
                 observed_camera_revision = requested_camera ? requested_camera->revision : 0;
+
+                if (requested_settings.revision != active_settings_revision) {
+                    const bool pass_changed = requested_settings.active_pass
+                        != active_settings.active_pass;
+                    if (session && (requested_settings_reset == CYCLES_BRIDGE_RESET_SESSION
+                                    || pass_changed)) {
+                        session->cancel(true);
+                        session.reset();
+                        scene_runtime.clear();
+                        active_scene.reset();
+                        active_scene_revision = 0;
+                        device_index = 0;
+                    } else if (session && render_in_flight) {
+                        session->cancel(true);
+                    }
+                    if (requested_settings_reset >= CYCLES_BRIDGE_RESET_ACCUMULATION) {
+                        active_camera_revision = 0;
+                        render_in_flight = false;
+                        frames_.clear();
+                    }
+                    active_settings = requested_settings;
+                    active_settings_revision = requested_settings.revision;
+                    {
+                        std::lock_guard lock(state_mutex_);
+                        active_settings_revision_diagnostic_ = active_settings_revision;
+                        active_pass_diagnostic_ = active_settings.active_pass;
+                    }
+                }
 
                 if (requested_reset_revision != active_reset_revision) {
                     if (session) {
@@ -1276,11 +1778,7 @@ class CyclesEngine::Impl final {
                     active_camera_revision = 0;
                     render_in_flight = false;
                     frames_.clear();
-                    if (device_index >= devices_.size()) {
-                        set_state("failed", "all Cycles backends failed; last error: " + backend_error);
-                        continue;
-                    }
-                    set_device_state(devices_[device_index], "fallback");
+                    set_state("fallback", backend_error);
                 }
 
                 if (!render_in_flight && requested_scene
@@ -1293,6 +1791,7 @@ class CyclesEngine::Impl final {
                                 session,
                                 session_params,
                                 *requested_scene,
+                                active_settings,
                                 scene_runtime,
                                 device_index)) {
                             continue;
@@ -1308,7 +1807,12 @@ class CyclesEngine::Impl final {
                 if (!render_in_flight && session && active_scene && requested_camera
                     && requested_camera->revision != active_camera_revision) {
                     render_start_generation = frames_.generation();
-                    start_render(*session, session_params, *active_scene, *requested_camera);
+                    start_render(
+                        *session,
+                        session_params,
+                        *active_scene,
+                        *requested_camera,
+                        active_settings);
                     active_camera_revision = requested_camera->revision;
                     render_in_flight = true;
                 }
@@ -1335,6 +1839,9 @@ class CyclesEngine::Impl final {
     std::uint64_t scene_revision_ = 0;
     std::uint64_t camera_revision_ = 0;
     std::uint64_t scene_reset_revision_ = 0;
+    std::uint64_t settings_revision_ = 0;
+    std::uint32_t requested_reset_level_ = CYCLES_BRIDGE_RESET_NONE;
+    CyclesBridgeRenderSettings requested_settings_{};
     std::shared_ptr<const SceneResourcesData> staging_resources_;
     std::unordered_map<std::int64_t, std::shared_ptr<const SectionRequest>> staging_sections_;
     std::shared_ptr<const SceneRequest> requested_scene_;
@@ -1344,6 +1851,11 @@ class CyclesEngine::Impl final {
 
     mutable std::mutex state_mutex_;
     ccl::DeviceInfo selected_device_;
+    std::uint32_t state_code_ = 0;
+    std::uint32_t effective_denoiser_ = 0;
+    std::uint32_t last_reset_level_ = CYCLES_BRIDGE_RESET_NONE;
+    std::uint64_t active_settings_revision_diagnostic_ = 0;
+    std::uint32_t active_pass_diagnostic_ = CYCLES_BRIDGE_PASS_COMBINED;
     std::string state_;
     std::string terminal_error_;
 
@@ -1391,6 +1903,20 @@ bool CyclesEngine::remove_section(std::int64_t section_id, std::string& error) {
 
 bool CyclesEngine::commit_scene(std::string& error) {
     return impl_->commit_scene(error);
+}
+
+bool CyclesEngine::apply_settings(
+    const CyclesBridgeRenderSettings& settings,
+    std::string& error) {
+    return impl_->apply_settings(settings, error);
+}
+
+void CyclesEngine::query_capabilities(CyclesBridgeCapabilities& capabilities) const {
+    impl_->query_capabilities(capabilities);
+}
+
+void CyclesEngine::query_diagnostics(CyclesBridgeDiagnostics& diagnostics) const {
+    impl_->query_diagnostics(diagnostics);
 }
 
 bool CyclesEngine::render(

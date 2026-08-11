@@ -1,6 +1,9 @@
 package dev.cyclesrenderer;
 
 import com.mojang.blaze3d.platform.InputConstants;
+import dev.cyclesrenderer.client.CyclesSettingsScreen;
+import dev.cyclesrenderer.config.CyclesClientConfig;
+import dev.cyclesrenderer.config.CyclesRenderSettings;
 import dev.cyclesrenderer.nativebridge.NativeBridge;
 import dev.cyclesrenderer.render.CyclesFramePresenter;
 import dev.cyclesrenderer.scene.DistantHorizonsSceneProvider;
@@ -16,7 +19,11 @@ import net.minecraft.resources.Identifier;
 import net.minecraft.server.packs.resources.ResourceManagerReloadListener;
 import net.neoforged.api.distmarker.Dist;
 import net.neoforged.bus.api.IEventBus;
+import net.neoforged.fml.ModContainer;
 import net.neoforged.fml.common.Mod;
+import net.neoforged.fml.config.ModConfig;
+import net.neoforged.fml.event.config.ModConfigEvent;
+import net.neoforged.neoforge.client.gui.IConfigScreenFactory;
 import net.neoforged.neoforge.client.event.ClientTickEvent;
 import net.neoforged.neoforge.client.event.AddClientReloadListenersEvent;
 import net.neoforged.neoforge.client.event.RegisterKeyMappingsEvent;
@@ -39,18 +46,38 @@ public final class CyclesRendererMod {
             InputConstants.Type.KEYSYM,
             InputConstants.KEY_F8,
             KEY_CATEGORY);
+    private static final KeyMapping OPEN_SETTINGS = new KeyMapping(
+            "key.cyclesrenderer.open_settings",
+            InputConstants.Type.KEYSYM,
+            InputConstants.KEY_F9,
+            KEY_CATEGORY);
+    private static final KeyMapping TOGGLE_DEBUG = new KeyMapping(
+            "key.cyclesrenderer.toggle_debug",
+            InputConstants.Type.KEYSYM,
+            InputConstants.KEY_F10,
+            KEY_CATEGORY);
 
     private static boolean testFrameEnabled;
     private static boolean nativeBridgeReady;
     private static long nativeFrameId;
     private static long lastStatsLogNanos;
+    private static long appliedSettingsRevision = -1L;
     private static volatile long resourceRevision;
+    private static ModContainer modContainer;
     private static final SectionSceneManager SCENE_MANAGER = new SectionSceneManager();
     private static final CyclesFramePresenter FRAME_PRESENTER = new CyclesFramePresenter();
 
-    public CyclesRendererMod(IEventBus modEventBus) {
+    public CyclesRendererMod(IEventBus modEventBus, ModContainer container) {
+        modContainer = container;
+        container.registerConfig(ModConfig.Type.CLIENT, CyclesClientConfig.SPEC);
+        container.registerExtensionPoint(
+                IConfigScreenFactory.class,
+                (registeredContainer, parent) ->
+                        new CyclesSettingsScreen(registeredContainer, parent));
         modEventBus.addListener(CyclesRendererMod::registerKeyMappings);
         modEventBus.addListener(CyclesRendererMod::addClientReloadListeners);
+        modEventBus.addListener(CyclesRendererMod::onConfigLoading);
+        modEventBus.addListener(CyclesRendererMod::onConfigReloading);
         NeoForge.EVENT_BUS.addListener(CyclesRendererMod::onClientTick);
         NeoForge.EVENT_BUS.addListener(CyclesRendererMod::onRenderLevelAfterLevel);
         NeoForge.EVENT_BUS.addListener(CyclesRendererMod::onRenderGui);
@@ -60,6 +87,8 @@ public final class CyclesRendererMod {
     private static void registerKeyMappings(RegisterKeyMappingsEvent event) {
         event.registerCategory(KEY_CATEGORY);
         event.register(TOGGLE_TEST_FRAME);
+        event.register(OPEN_SETTINGS);
+        event.register(TOGGLE_DEBUG);
     }
 
     private static void addClientReloadListeners(AddClientReloadListenersEvent event) {
@@ -69,20 +98,26 @@ public final class CyclesRendererMod {
     }
 
     private static void onClientTick(ClientTickEvent.Post event) {
+        while (OPEN_SETTINGS.consumeClick()) {
+            Minecraft minecraft = Minecraft.getInstance();
+            minecraft.gui.setScreen(new CyclesSettingsScreen(
+                    modContainer,
+                    minecraft.gui.screen()));
+        }
+        while (TOGGLE_DEBUG.consumeClick()) {
+            CyclesClientConfig.setDebugOverlay(
+                    !CyclesClientConfig.snapshot().debugOverlay());
+        }
+
+        applySettingsIfNeeded();
         while (TOGGLE_TEST_FRAME.consumeClick()) {
             if (testFrameEnabled) {
                 disableExperimentalRenderer();
                 continue;
             }
 
-            if (!nativeBridgeReady) {
-                NativeBridge.ProbeResult probe = NativeBridge.probe();
-                if (!probe.success()) {
-                    LOGGER.error("Native renderer bridge probe failed: {}", probe.message());
-                    continue;
-                }
-                nativeBridgeReady = true;
-                LOGGER.info("Native renderer bridge ready: {}", probe.message());
+            if (!ensureNativeBridgeReady()) {
+                continue;
             }
 
             nativeFrameId = 0L;
@@ -92,6 +127,57 @@ public final class CyclesRendererMod {
             SectionGeometryCollector.setEnabled(true);
             testFrameEnabled = true;
             LOGGER.info("Experimental renderer enabled; building the streamed Cycles scene");
+        }
+    }
+
+    public static boolean ensureNativeBridgeReady() {
+        if (nativeBridgeReady && NativeBridge.isReady()) {
+            applySettingsIfNeeded();
+            return true;
+        }
+        NativeBridge.ProbeResult probe = NativeBridge.probe();
+        if (!probe.success()) {
+            LOGGER.error("Native renderer bridge probe failed: {}", probe.message());
+            return false;
+        }
+        nativeBridgeReady = true;
+        appliedSettingsRevision = -1L;
+        applySettingsIfNeeded();
+        LOGGER.info("Native renderer bridge ready: {}", probe.message());
+        return true;
+    }
+
+    private static void applySettingsIfNeeded() {
+        if (!nativeBridgeReady || !NativeBridge.isReady()) {
+            return;
+        }
+        CyclesRenderSettings settings = CyclesClientConfig.snapshot();
+        if (settings.revision() == appliedSettingsRevision) {
+            return;
+        }
+        try {
+            NativeBridge.applySettings(settings);
+            appliedSettingsRevision = settings.revision();
+        } catch (RuntimeException error) {
+            LOGGER.error("Could not apply Cycles client settings", error);
+            if (testFrameEnabled) {
+                disableExperimentalRenderer();
+            }
+            NativeBridge.close();
+            nativeBridgeReady = false;
+            appliedSettingsRevision = -1L;
+        }
+    }
+
+    private static void onConfigLoading(ModConfigEvent.Loading event) {
+        if (event.getConfig().getSpec() == CyclesClientConfig.SPEC) {
+            CyclesClientConfig.markReloaded();
+        }
+    }
+
+    private static void onConfigReloading(ModConfigEvent.Reloading event) {
+        if (event.getConfig().getSpec() == CyclesClientConfig.SPEC) {
+            CyclesClientConfig.markReloaded();
         }
     }
 
@@ -159,6 +245,7 @@ public final class CyclesRendererMod {
             disableExperimentalRenderer();
             NativeBridge.close();
             nativeBridgeReady = false;
+            appliedSettingsRevision = -1L;
         }
     }
 
@@ -197,19 +284,71 @@ public final class CyclesRendererMod {
 
     private static void onRenderGui(RenderGuiEvent.Pre event) {
         Minecraft minecraft = Minecraft.getInstance();
-        if (!testFrameEnabled || minecraft.level == null) {
+        if (minecraft.level == null) {
             return;
         }
 
         GuiGraphicsExtractor graphics = event.getGuiGraphics();
-        Component status = FRAME_PRESENTER.hasFrame()
-                ? Component.translatable("message.cyclesrenderer.test_frame")
-                : Component.literal("Cycles 正在构建场景 — 按 F8 返回原版");
-        graphics.centeredText(
-                minecraft.font,
-                status,
-                graphics.guiWidth() / 2,
-                12,
-                0xFFFFFFFF);
+        if (testFrameEnabled) {
+            Component status = FRAME_PRESENTER.hasFrame()
+                    ? Component.translatable("message.cyclesrenderer.test_frame")
+                    : Component.translatable("message.cyclesrenderer.building_scene");
+            graphics.centeredText(
+                    minecraft.font,
+                    status,
+                    graphics.guiWidth() / 2,
+                    12,
+                    0xFFFFFFFF);
+        }
+        if (CyclesClientConfig.snapshot().debugOverlay()) {
+            extractDebugOverlay(graphics, minecraft);
+        }
+    }
+
+    private static void extractDebugOverlay(
+            GuiGraphicsExtractor graphics,
+            Minecraft minecraft) {
+        int y = 52;
+        graphics.text(minecraft.font, "Cycles ABI " + NativeBridge.ABI_VERSION, 6, y, 0xFFE0E0E0);
+        y += 10;
+        if (!NativeBridge.isReady()) {
+            graphics.text(minecraft.font, "Native bridge: not loaded", 6, y, 0xFFFFAA55);
+            return;
+        }
+        try {
+            NativeBridge.Diagnostics diagnostics = NativeBridge.diagnostics();
+            CyclesRenderSettings settings = CyclesClientConfig.snapshot();
+            graphics.text(
+                    minecraft.font,
+                    diagnostics.deviceName() + " / denoise " + diagnostics.denoiserName()
+                            + " / " + diagnostics.stateName(),
+                    6, y, 0xFFE0E0E0);
+            y += 10;
+            graphics.text(
+                    minecraft.font,
+                    diagnostics.width() + "x" + diagnostics.height()
+                            + "  pass=" + settings.activePass().name()
+                            + "  samples=" + diagnostics.sampleCount(),
+                    6, y, 0xFFE0E0E0);
+            y += 10;
+            graphics.text(
+                    minecraft.font,
+                    "scene=" + diagnostics.sceneRevision()
+                            + " camera=" + diagnostics.cameraRevision()
+                            + " frame=" + diagnostics.frameGeneration()
+                            + " sections=" + diagnostics.sectionCount(),
+                    6, y, 0xFFE0E0E0);
+            y += 10;
+            graphics.text(
+                    minecraft.font,
+                    "settings=" + diagnostics.settingsRevision()
+                            + " reset=" + diagnostics.resetName(),
+                    6, y, 0xFFE0E0E0);
+        } catch (RuntimeException error) {
+            graphics.text(
+                    minecraft.font,
+                    "Native diagnostics failed: " + error.getMessage(),
+                    6, y, 0xFFFF5555);
+        }
     }
 }

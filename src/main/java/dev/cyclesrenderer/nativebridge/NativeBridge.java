@@ -1,5 +1,6 @@
 package dev.cyclesrenderer.nativebridge;
 
+import dev.cyclesrenderer.config.CyclesRenderSettings;
 import dev.cyclesrenderer.scene.SectionGeometrySnapshot;
 
 import java.lang.foreign.Arena;
@@ -22,7 +23,7 @@ import static java.lang.foreign.ValueLayout.JAVA_INT;
 import static java.lang.foreign.ValueLayout.JAVA_LONG;
 
 public final class NativeBridge {
-    public static final int ABI_VERSION = 5;
+    public static final int ABI_VERSION = 6;
 
     private static final String LIBRARY_PATH_PROPERTY = "cyclesrenderer.nativeLibrary";
     private static final int STRUCT_VERSION = 1;
@@ -34,7 +35,14 @@ public final class NativeBridge {
     private static final long TEST_FRAME_ID = 7L;
     private static final int BUILD_INFO_BYTES = 128;
     private static final int RENDERER_INFO_BYTES = 512;
-    private static final int MAX_NATIVE_FRAME_BYTES = 480 * 270 * 4;
+    private static final int MAX_NATIVE_FRAME_BYTES = 3840 * 2160 * 4;
+    public static final long CAPABILITY_SETTINGS = 1L << 0;
+    public static final long CAPABILITY_PASS_VIEWER = 1L << 1;
+    public static final long CAPABILITY_DENOISE = 1L << 2;
+    public static final long CAPABILITY_OPTIX_COMPILED = 1L << 3;
+    public static final long CAPABILITY_CUDA_COMPILED = 1L << 4;
+    public static final long CAPABILITY_OIDN_COMPILED = 1L << 5;
+    public static final long CAPABILITY_OCIO_COMPILED = 1L << 6;
 
     private static final MemoryLayout CAMERA_LAYOUT = MemoryLayout.structLayout(
             JAVA_INT.withName("struct_size"),
@@ -88,6 +96,79 @@ public final class NativeBridge {
             JAVA_INT.withName("flags"),
             JAVA_INT.withName("sample_count"),
             JAVA_INT.withName("reserved"));
+    private static final MemoryLayout SETTINGS_LAYOUT = MemoryLayout.structLayout(
+            JAVA_INT.withName("struct_size"),
+            JAVA_INT.withName("struct_version"),
+            JAVA_LONG.withName("revision"),
+            JAVA_INT.withName("device_policy"),
+            JAVA_INT.withName("resolution_mode"),
+            JAVA_INT.withName("render_width"),
+            JAVA_INT.withName("render_height"),
+            JAVA_INT.withName("resolution_percentage"),
+            JAVA_INT.withName("interactive_samples"),
+            JAVA_INT.withName("still_samples"),
+            JAVA_INT.withName("stationary_delay_millis"),
+            JAVA_INT.withName("adaptive_sampling"),
+            JAVA_INT.withName("minimum_samples"),
+            JAVA_FLOAT.withName("noise_threshold"),
+            JAVA_INT.withName("interactive_time_limit_millis"),
+            JAVA_INT.withName("still_time_limit_millis"),
+            JAVA_INT.withName("minimum_bounce"),
+            JAVA_INT.withName("maximum_bounce"),
+            JAVA_INT.withName("diffuse_bounces"),
+            JAVA_INT.withName("glossy_bounces"),
+            JAVA_INT.withName("transmission_bounces"),
+            JAVA_INT.withName("volume_bounces"),
+            JAVA_INT.withName("transparent_bounces"),
+            JAVA_FLOAT.withName("clamp_direct"),
+            JAVA_FLOAT.withName("clamp_indirect"),
+            JAVA_FLOAT.withName("filter_glossy"),
+            JAVA_INT.withName("reflective_caustics"),
+            JAVA_INT.withName("refractive_caustics"),
+            JAVA_INT.withName("pixel_filter"),
+            JAVA_FLOAT.withName("filter_width"),
+            JAVA_INT.withName("seed"),
+            JAVA_INT.withName("denoiser_mode"),
+            JAVA_INT.withName("denoiser_start_sample"),
+            JAVA_INT.withName("denoiser_input"),
+            JAVA_INT.withName("denoiser_prefilter"),
+            JAVA_INT.withName("denoiser_quality"),
+            JAVA_INT.withName("denoiser_use_gpu"),
+            JAVA_FLOAT.withName("exposure_ev"),
+            JAVA_FLOAT.withName("gamma"),
+            JAVA_INT.withName("view_transform"),
+            JAVA_INT.withName("active_pass"),
+            JAVA_INT.withName("debug_overlay"),
+            MemoryLayout.sequenceLayout(9, JAVA_INT).withName("reserved"));
+    private static final MemoryLayout CAPABILITIES_LAYOUT = MemoryLayout.structLayout(
+            JAVA_INT.withName("struct_size"),
+            JAVA_INT.withName("struct_version"),
+            JAVA_LONG.withName("capability_flags"),
+            JAVA_LONG.withName("pass_mask"),
+            JAVA_INT.withName("denoiser_mask"),
+            JAVA_INT.withName("device_mask"),
+            JAVA_INT.withName("maximum_width"),
+            JAVA_INT.withName("maximum_height"),
+            JAVA_INT.withName("device_count"),
+            MemoryLayout.sequenceLayout(5, JAVA_INT).withName("reserved"));
+    private static final MemoryLayout DIAGNOSTICS_LAYOUT = MemoryLayout.structLayout(
+            JAVA_INT.withName("struct_size"),
+            JAVA_INT.withName("struct_version"),
+            JAVA_LONG.withName("settings_revision"),
+            JAVA_LONG.withName("scene_revision"),
+            JAVA_LONG.withName("camera_revision"),
+            JAVA_LONG.withName("frame_generation"),
+            JAVA_INT.withName("state_code"),
+            JAVA_INT.withName("device_type"),
+            JAVA_INT.withName("effective_denoiser"),
+            JAVA_INT.withName("active_pass"),
+            JAVA_INT.withName("width"),
+            JAVA_INT.withName("height"),
+            JAVA_INT.withName("sample_count"),
+            JAVA_INT.withName("section_count"),
+            JAVA_INT.withName("reset_level"),
+            JAVA_INT.withName("frame_ready"),
+            MemoryLayout.sequenceLayout(4, JAVA_INT).withName("reserved"));
     private static final MemoryLayout VERTEX_LAYOUT = MemoryLayout.structLayout(
             JAVA_FLOAT.withName("position_x"),
             JAVA_FLOAT.withName("position_y"),
@@ -130,6 +211,9 @@ public final class NativeBridge {
                 || RESOURCES_LAYOUT.byteSize() != 48L
                 || SECTION_LAYOUT.byteSize() != 48L
                 || FRAME_LAYOUT.byteSize() != 40L
+                || SETTINGS_LAYOUT.byteSize() != 208L
+                || CAPABILITIES_LAYOUT.byteSize() != 64L
+                || DIAGNOSTICS_LAYOUT.byteSize() != 96L
                 || VERTEX_LAYOUT.byteSize() != 40L
                 || TRIANGLE_LAYOUT.byteSize() != 16L
                 || MATERIAL_LAYOUT.byteSize() != 32L
@@ -211,6 +295,34 @@ public final class NativeBridge {
         }
     }
 
+    public static boolean isReady() {
+        return bridgeState != null;
+    }
+
+    public static void applySettings(CyclesRenderSettings settings) {
+        invoke("native settings update", state -> state.applySettings(settings));
+    }
+
+    public static Capabilities capabilities() {
+        BridgeState state = requireState();
+        try {
+            return state.capabilities();
+        } catch (Throwable error) {
+            rethrowFatalError(error);
+            throw new IllegalStateException("native capability query failed: " + describe(error), error);
+        }
+    }
+
+    public static Diagnostics diagnostics() {
+        BridgeState state = requireState();
+        try {
+            return state.diagnostics();
+        } catch (Throwable error) {
+            rethrowFatalError(error);
+            throw new IllegalStateException("native diagnostics query failed: " + describe(error), error);
+        }
+    }
+
     public static void close() {
         BridgeState state = bridgeState;
         bridgeState = null;
@@ -288,6 +400,9 @@ public final class NativeBridge {
         private final MethodHandle fillTestFrame;
         private final MethodHandle destroyRenderer;
         private final MethodHandle writeRendererInfo;
+        private final MethodHandle queryCapabilities;
+        private final MethodHandle applySettings;
+        private final MethodHandle queryDiagnostics;
         private final MethodHandle resetScene;
         private final MethodHandle upsertSection;
         private final MethodHandle removeSection;
@@ -296,6 +411,9 @@ public final class NativeBridge {
         private final MemorySegment renderer;
         private final MemorySegment cameraSegment;
         private final MemorySegment frameInfoSegment;
+        private final MemorySegment settingsSegment;
+        private final MemorySegment capabilitiesSegment;
+        private final MemorySegment diagnosticsSegment;
         private final MemorySegment framePixelsSegment;
         private final ByteBuffer framePixels;
         private final String buildInfo;
@@ -308,6 +426,9 @@ public final class NativeBridge {
                 MethodHandle fillTestFrame,
                 MethodHandle destroyRenderer,
                 MethodHandle writeRendererInfo,
+                MethodHandle queryCapabilities,
+                MethodHandle applySettings,
+                MethodHandle queryDiagnostics,
                 MethodHandle resetScene,
                 MethodHandle upsertSection,
                 MethodHandle removeSection,
@@ -319,6 +440,9 @@ public final class NativeBridge {
             this.fillTestFrame = fillTestFrame;
             this.destroyRenderer = destroyRenderer;
             this.writeRendererInfo = writeRendererInfo;
+            this.queryCapabilities = queryCapabilities;
+            this.applySettings = applySettings;
+            this.queryDiagnostics = queryDiagnostics;
             this.resetScene = resetScene;
             this.upsertSection = upsertSection;
             this.removeSection = removeSection;
@@ -327,6 +451,9 @@ public final class NativeBridge {
             this.renderer = renderer;
             this.cameraSegment = libraryArena.allocate(CAMERA_LAYOUT);
             this.frameInfoSegment = libraryArena.allocate(FRAME_LAYOUT);
+            this.settingsSegment = libraryArena.allocate(SETTINGS_LAYOUT);
+            this.capabilitiesSegment = libraryArena.allocate(CAPABILITIES_LAYOUT);
+            this.diagnosticsSegment = libraryArena.allocate(DIAGNOSTICS_LAYOUT);
             this.framePixelsSegment = libraryArena.allocate(MAX_NATIVE_FRAME_BYTES, 16);
             this.framePixels = framePixelsSegment.asByteBuffer();
             this.buildInfo = buildInfo;
@@ -355,6 +482,15 @@ public final class NativeBridge {
                 MethodHandle writeRendererInfo = downcall(linker, symbols,
                         "cycles_bridge_write_renderer_info",
                         FunctionDescriptor.of(JAVA_INT, ADDRESS, ADDRESS, JAVA_INT));
+                MethodHandle queryCapabilities = downcall(linker, symbols,
+                        "cycles_bridge_query_capabilities",
+                        FunctionDescriptor.of(JAVA_INT, ADDRESS, ADDRESS));
+                MethodHandle applySettings = downcall(linker, symbols,
+                        "cycles_bridge_apply_settings",
+                        FunctionDescriptor.of(JAVA_INT, ADDRESS, ADDRESS));
+                MethodHandle queryDiagnostics = downcall(linker, symbols,
+                        "cycles_bridge_query_diagnostics",
+                        FunctionDescriptor.of(JAVA_INT, ADDRESS, ADDRESS));
                 MethodHandle resetScene = downcall(linker, symbols,
                         "cycles_bridge_reset_scene",
                         FunctionDescriptor.of(
@@ -397,6 +533,9 @@ public final class NativeBridge {
                         fillTestFrame,
                         destroyRenderer,
                         writeRendererInfo,
+                        queryCapabilities,
+                        applySettings,
+                        queryDiagnostics,
                         resetScene,
                         upsertSection,
                         removeSection,
@@ -488,6 +627,98 @@ public final class NativeBridge {
 
         private void commitScene() throws Throwable {
             checkRendererStatus((int) commitScene.invokeExact(renderer), "scene commit");
+        }
+
+        private void applySettings(CyclesRenderSettings settings) throws Throwable {
+            settingsSegment.fill((byte) 0);
+            settingsSegment.set(JAVA_INT, 0L, Math.toIntExact(SETTINGS_LAYOUT.byteSize()));
+            settingsSegment.set(JAVA_INT, 4L, STRUCT_VERSION);
+            settingsSegment.set(JAVA_LONG, 8L, settings.revision());
+            settingsSegment.set(JAVA_INT, 16L, settings.devicePolicy().nativeId());
+            settingsSegment.set(JAVA_INT, 20L, settings.resolutionMode().nativeId());
+            settingsSegment.set(JAVA_INT, 24L, settings.renderWidth());
+            settingsSegment.set(JAVA_INT, 28L, settings.renderHeight());
+            settingsSegment.set(JAVA_INT, 32L, settings.resolutionPercentage());
+            settingsSegment.set(JAVA_INT, 36L, settings.interactiveSamples());
+            settingsSegment.set(JAVA_INT, 40L, settings.stillSamples());
+            settingsSegment.set(JAVA_INT, 44L, settings.stationaryDelayMillis());
+            settingsSegment.set(JAVA_INT, 48L, settings.adaptiveSampling() ? 1 : 0);
+            settingsSegment.set(JAVA_INT, 52L, settings.minimumSamples());
+            settingsSegment.set(JAVA_FLOAT, 56L, settings.noiseThreshold());
+            settingsSegment.set(JAVA_INT, 60L, settings.interactiveTimeLimitMillis());
+            settingsSegment.set(JAVA_INT, 64L, settings.stillTimeLimitMillis());
+            settingsSegment.set(JAVA_INT, 68L, settings.minimumBounce());
+            settingsSegment.set(JAVA_INT, 72L, settings.maximumBounce());
+            settingsSegment.set(JAVA_INT, 76L, settings.diffuseBounces());
+            settingsSegment.set(JAVA_INT, 80L, settings.glossyBounces());
+            settingsSegment.set(JAVA_INT, 84L, settings.transmissionBounces());
+            settingsSegment.set(JAVA_INT, 88L, settings.volumeBounces());
+            settingsSegment.set(JAVA_INT, 92L, settings.transparentBounces());
+            settingsSegment.set(JAVA_FLOAT, 96L, settings.clampDirect());
+            settingsSegment.set(JAVA_FLOAT, 100L, settings.clampIndirect());
+            settingsSegment.set(JAVA_FLOAT, 104L, settings.filterGlossy());
+            settingsSegment.set(JAVA_INT, 108L, settings.reflectiveCaustics() ? 1 : 0);
+            settingsSegment.set(JAVA_INT, 112L, settings.refractiveCaustics() ? 1 : 0);
+            settingsSegment.set(JAVA_INT, 116L, settings.pixelFilter().nativeId());
+            settingsSegment.set(JAVA_FLOAT, 120L, settings.filterWidth());
+            settingsSegment.set(JAVA_INT, 124L, settings.seed());
+            settingsSegment.set(JAVA_INT, 128L, settings.denoiserMode().nativeId());
+            settingsSegment.set(JAVA_INT, 132L, settings.denoiserStartSample());
+            settingsSegment.set(JAVA_INT, 136L, settings.denoiserInput().nativeId());
+            settingsSegment.set(JAVA_INT, 140L, settings.denoiserPrefilter().nativeId());
+            settingsSegment.set(JAVA_INT, 144L, settings.denoiserQuality().nativeId());
+            settingsSegment.set(JAVA_INT, 148L, settings.denoiserUseGpu() ? 1 : 0);
+            settingsSegment.set(JAVA_FLOAT, 152L, settings.exposureEv());
+            settingsSegment.set(JAVA_FLOAT, 156L, settings.gamma());
+            settingsSegment.set(JAVA_INT, 160L, settings.viewTransform().nativeId());
+            settingsSegment.set(JAVA_INT, 164L, settings.activePass().nativeId());
+            settingsSegment.set(JAVA_INT, 168L, settings.debugOverlay() ? 1 : 0);
+            checkRendererStatus(
+                    (int) applySettings.invokeExact(renderer, settingsSegment),
+                    "settings update");
+        }
+
+        private Capabilities capabilities() throws Throwable {
+            capabilitiesSegment.fill((byte) 0);
+            capabilitiesSegment.set(
+                    JAVA_INT, 0L, Math.toIntExact(CAPABILITIES_LAYOUT.byteSize()));
+            capabilitiesSegment.set(JAVA_INT, 4L, STRUCT_VERSION);
+            checkRendererStatus(
+                    (int) queryCapabilities.invokeExact(renderer, capabilitiesSegment),
+                    "capability query");
+            return new Capabilities(
+                    capabilitiesSegment.get(JAVA_LONG, 8L),
+                    capabilitiesSegment.get(JAVA_LONG, 16L),
+                    capabilitiesSegment.get(JAVA_INT, 24L),
+                    capabilitiesSegment.get(JAVA_INT, 28L),
+                    capabilitiesSegment.get(JAVA_INT, 32L),
+                    capabilitiesSegment.get(JAVA_INT, 36L),
+                    capabilitiesSegment.get(JAVA_INT, 40L));
+        }
+
+        private Diagnostics diagnostics() throws Throwable {
+            diagnosticsSegment.fill((byte) 0);
+            diagnosticsSegment.set(
+                    JAVA_INT, 0L, Math.toIntExact(DIAGNOSTICS_LAYOUT.byteSize()));
+            diagnosticsSegment.set(JAVA_INT, 4L, STRUCT_VERSION);
+            checkRendererStatus(
+                    (int) queryDiagnostics.invokeExact(renderer, diagnosticsSegment),
+                    "diagnostics query");
+            return new Diagnostics(
+                    diagnosticsSegment.get(JAVA_LONG, 8L),
+                    diagnosticsSegment.get(JAVA_LONG, 16L),
+                    diagnosticsSegment.get(JAVA_LONG, 24L),
+                    diagnosticsSegment.get(JAVA_LONG, 32L),
+                    diagnosticsSegment.get(JAVA_INT, 40L),
+                    diagnosticsSegment.get(JAVA_INT, 44L),
+                    diagnosticsSegment.get(JAVA_INT, 48L),
+                    diagnosticsSegment.get(JAVA_INT, 52L),
+                    diagnosticsSegment.get(JAVA_INT, 56L),
+                    diagnosticsSegment.get(JAVA_INT, 60L),
+                    diagnosticsSegment.get(JAVA_INT, 64L),
+                    diagnosticsSegment.get(JAVA_INT, 68L),
+                    diagnosticsSegment.get(JAVA_INT, 72L),
+                    diagnosticsSegment.get(JAVA_INT, 76L) != 0);
         }
 
         private RenderedFrame renderFrame(
@@ -703,6 +934,95 @@ public final class NativeBridge {
             long generation,
             int sampleCount,
             ByteBuffer pixels) {
+    }
+
+    public record Capabilities(
+            long flags,
+            long passMask,
+            int denoiserMask,
+            int deviceMask,
+            int maximumWidth,
+            int maximumHeight,
+            int deviceCount) {
+        public boolean has(long capability) {
+            return (flags & capability) != 0L;
+        }
+
+        public boolean supportsPass(CyclesRenderSettings.PassView pass) {
+            return (passMask & (1L << pass.nativeId())) != 0L;
+        }
+
+        public boolean optixDenoiserAvailable() {
+            return (denoiserMask & 1) != 0;
+        }
+
+        public boolean oidnDenoiserAvailable() {
+            return (denoiserMask & 2) != 0;
+        }
+
+        public String denoiserSummary() {
+            return "OptiX=" + availability(optixDenoiserAvailable())
+                    + ", OIDN=" + availability(oidnDenoiserAvailable());
+        }
+
+        private static String availability(boolean value) {
+            return value ? "available" : "unavailable";
+        }
+    }
+
+    public record Diagnostics(
+            long settingsRevision,
+            long sceneRevision,
+            long cameraRevision,
+            long frameGeneration,
+            int stateCode,
+            int deviceType,
+            int effectiveDenoiser,
+            int activePassId,
+            int width,
+            int height,
+            int sampleCount,
+            int sectionCount,
+            int resetLevel,
+            boolean frameReady) {
+        public String stateName() {
+            return switch (stateCode) {
+                case 1 -> "scene-staging";
+                case 2 -> "queued";
+                case 3 -> "initializing";
+                case 4 -> "scene-ready";
+                case 5 -> "rendering";
+                case 6 -> "fallback";
+                case 7 -> "failed";
+                default -> "waiting";
+            };
+        }
+
+        public String deviceName() {
+            return switch (deviceType) {
+                case 1 -> "OptiX";
+                case 2 -> "CUDA";
+                case 3 -> "CPU";
+                default -> "Unknown";
+            };
+        }
+
+        public String denoiserName() {
+            return switch (effectiveDenoiser) {
+                case 1 -> "OptiX";
+                case 2 -> "OpenImageDenoise";
+                default -> "Off";
+            };
+        }
+
+        public String resetName() {
+            return switch (resetLevel) {
+                case 1 -> "accumulation";
+                case 2 -> "buffer";
+                case 3 -> "session";
+                default -> "none";
+            };
+        }
     }
 
     public record ProbeResult(boolean success, String message) {

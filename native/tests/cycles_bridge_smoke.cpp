@@ -74,7 +74,8 @@ bool wait_for_updated_frame(
     CyclesBridgeFrame& frame,
     std::vector<std::uint8_t>& pixels,
     const char* stage,
-    std::string& info) {
+    std::string& info,
+    bool require_green = false) {
     for (int attempt = 0; attempt < 1200; ++attempt) {
         camera.frame_id++;
         if (!require_ok(
@@ -91,7 +92,9 @@ bool wait_for_updated_frame(
         }
         if ((frame.flags & CYCLES_BRIDGE_FRAME_READY) != 0U
             && (frame.flags & CYCLES_BRIDGE_FRAME_UPDATED) != 0U) {
-            return true;
+            if (!require_green || has_green_dominant_pixel(pixels)) {
+                return true;
+            }
         }
         Sleep(100);
     }
@@ -100,12 +103,120 @@ bool wait_for_updated_frame(
     return false;
 }
 
+bool wait_for_checksum_change(
+    CyclesBridgeRenderer* renderer,
+    CyclesBridgeCamera& camera,
+    CyclesBridgeFrame& frame,
+    std::vector<std::uint8_t>& pixels,
+    std::uint64_t previous_checksum,
+    const char* stage,
+    std::string& info) {
+    for (int attempt = 0; attempt < 300; ++attempt) {
+        camera.frame_id++;
+        if (!require_ok(
+                cycles_bridge_render_frame(
+                    renderer, &camera, &frame, pixels.data(), pixels.size()),
+                "frame render")) {
+            info = renderer_info(renderer);
+            std::cerr << info << '\n';
+            return false;
+        }
+        info = renderer_info(renderer);
+        if (attempt % 50 == 0) {
+            std::cerr << "[smoke] " << stage << ": " << info << '\n';
+        }
+        if ((frame.flags & CYCLES_BRIDGE_FRAME_UPDATED) != 0U
+            && checksum(pixels) != previous_checksum) {
+            return true;
+        }
+        Sleep(100);
+    }
+    std::cerr << stage << " did not change the frame checksum\n";
+    return false;
+}
+
+bool wait_for_background_frame(
+    CyclesBridgeRenderer* renderer,
+    CyclesBridgeCamera& camera,
+    CyclesBridgeFrame& frame,
+    std::vector<std::uint8_t>& pixels,
+    const char* stage,
+    std::string& info) {
+    for (int attempt = 0; attempt < 300; ++attempt) {
+        camera.frame_id++;
+        if (!require_ok(
+                cycles_bridge_render_frame(
+                    renderer, &camera, &frame, pixels.data(), pixels.size()),
+                "frame render")) {
+            info = renderer_info(renderer);
+            std::cerr << info << '\n';
+            return false;
+        }
+        info = renderer_info(renderer);
+        if (attempt % 50 == 0) {
+            std::cerr << "[smoke] " << stage << ": " << info << '\n';
+        }
+        if ((frame.flags & CYCLES_BRIDGE_FRAME_UPDATED) != 0U
+            && !has_rgb_variation(pixels)) {
+            return true;
+        }
+        Sleep(100);
+    }
+    std::cerr << stage << " did not converge to the background frame\n";
+    return false;
+}
+
+CyclesBridgeRenderSettings default_settings() {
+    CyclesBridgeRenderSettings settings{};
+    settings.struct_size = sizeof(settings);
+    settings.struct_version = 1;
+    settings.revision = 1;
+    settings.render_width = 480;
+    settings.render_height = 270;
+    settings.resolution_percentage = 100;
+    settings.interactive_samples = 1;
+    settings.still_samples = 1;
+    settings.noise_threshold = 0.01F;
+    settings.maximum_bounce = 3;
+    settings.diffuse_bounces = 2;
+    settings.glossy_bounces = 1;
+    settings.clamp_indirect = 10.0F;
+    settings.filter_width = 1.0F;
+    settings.denoiser_start_sample = 1;
+    settings.denoiser_input = 2;
+    settings.denoiser_prefilter = 1;
+    settings.denoiser_quality = 1;
+    settings.denoiser_use_gpu = 1;
+    settings.gamma = 1.0F;
+    settings.active_pass = CYCLES_BRIDGE_PASS_COMBINED;
+    return settings;
+}
+
+bool wait_for_settings(CyclesBridgeRenderer* renderer, std::uint64_t revision) {
+    CyclesBridgeDiagnostics diagnostics{};
+    diagnostics.struct_size = sizeof(diagnostics);
+    diagnostics.struct_version = 1;
+    for (int attempt = 0; attempt < 200; ++attempt) {
+        if (!require_ok(
+                cycles_bridge_query_diagnostics(renderer, &diagnostics),
+                "settings diagnostics")) {
+            return false;
+        }
+        if (diagnostics.settings_revision == revision) {
+            return true;
+        }
+        Sleep(10);
+    }
+    std::cerr << "settings revision " << revision << " was not activated\n";
+    return false;
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
     const bool require_optix = argc > 1 && std::strcmp(argv[1], "--require-optix") == 0;
     std::cerr << "[smoke] ABI check\n";
-    if (cycles_bridge_abi_version() != 5U) {
+    if (cycles_bridge_abi_version() != 6U) {
         std::cerr << "unexpected native ABI " << cycles_bridge_abi_version() << '\n';
         return 1;
     }
@@ -114,6 +225,23 @@ int main(int argc, char** argv) {
     std::cerr << "[smoke] Creating renderer\n";
     if (!require_ok(cycles_bridge_create_renderer(&renderer), "renderer creation")
         || renderer == nullptr) {
+        return 1;
+    }
+
+    CyclesBridgeCapabilities capabilities{};
+    capabilities.struct_size = sizeof(capabilities);
+    capabilities.struct_version = 1;
+    CyclesBridgeRenderSettings settings = default_settings();
+    if (!require_ok(
+            cycles_bridge_query_capabilities(renderer, &capabilities),
+            "capability query")
+        || (capabilities.capability_flags & CYCLES_BRIDGE_CAPABILITY_SETTINGS) == 0U
+        || (capabilities.capability_flags & CYCLES_BRIDGE_CAPABILITY_PASS_VIEWER) == 0U
+        || capabilities.pass_mask != ((1ULL << CYCLES_BRIDGE_PASS_COUNT) - 1ULL)
+        || !require_ok(
+            cycles_bridge_apply_settings(renderer, &settings),
+            "initial settings")) {
+        cycles_bridge_destroy_renderer(renderer);
         return 1;
     }
 
@@ -189,7 +317,7 @@ int main(int argc, char** argv) {
     frame.struct_version = 1;
     std::string info;
     if (!wait_for_updated_frame(
-            renderer, camera, frame, pixels, "initial section", info)) {
+            renderer, camera, frame, pixels, "initial section", info, true)) {
         cycles_bridge_destroy_renderer(renderer);
         return 1;
     }
@@ -205,6 +333,118 @@ int main(int argc, char** argv) {
     }
     if (!has_green_dominant_pixel(pixels)) {
         std::cerr << "completed frame did not preserve the green texture channel\n";
+        cycles_bridge_destroy_renderer(renderer);
+        return 1;
+    }
+
+    for (std::uint32_t pass = CYCLES_BRIDGE_PASS_DEPTH;
+         pass < CYCLES_BRIDGE_PASS_COUNT;
+         ++pass) {
+        settings.active_pass = pass;
+        settings.revision++;
+        const std::string stage = std::string("pass ") + std::to_string(pass);
+        if (!require_ok(
+                cycles_bridge_apply_settings(renderer, &settings),
+                "pass settings")
+            || !wait_for_settings(renderer, settings.revision)
+            || !wait_for_updated_frame(
+                renderer, camera, frame, pixels, stage.c_str(), info)
+            || frame.width != kWidth || frame.height != kHeight) {
+            cycles_bridge_destroy_renderer(renderer);
+            return 1;
+        }
+    }
+    settings.active_pass = CYCLES_BRIDGE_PASS_COMBINED;
+    settings.revision++;
+    if (!require_ok(
+            cycles_bridge_apply_settings(renderer, &settings),
+            "combined pass restore")
+        || !wait_for_settings(renderer, settings.revision)
+        || !wait_for_updated_frame(
+            renderer, camera, frame, pixels, "combined pass restore", info, true)) {
+        cycles_bridge_destroy_renderer(renderer);
+        return 1;
+    }
+
+    CyclesBridgeDiagnostics diagnostics{};
+    diagnostics.struct_size = sizeof(diagnostics);
+    diagnostics.struct_version = 1;
+    if (!require_ok(
+            cycles_bridge_query_diagnostics(renderer, &diagnostics),
+            "diagnostics query")) {
+        cycles_bridge_destroy_renderer(renderer);
+        return 1;
+    }
+
+    if ((capabilities.denoiser_mask & CYCLES_BRIDGE_DENOISER_OPTIX) != 0U) {
+        std::cerr << "[smoke] Enabling the detected OptiX denoiser\n";
+        settings.denoiser_mode = 2U;
+        settings.revision++;
+        if (!require_ok(
+                cycles_bridge_apply_settings(renderer, &settings),
+                "OptiX denoiser settings")
+            || !wait_for_settings(renderer, settings.revision)
+            || !wait_for_updated_frame(
+                renderer, camera, frame, pixels, "OptiX denoiser", info, true)
+            || !require_ok(
+                cycles_bridge_query_diagnostics(renderer, &diagnostics),
+                "OptiX diagnostics")
+            || diagnostics.effective_denoiser != 1U) {
+            std::cerr << "detected OptiX denoiser was not activated\n";
+            cycles_bridge_destroy_renderer(renderer);
+            return 1;
+        }
+
+        settings.denoiser_mode = 0U;
+        settings.revision++;
+        if (!require_ok(
+                cycles_bridge_apply_settings(renderer, &settings),
+                "denoiser restore settings")
+            || !wait_for_settings(renderer, settings.revision)
+            || !wait_for_updated_frame(
+                renderer, camera, frame, pixels, "denoiser restore", info, true)) {
+            cycles_bridge_destroy_renderer(renderer);
+            return 1;
+        }
+    }
+
+    if (!require_ok(
+            cycles_bridge_query_diagnostics(renderer, &diagnostics),
+            "final diagnostics query")) {
+        cycles_bridge_destroy_renderer(renderer);
+        return 1;
+    }
+    if (diagnostics.settings_revision != settings.revision
+        || diagnostics.active_pass != CYCLES_BRIDGE_PASS_COMBINED
+        || diagnostics.width != kWidth || diagnostics.height != kHeight) {
+        std::cerr << "unexpected diagnostics after Combined restore: revision="
+                  << diagnostics.settings_revision << ";pass=" << diagnostics.active_pass
+                  << ";resolution=" << diagnostics.width << 'x' << diagnostics.height
+                  << ";samples=" << diagnostics.sample_count << '\n';
+        cycles_bridge_destroy_renderer(renderer);
+        return 1;
+    }
+
+    const std::uint64_t render_settings_revision = diagnostics.settings_revision;
+    settings.debug_overlay = 1U;
+    settings.revision++;
+    if (!require_ok(
+            cycles_bridge_apply_settings(renderer, &settings),
+            "debug-only settings")
+        || !require_ok(
+            cycles_bridge_query_diagnostics(renderer, &diagnostics),
+            "debug-only diagnostics")
+        || diagnostics.settings_revision != render_settings_revision
+        || diagnostics.reset_level != CYCLES_BRIDGE_RESET_NONE) {
+        std::cerr << "debug-only settings unexpectedly reset the renderer\n";
+        cycles_bridge_destroy_renderer(renderer);
+        return 1;
+    }
+    settings.debug_overlay = 0U;
+    settings.revision++;
+    if (!require_ok(
+            cycles_bridge_apply_settings(renderer, &settings),
+            "debug settings restore")) {
         cycles_bridge_destroy_renderer(renderer);
         return 1;
     }
@@ -232,12 +472,18 @@ int main(int argc, char** argv) {
                 expanded_triangles.data()),
             "section update")
         || !require_ok(cycles_bridge_commit_scene(renderer), "updated scene commit")
-        || !wait_for_updated_frame(
-            renderer, camera, frame, pixels, "updated section", info)) {
+        || !wait_for_checksum_change(
+            renderer,
+            camera,
+            frame,
+            pixels,
+            initial_checksum,
+            "updated section",
+            info)) {
         cycles_bridge_destroy_renderer(renderer);
         return 1;
     }
-    if (frame.generation <= initial_generation || checksum(pixels) == initial_checksum) {
+    if (frame.generation <= initial_generation) {
         std::cerr << "section update did not change the rendered frame\n";
         cycles_bridge_destroy_renderer(renderer);
         return 1;
@@ -249,7 +495,7 @@ int main(int argc, char** argv) {
             cycles_bridge_remove_section(renderer, section.section_id),
             "section removal")
         || !require_ok(cycles_bridge_commit_scene(renderer), "removed scene commit")
-        || !wait_for_updated_frame(
+        || !wait_for_background_frame(
             renderer, camera, frame, pixels, "removed section", info)) {
         cycles_bridge_destroy_renderer(renderer);
         return 1;
@@ -259,12 +505,6 @@ int main(int argc, char** argv) {
         cycles_bridge_destroy_renderer(renderer);
         return 1;
     }
-    if (has_rgb_variation(pixels)) {
-        std::cerr << "removed section remains visible in the rendered frame\n";
-        cycles_bridge_destroy_renderer(renderer);
-        return 1;
-    }
-
     std::cout << info << '\n'
               << "frame=" << kWidth << 'x' << kHeight
               << ";checksum=" << checksum(pixels) << std::endl;

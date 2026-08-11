@@ -33,6 +33,45 @@ enum CyclesBridgeFrameFlags : std::uint32_t {
     CYCLES_BRIDGE_FRAME_UPDATED = 1U << 1U,
 };
 
+enum CyclesBridgeCapabilityFlags : std::uint64_t {
+    CYCLES_BRIDGE_CAPABILITY_SETTINGS = 1ULL << 0U,
+    CYCLES_BRIDGE_CAPABILITY_PASS_VIEWER = 1ULL << 1U,
+    CYCLES_BRIDGE_CAPABILITY_DENOISE = 1ULL << 2U,
+    CYCLES_BRIDGE_CAPABILITY_OPTIX_COMPILED = 1ULL << 3U,
+    CYCLES_BRIDGE_CAPABILITY_CUDA_COMPILED = 1ULL << 4U,
+    CYCLES_BRIDGE_CAPABILITY_OIDN_COMPILED = 1ULL << 5U,
+    CYCLES_BRIDGE_CAPABILITY_OCIO_COMPILED = 1ULL << 6U,
+};
+
+enum CyclesBridgeDeviceMask : std::uint32_t {
+    CYCLES_BRIDGE_DEVICE_OPTIX = 1U << 0U,
+    CYCLES_BRIDGE_DEVICE_CUDA = 1U << 1U,
+    CYCLES_BRIDGE_DEVICE_CPU = 1U << 2U,
+};
+
+enum CyclesBridgeDenoiserMask : std::uint32_t {
+    CYCLES_BRIDGE_DENOISER_OPTIX = 1U << 0U,
+    CYCLES_BRIDGE_DENOISER_OPENIMAGEDENOISE = 1U << 1U,
+};
+
+enum CyclesBridgePass : std::uint32_t {
+    CYCLES_BRIDGE_PASS_COMBINED = 0,
+    CYCLES_BRIDGE_PASS_DEPTH = 1,
+    CYCLES_BRIDGE_PASS_NORMAL = 2,
+    CYCLES_BRIDGE_PASS_DIFFUSE_COLOR = 3,
+    CYCLES_BRIDGE_PASS_EMISSION = 4,
+    CYCLES_BRIDGE_PASS_ROUGHNESS = 5,
+    CYCLES_BRIDGE_PASS_SAMPLE_COUNT = 6,
+    CYCLES_BRIDGE_PASS_COUNT = 7,
+};
+
+enum CyclesBridgeResetLevel : std::uint32_t {
+    CYCLES_BRIDGE_RESET_NONE = 0,
+    CYCLES_BRIDGE_RESET_ACCUMULATION = 1,
+    CYCLES_BRIDGE_RESET_BUFFER = 2,
+    CYCLES_BRIDGE_RESET_SESSION = 3,
+};
+
 struct CyclesBridgeCamera {
     std::uint32_t struct_size;
     std::uint32_t struct_version;
@@ -101,6 +140,85 @@ struct CyclesBridgeFrame {
     std::uint32_t reserved;
 };
 
+struct CyclesBridgeRenderSettings {
+    std::uint32_t struct_size;
+    std::uint32_t struct_version;
+    std::uint64_t revision;
+    std::uint32_t device_policy;
+    std::uint32_t resolution_mode;
+    std::uint32_t render_width;
+    std::uint32_t render_height;
+    std::uint32_t resolution_percentage;
+    std::uint32_t interactive_samples;
+    std::uint32_t still_samples;
+    std::uint32_t stationary_delay_millis;
+    std::uint32_t adaptive_sampling;
+    std::uint32_t minimum_samples;
+    float noise_threshold;
+    std::uint32_t interactive_time_limit_millis;
+    std::uint32_t still_time_limit_millis;
+    std::uint32_t minimum_bounce;
+    std::uint32_t maximum_bounce;
+    std::uint32_t diffuse_bounces;
+    std::uint32_t glossy_bounces;
+    std::uint32_t transmission_bounces;
+    std::uint32_t volume_bounces;
+    std::uint32_t transparent_bounces;
+    float clamp_direct;
+    float clamp_indirect;
+    float filter_glossy;
+    std::uint32_t reflective_caustics;
+    std::uint32_t refractive_caustics;
+    std::uint32_t pixel_filter;
+    float filter_width;
+    std::int32_t seed;
+    std::uint32_t denoiser_mode;
+    std::uint32_t denoiser_start_sample;
+    std::uint32_t denoiser_input;
+    std::uint32_t denoiser_prefilter;
+    std::uint32_t denoiser_quality;
+    std::uint32_t denoiser_use_gpu;
+    float exposure_ev;
+    float gamma;
+    std::uint32_t view_transform;
+    std::uint32_t active_pass;
+    std::uint32_t debug_overlay;
+    std::uint32_t reserved[9];
+};
+
+struct CyclesBridgeCapabilities {
+    std::uint32_t struct_size;
+    std::uint32_t struct_version;
+    std::uint64_t capability_flags;
+    std::uint64_t pass_mask;
+    std::uint32_t denoiser_mask;
+    std::uint32_t device_mask;
+    std::uint32_t maximum_width;
+    std::uint32_t maximum_height;
+    std::uint32_t device_count;
+    std::uint32_t reserved[5];
+};
+
+struct CyclesBridgeDiagnostics {
+    std::uint32_t struct_size;
+    std::uint32_t struct_version;
+    std::uint64_t settings_revision;
+    std::uint64_t scene_revision;
+    std::uint64_t camera_revision;
+    std::uint64_t frame_generation;
+    std::uint32_t state_code;
+    std::uint32_t device_type;
+    std::uint32_t effective_denoiser;
+    std::uint32_t active_pass;
+    std::uint32_t width;
+    std::uint32_t height;
+    std::uint32_t sample_count;
+    std::uint32_t section_count;
+    std::uint32_t reset_level;
+    std::uint32_t frame_ready;
+    std::uint32_t reserved[4];
+};
+
 struct CyclesBridgeVertex {
     float position_x;
     float position_y;
@@ -161,6 +279,18 @@ CYCLES_BRIDGE_API std::uint32_t cycles_bridge_write_renderer_info(
     const CyclesBridgeRenderer* renderer,
     char* output,
     std::uint32_t capacity);
+
+CYCLES_BRIDGE_API std::uint32_t cycles_bridge_query_capabilities(
+    const CyclesBridgeRenderer* renderer,
+    CyclesBridgeCapabilities* capabilities);
+
+CYCLES_BRIDGE_API std::uint32_t cycles_bridge_apply_settings(
+    CyclesBridgeRenderer* renderer,
+    const CyclesBridgeRenderSettings* settings);
+
+CYCLES_BRIDGE_API std::uint32_t cycles_bridge_query_diagnostics(
+    const CyclesBridgeRenderer* renderer,
+    CyclesBridgeDiagnostics* diagnostics);
 
 CYCLES_BRIDGE_API std::uint32_t cycles_bridge_upload_scene(
     CyclesBridgeRenderer* renderer,
