@@ -68,6 +68,7 @@ CyclesBridgeRenderSettings default_settings() {
     settings.resolution_percentage = 100;
     settings.dynamic_resolution = 0;
     settings.interactive_resolution_percentage = 50;
+    settings.pass_cache_megabytes = 256;
     settings.interactive_samples = 1;
     settings.still_samples = 8;
     settings.stationary_delay_millis = 150;
@@ -98,6 +99,20 @@ bool same_render_settings(
     std::fill(std::begin(first.reserved), std::end(first.reserved), 0U);
     std::fill(std::begin(second.reserved), std::end(second.reserved), 0U);
     return std::memcmp(&first, &second, sizeof(first)) == 0;
+}
+
+bool same_render_settings_except_pass(
+    CyclesBridgeRenderSettings first,
+    CyclesBridgeRenderSettings second) {
+    first.active_pass = second.active_pass;
+    return same_render_settings(first, second);
+}
+
+bool same_render_settings_except_cache_budget(
+    CyclesBridgeRenderSettings first,
+    CyclesBridgeRenderSettings second) {
+    first.pass_cache_megabytes = second.pass_cache_megabytes;
+    return same_render_settings(first, second);
 }
 
 const char* pass_name(std::uint32_t pass) {
@@ -167,6 +182,7 @@ struct CameraRequest {
     std::uint32_t render_height = 0;
     int sample_count = 1;
     std::uint32_t sampling_state = CYCLES_BRIDGE_SAMPLING_INTERACTIVE;
+    bool preserve_pass_cache = false;
     std::uint64_t revision = 0;
 };
 
@@ -383,11 +399,24 @@ constexpr std::size_t kFrameSlotCount = 3U;
 
 struct FrameSlot {
     std::vector<ccl::half4> pixels;
+    std::uint32_t pass = CYCLES_BRIDGE_PASS_COMBINED;
+    std::uint32_t variant = CYCLES_BRIDGE_FRAME_VARIANT_RAW;
+    std::uint64_t camera_revision = 0;
     std::uint32_t width = 0;
     std::uint32_t height = 0;
     std::uint32_t sample_count = 0;
     std::uint32_t readers = 0;
     std::uint64_t generation = 0;
+};
+
+struct CachedPassFrame {
+    std::uint32_t pass = CYCLES_BRIDGE_PASS_COMBINED;
+    std::uint32_t variant = CYCLES_BRIDGE_FRAME_VARIANT_RAW;
+    std::uint32_t width = 0;
+    std::uint32_t height = 0;
+    std::uint32_t sample_count = 0;
+    std::uint64_t last_access = 0;
+    std::vector<ccl::half4> pixels;
 };
 
 class FrameStore final {
@@ -401,14 +430,41 @@ class FrameStore final {
         published_slot_ = -1;
         writing_slot_ = -1;
         zero_next_display_ = true;
+        produced_camera_revision_ = 0;
+        pass_cache_.clear();
+        pass_cache_bytes_ = 0U;
         generation_++;
+    }
+
+    void invalidate_pass_cache() {
+        std::lock_guard lock(mutex_);
+        pass_cache_.clear();
+        pass_cache_bytes_ = 0U;
+    }
+
+    void set_cache_budget(std::uint32_t megabytes) {
+        std::lock_guard lock(mutex_);
+        set_cache_budget_locked(megabytes);
     }
 
     void configure(
         const CyclesBridgeRenderSettings& settings,
         float depth_far,
-        int target_samples) {
+        int target_samples,
+        bool denoised,
+        std::uint64_t camera_revision) {
         std::lock_guard lock(mutex_);
+        set_cache_budget_locked(settings.pass_cache_megabytes);
+        const std::uint32_t requested_variant = denoised
+                && settings.active_pass == CYCLES_BRIDGE_PASS_COMBINED
+            ? CYCLES_BRIDGE_FRAME_VARIANT_DENOISED
+            : CYCLES_BRIDGE_FRAME_VARIANT_RAW;
+        if (active_pass_ != settings.active_pass || active_variant_ != requested_variant) {
+            cache_published_locked();
+            active_pass_ = settings.active_pass;
+            active_variant_ = requested_variant;
+            restore_cached_locked();
+        }
         const float exposure_scale = std::exp2(settings.exposure_ev);
         const float normalized_depth_far = std::max(1.0F, depth_far);
         const int normalized_target_samples = std::max(1, target_samples);
@@ -425,6 +481,7 @@ class FrameStore final {
         view_transform_ = settings.view_transform;
         depth_far_ = normalized_depth_far;
         target_samples_ = normalized_target_samples;
+        active_camera_revision_ = camera_revision;
         if (rebuild_lut) {
             rebuild_display_luts_locked();
             display_lut_ready_ = true;
@@ -463,6 +520,9 @@ class FrameStore final {
         const auto width = static_cast<std::uint32_t>(params.full_size.x);
         const auto height = static_cast<std::uint32_t>(params.full_size.y);
         FrameSlot& slot = slots_[static_cast<std::size_t>(writing_slot_)];
+        slot.pass = active_pass_;
+        slot.variant = active_variant_;
+        slot.camera_revision = active_camera_revision_;
         slot.width = width;
         slot.height = height;
         const std::size_t pixel_count = static_cast<std::size_t>(width) * height;
@@ -503,6 +563,7 @@ class FrameStore final {
         ema_convert_micros_ = update_ema(ema_convert_micros_, last_convert_micros_);
         max_convert_micros_ = std::max(max_convert_micros_, last_convert_micros_);
         produced_frame_count_++;
+        produced_camera_revision_ = slot.camera_revision;
         last_frame_completed_ = completed;
         display_update_active_ = false;
         mutex_.unlock();
@@ -602,6 +663,16 @@ class FrameStore final {
         return generation_;
     }
 
+    [[nodiscard]] std::uint64_t produced_frame_count() const {
+        std::lock_guard lock(mutex_);
+        return produced_frame_count_;
+    }
+
+    [[nodiscard]] std::uint64_t produced_camera_revision() const {
+        std::lock_guard lock(mutex_);
+        return produced_camera_revision_;
+    }
+
     [[nodiscard]] std::pair<std::uint32_t, std::uint32_t> size() const {
         std::lock_guard lock(mutex_);
         return {width_, height_};
@@ -693,9 +764,129 @@ class FrameStore final {
             ? 0U
             : elapsed_micros(last_frame_completed_, std::chrono::steady_clock::now());
         diagnostics.frame_pixel_format = CYCLES_BRIDGE_PIXEL_FORMAT_RGBA16_FLOAT;
+        diagnostics.cached_raw_pass_mask = 0U;
+        diagnostics.cached_denoised_pass_mask = 0U;
+        for (const CachedPassFrame& cached : pass_cache_) {
+            if (cached.pass >= CYCLES_BRIDGE_PASS_COUNT) {
+                continue;
+            }
+            if (cached.variant == CYCLES_BRIDGE_FRAME_VARIANT_DENOISED) {
+                diagnostics.cached_denoised_pass_mask |= 1ULL << cached.pass;
+            } else {
+                diagnostics.cached_raw_pass_mask |= 1ULL << cached.pass;
+            }
+        }
+        diagnostics.pass_cache_bytes = pass_cache_bytes_;
+        diagnostics.pass_cache_budget_bytes = pass_cache_budget_bytes_;
+        diagnostics.pass_cache_entry_count = static_cast<std::uint32_t>(pass_cache_.size());
+        diagnostics.pass_cache_eviction_count = pass_cache_eviction_count_;
+        diagnostics.pass_cache_hit_count = pass_cache_hit_count_;
+        const FrameSlot* published = published_frame_locked();
+        diagnostics.active_pass = published == nullptr
+            ? active_pass_
+            : published->pass;
+        diagnostics.active_frame_variant = published == nullptr
+            ? active_variant_
+            : published->variant;
     }
 
  private:
+    void set_cache_budget_locked(std::uint32_t megabytes) {
+        pass_cache_budget_bytes_ = static_cast<std::uint64_t>(
+            std::clamp(megabytes, 64U, 4096U)) * 1024U * 1024U;
+        while (pass_cache_bytes_ > pass_cache_budget_bytes_ && !pass_cache_.empty()) {
+            evict_oldest_cache_entry_locked();
+        }
+    }
+
+    void evict_oldest_cache_entry_locked() {
+        const auto oldest = std::min_element(
+            pass_cache_.begin(),
+            pass_cache_.end(),
+            [](const CachedPassFrame& first, const CachedPassFrame& second) {
+                return first.last_access < second.last_access;
+            });
+        if (oldest == pass_cache_.end()) {
+            return;
+        }
+        pass_cache_bytes_ -= oldest->pixels.size() * sizeof(ccl::half4);
+        pass_cache_.erase(oldest);
+        pass_cache_eviction_count_++;
+    }
+
+    void cache_published_locked() {
+        const FrameSlot* slot = published_frame_locked();
+        if (slot == nullptr || slot->pixels.empty()) {
+            return;
+        }
+        const std::uint64_t bytes = slot->pixels.size() * sizeof(ccl::half4);
+        if (bytes > pass_cache_budget_bytes_) {
+            return;
+        }
+        const auto existing = std::find_if(
+            pass_cache_.begin(),
+            pass_cache_.end(),
+            [slot](const CachedPassFrame& cached) {
+                return cached.pass == slot->pass && cached.variant == slot->variant;
+            });
+        if (existing != pass_cache_.end()) {
+            pass_cache_bytes_ -= existing->pixels.size() * sizeof(ccl::half4);
+            pass_cache_.erase(existing);
+        }
+        while (pass_cache_bytes_ + bytes > pass_cache_budget_bytes_
+               && !pass_cache_.empty()) {
+            evict_oldest_cache_entry_locked();
+        }
+        CachedPassFrame cached;
+        cached.pass = slot->pass;
+        cached.variant = slot->variant;
+        cached.width = slot->width;
+        cached.height = slot->height;
+        cached.sample_count = slot->sample_count;
+        cached.last_access = ++pass_cache_access_sequence_;
+        cached.pixels = slot->pixels;
+        pass_cache_bytes_ += bytes;
+        pass_cache_.push_back(std::move(cached));
+    }
+
+    void restore_cached_locked() {
+        const auto cached = std::find_if(
+            pass_cache_.begin(),
+            pass_cache_.end(),
+            [this](const CachedPassFrame& candidate) {
+                return candidate.pass == active_pass_
+                    && candidate.variant == active_variant_;
+            });
+        if (cached == pass_cache_.end()) {
+            return;
+        }
+        int restore_slot = -1;
+        for (std::size_t index = 0; index < slots_.size(); ++index) {
+            if (static_cast<int>(index) != published_slot_ && slots_[index].readers == 0U) {
+                restore_slot = static_cast<int>(index);
+                break;
+            }
+        }
+        if (restore_slot < 0) {
+            return;
+        }
+        cached->last_access = ++pass_cache_access_sequence_;
+        FrameSlot& slot = slots_[static_cast<std::size_t>(restore_slot)];
+        slot.pixels = cached->pixels;
+        slot.pass = cached->pass;
+        slot.variant = cached->variant;
+        slot.width = cached->width;
+        slot.height = cached->height;
+        slot.sample_count = cached->sample_count;
+        slot.generation = ++generation_;
+        width_ = slot.width;
+        height_ = slot.height;
+        sample_count_ = static_cast<int>(slot.sample_count);
+        published_slot_ = restore_slot;
+        last_frame_completed_ = std::chrono::steady_clock::now();
+        pass_cache_hit_count_++;
+    }
+
     FrameSlot* published_frame_locked() {
         if (published_slot_ < 0) {
             return nullptr;
@@ -754,12 +945,19 @@ class FrameStore final {
     std::uint64_t generation_ = 0;
     int sample_count_ = 0;
     std::uint32_t active_pass_ = CYCLES_BRIDGE_PASS_COMBINED;
+    std::uint32_t active_variant_ = CYCLES_BRIDGE_FRAME_VARIANT_RAW;
     float exposure_scale_ = 1.0F;
     float gamma_ = 1.0F;
     std::uint32_t view_transform_ = 0;
     float depth_far_ = 1.0F;
     int target_samples_ = 1;
     std::array<FrameSlot, kFrameSlotCount> slots_{};
+    std::vector<CachedPassFrame> pass_cache_;
+    std::uint64_t pass_cache_bytes_ = 0U;
+    std::uint64_t pass_cache_budget_bytes_ = 256ULL * 1024ULL * 1024ULL;
+    std::uint64_t pass_cache_access_sequence_ = 0U;
+    std::uint32_t pass_cache_eviction_count_ = 0U;
+    std::uint32_t pass_cache_hit_count_ = 0U;
     std::array<std::uint8_t, 65536> display_lut_{};
     std::array<std::uint8_t, 65536> alpha_lut_{};
     bool display_lut_ready_ = false;
@@ -772,6 +970,8 @@ class FrameStore final {
     std::uint32_t dropped_display_updates_ = 0;
     std::chrono::steady_clock::time_point display_update_started_{};
     std::uint64_t produced_frame_count_ = 0;
+    std::uint64_t active_camera_revision_ = 0;
+    std::uint64_t produced_camera_revision_ = 0;
     std::uint64_t copied_frame_count_ = 0;
     std::uint64_t copied_byte_count_ = 0;
     std::uint64_t unchanged_poll_count_ = 0;
@@ -1469,9 +1669,9 @@ class CyclesEngine::Impl final {
                     static_cast<int>(requested_settings_.interactive_samples);
                 requested_camera_->sampling_state =
                     CYCLES_BRIDGE_SAMPLING_INTERACTIVE;
+                requested_camera_->preserve_pass_cache = false;
                 requested_camera_->revision = ++camera_revision_;
                 last_camera_change_ = std::chrono::steady_clock::now();
-                last_camera_generation_ = frames_.generation();
             }
         }
         record_scene_commit(elapsed_micros(
@@ -1486,6 +1686,8 @@ class CyclesEngine::Impl final {
         std::string& error) {
         std::uint32_t reset_level = CYCLES_BRIDGE_RESET_NONE;
         bool display_only_no_op = false;
+        bool pass_only_change = false;
+        frames_.set_cache_budget(settings.pass_cache_megabytes);
         {
             std::lock_guard lock(request_mutex_);
             if (stopping_) {
@@ -1495,10 +1697,23 @@ class CyclesEngine::Impl final {
             display_only_no_op = settings_revision_ > 0
                 && same_render_settings(settings, requested_settings_);
             if (!display_only_no_op) {
-                if (settings.device_policy != requested_settings_.device_policy) {
+                const bool pass_changed = settings_revision_ > 0
+                    && settings.active_pass != requested_settings_.active_pass;
+                pass_only_change = pass_changed
+                    && same_render_settings_except_pass(settings, requested_settings_);
+                const bool cache_budget_only = settings_revision_ > 0
+                    && settings.pass_cache_megabytes
+                        != requested_settings_.pass_cache_megabytes
+                    && same_render_settings_except_cache_budget(settings, requested_settings_);
+                const bool denoiser_topology_changed = settings_revision_ > 0
+                    && (settings.denoiser_mode != requested_settings_.denoiser_mode
+                        || settings.denoiser_input != requested_settings_.denoiser_input
+                        || settings.denoiser_use_gpu
+                            != requested_settings_.denoiser_use_gpu);
+                if (settings.device_policy != requested_settings_.device_policy
+                    || denoiser_topology_changed) {
                     reset_level = CYCLES_BRIDGE_RESET_SESSION;
-                } else if (settings.active_pass != requested_settings_.active_pass
-                           || settings.resolution_mode != requested_settings_.resolution_mode
+                } else if (settings.resolution_mode != requested_settings_.resolution_mode
                            || settings.render_width != requested_settings_.render_width
                            || settings.render_height != requested_settings_.render_height
                            || settings.resolution_percentage
@@ -1508,6 +1723,10 @@ class CyclesEngine::Impl final {
                            || settings.interactive_resolution_percentage
                                != requested_settings_.interactive_resolution_percentage) {
                     reset_level = CYCLES_BRIDGE_RESET_BUFFER;
+                } else if (pass_changed) {
+                    reset_level = CYCLES_BRIDGE_RESET_ACCUMULATION;
+                } else if (cache_budget_only) {
+                    reset_level = CYCLES_BRIDGE_RESET_NONE;
                 } else if (!same_render_settings(settings, requested_settings_)) {
                     reset_level = CYCLES_BRIDGE_RESET_ACCUMULATION;
                 }
@@ -1517,6 +1736,7 @@ class CyclesEngine::Impl final {
                 }
                 settings_revision_ = requested_settings_.revision;
                 requested_reset_level_ = reset_level;
+                requested_pass_only_change_ = pass_only_change;
                 if (requested_camera_) {
                     std::tie(requested_camera_->render_width, requested_camera_->render_height) =
                         render_dimensions(
@@ -1528,9 +1748,9 @@ class CyclesEngine::Impl final {
                         static_cast<int>(requested_settings_.interactive_samples);
                     requested_camera_->sampling_state =
                         CYCLES_BRIDGE_SAMPLING_INTERACTIVE;
+                    requested_camera_->preserve_pass_cache = pass_only_change;
                     requested_camera_->revision = ++camera_revision_;
                     last_camera_change_ = std::chrono::steady_clock::now();
-                    last_camera_generation_ = frames_.generation();
                 }
             }
         }
@@ -1541,6 +1761,9 @@ class CyclesEngine::Impl final {
         }
         if (reset_level >= CYCLES_BRIDGE_RESET_BUFFER) {
             frames_.clear();
+        } else if (reset_level >= CYCLES_BRIDGE_RESET_ACCUMULATION
+                   && !pass_only_change) {
+            frames_.invalidate_pass_cache();
         }
         {
             std::lock_guard lock(state_mutex_);
@@ -1762,14 +1985,14 @@ class CyclesEngine::Impl final {
                 request.revision = ++camera_revision_;
                 requested_camera_ = request;
                 last_camera_change_ = now;
-                last_camera_generation_ = frames_.generation();
                 changed = true;
                 update_sampling_phase = true;
                 sampling_phase = CYCLES_BRIDGE_SAMPLING_INTERACTIVE;
                 settling_remaining_millis = requested_settings_.stationary_delay_millis;
             } else if (requested_camera_->sampling_state
                            != CYCLES_BRIDGE_SAMPLING_STILL
-                       && frames_.generation() != last_camera_generation_) {
+                       && frames_.produced_camera_revision()
+                           == requested_camera_->revision) {
                 const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
                     now - last_camera_change_);
                 const auto delay = std::chrono::milliseconds(
@@ -1783,6 +2006,7 @@ class CyclesEngine::Impl final {
                         CYCLES_BRIDGE_SAMPLING_STILL);
                     request.sample_count = static_cast<int>(requested_settings_.still_samples);
                     request.sampling_state = CYCLES_BRIDGE_SAMPLING_STILL;
+                    request.preserve_pass_cache = true;
                     request.revision = ++camera_revision_;
                     requested_camera_ = request;
                     changed = true;
@@ -1963,7 +2187,9 @@ class CyclesEngine::Impl final {
         frames_.configure(
             settings,
             camera_request.camera.depth_far,
-            render_params.samples);
+            render_params.samples,
+            effective_denoiser != 0U,
+            camera_request.revision);
         frames_.set_sample_count(0);
         sampling_target_ = render_params.samples;
         sampling_measure_count_ = 0;
@@ -2050,7 +2276,7 @@ class CyclesEngine::Impl final {
         std::uint64_t active_settings_revision = 0;
         std::uint64_t observed_scene_revision = 0;
         std::uint64_t observed_camera_revision = 0;
-        std::uint64_t render_start_generation = 0;
+        std::uint64_t render_camera_revision = 0;
         bool render_in_flight = false;
         std::size_t device_index = 0;
 
@@ -2061,6 +2287,7 @@ class CyclesEngine::Impl final {
                 std::uint64_t requested_reset_revision = 0;
                 CyclesBridgeRenderSettings requested_settings{};
                 std::uint32_t requested_settings_reset = CYCLES_BRIDGE_RESET_NONE;
+                bool requested_pass_only_change = false;
                 {
                     std::unique_lock lock(request_mutex_);
                     request_changed_.wait_for(lock, 16ms, [this, observed_scene_revision,
@@ -2083,6 +2310,7 @@ class CyclesEngine::Impl final {
                     requested_reset_revision = scene_reset_revision_;
                     requested_settings = requested_settings_;
                     requested_settings_reset = requested_reset_level_;
+                    requested_pass_only_change = requested_pass_only_change_;
                 }
                 observed_scene_revision = requested_scene ? requested_scene->revision : 0;
                 observed_camera_revision = requested_camera ? requested_camera->revision : 0;
@@ -2091,9 +2319,11 @@ class CyclesEngine::Impl final {
                     update_sampling_progress(*session);
                 }
 
+                bool pass_only_settings_update = false;
                 if (requested_settings.revision != active_settings_revision) {
                     const bool pass_changed = requested_settings.active_pass
                         != active_settings.active_pass;
+                    pass_only_settings_update = requested_pass_only_change;
                     if (session && (requested_settings_reset == CYCLES_BRIDGE_RESET_SESSION
                                     || pass_changed)) {
                         session->cancel(true);
@@ -2108,7 +2338,9 @@ class CyclesEngine::Impl final {
                     if (requested_settings_reset >= CYCLES_BRIDGE_RESET_ACCUMULATION) {
                         active_camera_revision = 0;
                         render_in_flight = false;
-                        frames_.clear();
+                        if (!requested_pass_only_change) {
+                            frames_.clear();
+                        }
                     }
                     active_settings = requested_settings;
                     active_settings_revision = requested_settings.revision;
@@ -2132,7 +2364,8 @@ class CyclesEngine::Impl final {
                     render_in_flight = false;
                     frames_.clear();
                 } else if (render_in_flight
-                           && frames_.generation() != render_start_generation) {
+                           && frames_.produced_camera_revision()
+                               == render_camera_revision) {
                     render_in_flight = false;
                 }
 
@@ -2151,6 +2384,9 @@ class CyclesEngine::Impl final {
 
                 if (!render_in_flight && requested_scene
                     && requested_scene->revision != active_scene_revision) {
+                    if (!pass_only_settings_update) {
+                        frames_.invalidate_pass_cache();
+                    }
                     const bool resources_changed = !session
                         || !active_scene
                         || scene_runtime.resources != requested_scene->resources;
@@ -2174,7 +2410,10 @@ class CyclesEngine::Impl final {
 
                 if (!render_in_flight && session && active_scene && requested_camera
                     && requested_camera->revision != active_camera_revision) {
-                    render_start_generation = frames_.generation();
+                    if (!requested_camera->preserve_pass_cache) {
+                        frames_.invalidate_pass_cache();
+                    }
+                    render_camera_revision = requested_camera->revision;
                     start_render(
                         *session,
                         session_params,
@@ -2209,13 +2448,13 @@ class CyclesEngine::Impl final {
     std::uint64_t scene_reset_revision_ = 0;
     std::uint64_t settings_revision_ = 0;
     std::uint32_t requested_reset_level_ = CYCLES_BRIDGE_RESET_NONE;
+    bool requested_pass_only_change_ = false;
     CyclesBridgeRenderSettings requested_settings_{};
     std::shared_ptr<const SceneResourcesData> staging_resources_;
     std::unordered_map<std::int64_t, std::shared_ptr<const SectionRequest>> staging_sections_;
     std::shared_ptr<const SceneRequest> requested_scene_;
     std::optional<CameraRequest> requested_camera_;
     std::chrono::steady_clock::time_point last_camera_change_{};
-    std::uint64_t last_camera_generation_ = 0;
 
     mutable std::mutex state_mutex_;
     ccl::DeviceInfo selected_device_;

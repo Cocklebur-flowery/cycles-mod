@@ -29,6 +29,7 @@
   "config.cyclesrenderer.output.percentage": "Resolution Percentage",
   "config.cyclesrenderer.output.dynamicResolution": "Dynamic Resolution",
   "config.cyclesrenderer.output.interactivePercentage": "Interactive Resolution Percentage",
+  "config.cyclesrenderer.output.passCacheMegabytes": "Pass Cache Budget (MiB)",
   "config.cyclesrenderer.sampling.interactiveSamples": "Interactive Samples",
   "config.cyclesrenderer.sampling.stillSamples": "Still Samples",
   "config.cyclesrenderer.sampling.stationaryDelay": "Stationary Delay (ms)",

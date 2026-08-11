@@ -1,7 +1,7 @@
 # 渲染数据桥与 Cycles 画面控制里程碑
 
-状态：已确认，实施中（单元 A/A2 已验收；单元 D 基础接入已收口；设置、能力检测与 Pass 查看器已完成自动验证，等待游戏验收）
-基线：Minecraft 26.2 / NeoForge 26.2.0.58 / Cycles 5.2 / C ABI v12
+状态：已确认，实施中（单元 A/A2 已验收；单元 D 基础接入已收口；类型化 HDR Pass 缓存 P9a 已完成自动验证）
+基线：Minecraft 26.2 / NeoForge 26.2.0.58 / Cycles 5.2 / C ABI v13
 
 ## 1. 目标
 
@@ -175,7 +175,7 @@ Provider 必须读取 DH 对外提供或能够稳定适配的最终 LOD 网格/�
 
 场景格式和设置都会成为稳定契约，修改时必须同步升级 ABI。
 
-单元 A 冻结的 ABI v4 整场景入口继续保留；Section 流送阶段升级为 ABI v5；设置阶段升级为 ABI v6；实际采样阶段升级为 ABI v7；帧管线遥测阶段升级为 ABI v8；场景更新遥测阶段升级为 ABI v9；相机/成品帧解耦阶段升级为 ABI v10；half-float DisplayDriver 阶段升级为 ABI v11；帧租约阶段升级为 ABI v12，并继续避免把 C++ 类型暴露给 Java：
+单元 A 冻结的 ABI v4 整场景入口继续保留；Section 流送阶段升级为 ABI v5；设置阶段升级为 ABI v6；实际采样阶段升级为 ABI v7；帧管线遥测阶段升级为 ABI v8；场景更新遥测阶段升级为 ABI v9；相机/成品帧解耦阶段升级为 ABI v10；half-float DisplayDriver 阶段升级为 ABI v11；帧租约阶段升级为 ABI v12；类型化 HDR Pass 缓存阶段升级为 ABI v13，并继续避免把 C++ 类型暴露给 Java：
 
 - `CyclesBridgeCamera`：80 字节，沿用已验证的相机坐标约定。
 - `CyclesBridgeScene`：48 字节，场景原点和各数组计数。
@@ -188,7 +188,7 @@ Provider 必须读取 DH 对外提供或能够稳定适配的最终 LOD 网格/�
 - `CyclesBridgeFrame`：40 字节，低分辨率尺寸、generation、状态标记和实际 sample 数。
 - `CyclesBridgeRenderSettings`：ABI v6 新增，固定 208 字节；包含稳定的设置 revision、设备/分辨率/采样/光程/过滤/降噪/显示/Pass ID。
 - `CyclesBridgeCapabilities`：ABI v6 新增，固定 64 字节；区分编译能力、枚举到的设备、设备实际支持的降噪器、Pass mask 和最大输出尺寸。
-- `CyclesBridgeDiagnostics`：ABI v6 新增、ABI v7 追加采样遥测、ABI v8 追加帧管线遥测、ABI v9 追加场景更新遥测，ABI v10-v12 保持固定 240 字节；v11 报告内部帧格式，v12 使用早期 reserved 区报告帧租约/槽位状态。
+- `CyclesBridgeDiagnostics`：ABI v6 新增、ABI v7 追加采样遥测、ABI v8 追加帧管线遥测、ABI v9 追加场景更新遥测，ABI v10-v12 保持固定 240 字节；v11 报告内部帧格式，v12 使用早期 reserved 区报告帧租约/槽位状态，v13 追加 Pass cache mask、预算和 LRU 统计并扩展为 288 字节。
 - `CyclesBridgeFrameView`：ABI v12 新增、固定 72 字节；Java 只能在 acquire/release 生命周期内读取返回的 RGBA16F 指针。
 - Pass 使用稳定枚举/位掩码，不用 UI 显示字符串作为协议键。
 
@@ -325,7 +325,7 @@ Native 端维护 Pass registry 和 HDR Pass cache。Java 默认只获取已经�
 - Roughness。
 - Sample Count。
 
-当前实现状态：上述 7 个 Pass 已在 native 中按当前选择按需注册，Java/Vulkan 每次只接收一个活动显示 Pass。Depth、Normal、Roughness 和 Sample Count 使用明确的调试映射，Combined/Diffuse Color/Emission 走当前曝光与显示转换。native 冒烟逐一切换所有 Pass、恢复 Combined 后，再继续验证同一 Renderer 中的 Section 修改和删除。
+当前实现状态：上述 7 个 Pass 已在 native 中按当前选择按需注册，Java/Vulkan 每次只接收一个活动显示 Pass。Depth、Normal、Roughness 和 Sample Count 使用明确的调试映射，Combined/Diffuse Color/Emission 走当前曝光与显示转换。ABI v13 已实现以 `(Pass ID, Raw/Denoised Variant)` 为键、受配置预算限制的 Native RGBA16F LRU 缓存；只在 Pass 切换时保存最新帧，不在每个渐进 sample 上复制所有 Pass。相机、场景和渲染参数变化会使缓存失效，F10 可查看 mask、占用、命中和淘汰。当前未注册 Pass 的切换仍会重建 Cycles Session，可查询 descriptor/on-demand registry 留给 P9b。详见 [类型化 HDR Pass 缓存](stages/pass-cache.md)。
 
 后续再开放：
 
@@ -422,7 +422,7 @@ Section 流送切换到 ABI v5 后，旧高度场暂不再合并进活动场景�
 - HDR 测试场景在 AgX 下保留高光层次，Raw/Standard 行为可对照。
 - 设置错误不会让 Minecraft 进程崩溃。
 
-当前状态：采样、分辨率、光程、过滤、设备策略、OptiX 降噪和基础显示参数已经通过 ABI v12 接通，Combined 显示源已是可租用并由 Vulkan 直接上传的 scene-linear RGBA16F；渐进状态已明确区分 Interactive、Settling 和 Still。类型化 HDR Pass cache、Blender OCIO 资产/AgX 和 OIDN 构建尚未完成，因此单元 B 只完成了控制面与一部分 Cycles 参数，不标记为整体验收。
+当前状态：采样、分辨率、光程、过滤、设备策略、OptiX 降噪和基础显示参数已经接通，Combined 显示源已是可租用并由 Vulkan 直接上传的 scene-linear RGBA16F；渐进状态已明确区分 Interactive、Settling 和 Still。ABI v13 已完成类型化 HDR Pass cache 的 P9a 数据层，但 P9b descriptor/on-demand registry、Blender OCIO 资产/AgX 和 OIDN 构建尚未完成，因此单元 B 只完成了一部分，不标记为整体验收。
 
 ### 单元 C：Minecraft 设置界面与 Pass 查看器
 

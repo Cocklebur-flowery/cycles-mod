@@ -76,7 +76,8 @@ bool wait_for_updated_frame(
     std::vector<std::uint8_t>& pixels,
     const char* stage,
     std::string& info,
-    bool require_green = false) {
+    bool require_green = false,
+    int expected_pass = -1) {
     for (int attempt = 0; attempt < 1200; ++attempt) {
         camera.frame_id++;
         if (!require_ok(
@@ -89,11 +90,28 @@ bool wait_for_updated_frame(
         }
         info = renderer_info(renderer);
         if (attempt % 50 == 0) {
-            std::cerr << "[smoke] " << stage << ": " << info << '\n';
+            CyclesBridgeDiagnostics progress{};
+            progress.struct_size = sizeof(progress);
+            progress.struct_version = 1;
+            cycles_bridge_query_diagnostics(renderer, &progress);
+            std::cerr << "[smoke] " << stage << ": " << info
+                      << ";sample=" << progress.sample_count << '/'
+                      << progress.target_sample_count
+                      << ";camera=" << progress.camera_revision
+                      << ";produced=" << progress.produced_frame_count
+                      << ";starts=" << progress.render_start_count << '\n';
         }
         if ((frame.flags & CYCLES_BRIDGE_FRAME_READY) != 0U
             && (frame.flags & CYCLES_BRIDGE_FRAME_UPDATED) != 0U) {
-            if (!require_green || has_green_dominant_pixel(pixels)) {
+            CyclesBridgeDiagnostics diagnostics{};
+            diagnostics.struct_size = sizeof(diagnostics);
+            diagnostics.struct_version = 1;
+            const bool pass_matches = expected_pass < 0
+                || (require_ok(
+                        cycles_bridge_query_diagnostics(renderer, &diagnostics),
+                        "frame pass diagnostics")
+                    && diagnostics.active_pass == static_cast<std::uint32_t>(expected_pass));
+            if (pass_matches && (!require_green || has_green_dominant_pixel(pixels))) {
                 return true;
             }
         }
@@ -209,6 +227,7 @@ CyclesBridgeRenderSettings default_settings() {
     settings.render_height = 270;
     settings.resolution_percentage = 100;
     settings.interactive_resolution_percentage = 50;
+    settings.pass_cache_megabytes = 256;
     settings.interactive_samples = 1;
     settings.still_samples = 1;
     settings.stationary_delay_millis = 150;
@@ -312,7 +331,7 @@ bool verify_progressive_sampling(
 int main(int argc, char** argv) {
     const bool require_optix = argc > 1 && std::strcmp(argv[1], "--require-optix") == 0;
     std::cerr << "[smoke] ABI check\n";
-    if (cycles_bridge_abi_version() != 12U) {
+    if (cycles_bridge_abi_version() != 13U) {
         std::cerr << "unexpected native ABI " << cycles_bridge_abi_version() << '\n';
         return 1;
     }
@@ -451,7 +470,8 @@ int main(int argc, char** argv) {
                 "pass settings")
             || !wait_for_settings(renderer, settings.revision)
             || !wait_for_updated_frame(
-                renderer, camera, frame, pixels, stage.c_str(), info)
+                renderer, camera, frame, pixels, stage.c_str(), info, false,
+                static_cast<int>(pass))
             || frame.width != kWidth || frame.height != kHeight) {
             cycles_bridge_destroy_renderer(renderer);
             return 1;
@@ -464,7 +484,8 @@ int main(int argc, char** argv) {
             "combined pass restore")
         || !wait_for_settings(renderer, settings.revision)
         || !wait_for_updated_frame(
-            renderer, camera, frame, pixels, "combined pass restore", info, true)) {
+            renderer, camera, frame, pixels, "combined pass restore", info, true,
+            CYCLES_BRIDGE_PASS_COMBINED)) {
         cycles_bridge_destroy_renderer(renderer);
         return 1;
     }
@@ -475,6 +496,24 @@ int main(int argc, char** argv) {
     if (!require_ok(
             cycles_bridge_query_diagnostics(renderer, &diagnostics),
             "diagnostics query")) {
+        cycles_bridge_destroy_renderer(renderer);
+        return 1;
+    }
+    const std::uint64_t all_passes_mask = (1ULL << CYCLES_BRIDGE_PASS_COUNT) - 1ULL;
+    if (diagnostics.cached_raw_pass_mask != all_passes_mask
+        || diagnostics.cached_denoised_pass_mask != 0U
+        || diagnostics.pass_cache_entry_count < CYCLES_BRIDGE_PASS_COUNT
+        || diagnostics.pass_cache_bytes == 0U
+        || diagnostics.pass_cache_bytes > diagnostics.pass_cache_budget_bytes
+        || diagnostics.pass_cache_hit_count == 0U
+        || diagnostics.active_frame_variant != CYCLES_BRIDGE_FRAME_VARIANT_RAW) {
+        std::cerr << "unexpected raw pass cache state: raw="
+                  << diagnostics.cached_raw_pass_mask
+                  << ";denoised=" << diagnostics.cached_denoised_pass_mask
+                  << ";entries=" << diagnostics.pass_cache_entry_count
+                  << ";bytes=" << diagnostics.pass_cache_bytes
+                  << ";budget=" << diagnostics.pass_cache_budget_bytes
+                  << ";hits=" << diagnostics.pass_cache_hit_count << '\n';
         cycles_bridge_destroy_renderer(renderer);
         return 1;
     }
@@ -494,6 +533,43 @@ int main(int argc, char** argv) {
                 "OptiX diagnostics")
             || diagnostics.effective_denoiser != 1U) {
             std::cerr << "detected OptiX denoiser was not activated\n";
+            cycles_bridge_destroy_renderer(renderer);
+            return 1;
+        }
+
+        const std::uint32_t cache_hits_before_denoised_switch =
+            diagnostics.pass_cache_hit_count;
+        settings.active_pass = CYCLES_BRIDGE_PASS_DEPTH;
+        settings.revision++;
+        if (!require_ok(
+                cycles_bridge_apply_settings(renderer, &settings),
+                "denoised cache depth settings")
+            || !wait_for_settings(renderer, settings.revision)
+            || !wait_for_updated_frame(
+                renderer, camera, frame, pixels, "denoised cache depth", info, false,
+                CYCLES_BRIDGE_PASS_DEPTH)) {
+            cycles_bridge_destroy_renderer(renderer);
+            return 1;
+        }
+        settings.active_pass = CYCLES_BRIDGE_PASS_COMBINED;
+        settings.revision++;
+        if (!require_ok(
+                cycles_bridge_apply_settings(renderer, &settings),
+                "denoised cache combined settings")
+            || !wait_for_settings(renderer, settings.revision)
+            || !wait_for_updated_frame(
+                renderer, camera, frame, pixels, "denoised cache combined", info, true,
+                CYCLES_BRIDGE_PASS_COMBINED)
+            || !require_ok(
+                cycles_bridge_query_diagnostics(renderer, &diagnostics),
+                "denoised pass cache diagnostics")
+            || (diagnostics.cached_raw_pass_mask & (1ULL << CYCLES_BRIDGE_PASS_DEPTH)) == 0U
+            || (diagnostics.cached_denoised_pass_mask
+                & (1ULL << CYCLES_BRIDGE_PASS_COMBINED)) == 0U
+            || diagnostics.pass_cache_hit_count <= cache_hits_before_denoised_switch
+            || diagnostics.active_frame_variant
+                != CYCLES_BRIDGE_FRAME_VARIANT_DENOISED) {
+            std::cerr << "raw and denoised pass cache variants were not kept separately\n";
             cycles_bridge_destroy_renderer(renderer);
             return 1;
         }

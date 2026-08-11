@@ -97,7 +97,7 @@ F10 叠加层采用“当前值 + 最近窗口统计”，不把目标值伪装�
 | P6 | `perf: add acquired frame ring buffers` | Native 三缓冲、FFM acquire/release | 已完成（本提交） |
 | P7 | `feat: present scene-linear rgba16f frames` | Vulkan RGBA16F 与最小显示 Shader | 已完成（P7a/P7b） |
 | P8 | `feat: add progressive interaction states` | Interactive/Settling/Still 和动态分辨率 | 已完成（P8a/P8b） |
-| P9 | `feat: add typed pass cache` | Pass 注册表、内存预算、raw/denoised 分离 | 待开始 |
+| P9 | `feat: add typed pass cache` | Pass 注册表、内存预算、raw/denoised 分离 | P9a 缓存已完成；P9b 描述/注册表待开始 |
 | P10 | `feat: schedule cycles denoisers` | OptiX/OIDN 能力、调度与 OIDN 构建 | 待开始 |
 | P11 | `feat: integrate ocio color management` | OCIO Vulkan、AgX、ACES 2、工作/显示空间 | 待开始 |
 | P12 | `feat: expose sampling and physical camera controls` | 原生蓝噪声、镜头、裁剪、景深 | 待开始 |
@@ -197,3 +197,13 @@ P1 至 P4 完成后进行一次 1080p 游戏人工里程碑：观察实际 sampl
 - 输出设置新增动态分辨率开关和交互分辨率百分比；默认关闭，保持现有画质和配置行为。开启后 `Interactive`/`Settling` 使用不高于基础输出百分比的交互比例，`Still` 恢复基础输出尺寸。
 - 分辨率切换沿用同一套渐进状态机，新尺寸准备期间 Minecraft 继续展示上一张有效纹理，不主动清屏。两个字段占用设置结构原有保留位，`CyclesBridgeRenderSettings` 仍为 208 字节，ABI 版本保持 v12。
 - F10 同时显示基础比例、交互比例与动态开关。Native smoke 在 320×180 视口中验证交互帧切换到 240×135，并在静止延迟后恢复 320×180，防止状态/尺寸振荡回归。
+
+### P9a：类型化 HDR Pass 缓存
+
+- ABI v13 在不改变 Scene/Section/FrameView 和 208 字节设置布局的前提下，增加 `passCacheMegabytes` 及缓存诊断；诊断结构由 240 字节追加到 288 字节。
+- Native 使用 `(Pass ID, Raw/Denoised Variant)` 作为缓存键。只有实际降噪的 Combined 标记为 Denoised，Depth 等调试 Pass 始终保持 Raw，避免不同语义的帧互相覆盖。
+- 缓存默认预算 256 MiB，使用 LRU 淘汰；只在离开当前 Pass 时复制最近发布帧，不为每个渐进 sample 制造额外整帧 CPU 拷贝。
+- 相机、场景和真实渲染参数变化会清空缓存；只切换 Pass 或修改预算会保留缓存。缓存命中只发布显示 generation，不增加 Cycles produced-frame 计数。
+- 帧槽记录实际 Pass、Variant 和 camera revision；缓存恢复、清空 generation 或取消边界的迟到帧不能冒充当前请求的新采样。降噪拓扑变化当前按 Session reset 处理，P10 再优化调度成本。
+- F10 显示活动 Variant、条目/预算/命中/淘汰和 Raw/Denoised masks。完整数据模型、内存口径和失效矩阵见 [类型化 HDR Pass 缓存](pass-cache.md)。
+- P9b 仍需加入可查询的 Pass descriptor/on-demand registry；当前切换到未注册 Pass 仍可能重建 Cycles Session，因此 P9 尚未整体验收。

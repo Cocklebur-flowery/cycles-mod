@@ -399,6 +399,7 @@ public final class CyclesRendererMod {
                     minecraft.font,
                     diagnostics.width() + "x" + diagnostics.height()
                             + "  pass=" + settings.activePass().name()
+                            + "/" + diagnostics.activeFramePassName()
                             + "  sample=" + diagnostics.sampleCount()
                             + "/" + diagnostics.targetSampleCount(),
                     6, y, 0xFFE0E0E0);
@@ -436,7 +437,24 @@ public final class CyclesRendererMod {
             graphics.text(
                     minecraft.font,
                     "store=" + diagnostics.framePixelFormatName()
+                            + " variant=" + diagnostics.activeFrameVariantName()
                             + " lease/upload=RGBA16_FLOAT",
+                    6, y, 0xFFE0E0E0);
+            y += 10;
+            graphics.text(
+                    minecraft.font,
+                    "pass cache=" + diagnostics.passCacheEntryCount()
+                            + "  MiB=" + oneDecimalMebibytes(diagnostics.passCacheBytes())
+                            + "/" + oneDecimalMebibytes(diagnostics.passCacheBudgetBytes())
+                            + " hit/evict=" + diagnostics.passCacheHitCount()
+                            + "/" + diagnostics.passCacheEvictionCount(),
+                    6, y, 0xFFE0E0E0);
+            y += 10;
+            graphics.text(
+                    minecraft.font,
+                    "pass masks raw=0x" + Long.toHexString(diagnostics.cachedRawPassMask())
+                            + " denoised=0x"
+                            + Long.toHexString(diagnostics.cachedDenoisedPassMask()),
                     6, y, 0xFFE0E0E0);
             y += 10;
             graphics.text(

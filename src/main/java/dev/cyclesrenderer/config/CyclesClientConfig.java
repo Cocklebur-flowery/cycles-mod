@@ -18,6 +18,7 @@ public final class CyclesClientConfig {
     private static final ModConfigSpec.IntValue RESOLUTION_PERCENTAGE;
     private static final ModConfigSpec.BooleanValue DYNAMIC_RESOLUTION;
     private static final ModConfigSpec.IntValue INTERACTIVE_RESOLUTION_PERCENTAGE;
+    private static final ModConfigSpec.IntValue PASS_CACHE_MEGABYTES;
     private static final ModConfigSpec.IntValue INTERACTIVE_SAMPLES;
     private static final ModConfigSpec.IntValue STILL_SAMPLES;
     private static final ModConfigSpec.IntValue STATIONARY_DELAY;
@@ -82,6 +83,9 @@ public final class CyclesClientConfig {
                         "config.cyclesrenderer.output.interactivePercentage")
                 .comment("Interactive percentage of the configured internal width and height.")
                 .defineInRange("interactivePercentage", 50, 25, 100);
+        PASS_CACHE_MEGABYTES = builder.translation("config.cyclesrenderer.output.passCacheMegabytes")
+                .comment("Maximum native memory used to retain previously viewed HDR passes.")
+                .defineInRange("passCacheMegabytes", 256, 64, 4096);
         builder.pop();
 
         builder.push("sampling");
@@ -186,6 +190,7 @@ public final class CyclesClientConfig {
                 DEVICE_POLICY.get(), RESOLUTION_MODE.get(),
                 RENDER_WIDTH.get(), RENDER_HEIGHT.get(), RESOLUTION_PERCENTAGE.get(),
                 DYNAMIC_RESOLUTION.get(), INTERACTIVE_RESOLUTION_PERCENTAGE.get(),
+                PASS_CACHE_MEGABYTES.get(),
                 INTERACTIVE_SAMPLES.get(), STILL_SAMPLES.get(), STATIONARY_DELAY.get(),
                 ADAPTIVE_SAMPLING.get(), MINIMUM_SAMPLES.get(), NOISE_THRESHOLD.get().floatValue(),
                 INTERACTIVE_TIME_LIMIT.get(), STILL_TIME_LIMIT.get(),

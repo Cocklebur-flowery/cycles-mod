@@ -16,9 +16,9 @@ struct CyclesBridgeRenderer {
 
 namespace {
 
-constexpr std::uint32_t kAbiVersion = 12;
+constexpr std::uint32_t kAbiVersion = 13;
 constexpr std::uint32_t kStructVersion = 1;
-constexpr char kBuildInfo[] = "cyclesrenderer-native/cycles-5.2;abi=12";
+constexpr char kBuildInfo[] = "cyclesrenderer-native/cycles-5.2;abi=13";
 
 static_assert(sizeof(CyclesBridgeCamera) == 80);
 static_assert(offsetof(CyclesBridgeCamera, frame_id) == 8);
@@ -36,7 +36,7 @@ static_assert(offsetof(CyclesBridgeFrameView, generation) == 16);
 static_assert(offsetof(CyclesBridgeFrameView, pixels) == 48);
 static_assert(sizeof(CyclesBridgeRenderSettings) == 208);
 static_assert(sizeof(CyclesBridgeCapabilities) == 64);
-static_assert(sizeof(CyclesBridgeDiagnostics) == 240);
+static_assert(sizeof(CyclesBridgeDiagnostics) == 288);
 static_assert(sizeof(CyclesBridgeVertex) == 40);
 static_assert(offsetof(CyclesBridgeVertex, packed_rgba) == 32);
 static_assert(sizeof(CyclesBridgeTriangle) == 16);
@@ -184,6 +184,8 @@ bool valid_settings(const CyclesBridgeRenderSettings& settings) {
         && valid_bool(settings.dynamic_resolution)
         && settings.interactive_resolution_percentage >= 25U
         && settings.interactive_resolution_percentage <= 100U
+        && settings.pass_cache_megabytes >= 64U
+        && settings.pass_cache_megabytes <= 4096U
         && settings.interactive_samples >= 1U && settings.interactive_samples <= 4096U
         && settings.still_samples >= 1U && settings.still_samples <= 4096U
         && settings.stationary_delay_millis <= 10000U

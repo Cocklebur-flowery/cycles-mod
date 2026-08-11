@@ -39,6 +39,11 @@ enum CyclesBridgePixelFormat : std::uint32_t {
     CYCLES_BRIDGE_PIXEL_FORMAT_RGBA16_FLOAT = 2,
 };
 
+enum CyclesBridgeFrameVariant : std::uint32_t {
+    CYCLES_BRIDGE_FRAME_VARIANT_RAW = 0,
+    CYCLES_BRIDGE_FRAME_VARIANT_DENOISED = 1,
+};
+
 enum CyclesBridgeCapabilityFlags : std::uint64_t {
     CYCLES_BRIDGE_CAPABILITY_SETTINGS = 1ULL << 0U,
     CYCLES_BRIDGE_CAPABILITY_PASS_VIEWER = 1ULL << 1U,
@@ -213,7 +218,8 @@ struct CyclesBridgeRenderSettings {
     std::uint32_t debug_overlay;
     std::uint32_t dynamic_resolution;
     std::uint32_t interactive_resolution_percentage;
-    std::uint32_t reserved[7];
+    std::uint32_t pass_cache_megabytes;
+    std::uint32_t reserved[6];
 };
 
 struct CyclesBridgeCapabilities {
@@ -279,6 +285,14 @@ struct CyclesBridgeDiagnostics {
     std::uint32_t ema_render_start_micros;
     std::uint32_t max_render_start_micros;
     std::uint32_t frame_pixel_format;
+    std::uint64_t cached_raw_pass_mask;
+    std::uint64_t cached_denoised_pass_mask;
+    std::uint64_t pass_cache_bytes;
+    std::uint64_t pass_cache_budget_bytes;
+    std::uint32_t pass_cache_entry_count;
+    std::uint32_t pass_cache_eviction_count;
+    std::uint32_t pass_cache_hit_count;
+    std::uint32_t active_frame_variant;
 };
 
 struct CyclesBridgeVertex {

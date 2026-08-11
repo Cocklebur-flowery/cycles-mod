@@ -15,6 +15,7 @@ public record CyclesRenderSettings(
         int resolutionPercentage,
         boolean dynamicResolution,
         int interactiveResolutionPercentage,
+        int passCacheMegabytes,
         int interactiveSamples,
         int stillSamples,
         int stationaryDelayMillis,

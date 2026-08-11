@@ -23,7 +23,7 @@ import static java.lang.foreign.ValueLayout.JAVA_INT;
 import static java.lang.foreign.ValueLayout.JAVA_LONG;
 
 public final class NativeBridge {
-    public static final int ABI_VERSION = 12;
+    public static final int ABI_VERSION = 13;
     public static final int PIXEL_FORMAT_RGBA16_FLOAT = 2;
 
     private static final String LIBRARY_PATH_PROPERTY = "cyclesrenderer.nativeLibrary";
@@ -157,7 +157,8 @@ public final class NativeBridge {
             JAVA_INT.withName("debug_overlay"),
             JAVA_INT.withName("dynamic_resolution"),
             JAVA_INT.withName("interactive_resolution_percentage"),
-            MemoryLayout.sequenceLayout(7, JAVA_INT).withName("reserved"));
+            JAVA_INT.withName("pass_cache_megabytes"),
+            MemoryLayout.sequenceLayout(6, JAVA_INT).withName("reserved"));
     private static final MemoryLayout CAPABILITIES_LAYOUT = MemoryLayout.structLayout(
             JAVA_INT.withName("struct_size"),
             JAVA_INT.withName("struct_version"),
@@ -218,7 +219,15 @@ public final class NativeBridge {
             JAVA_INT.withName("last_render_start_micros"),
             JAVA_INT.withName("ema_render_start_micros"),
             JAVA_INT.withName("max_render_start_micros"),
-            JAVA_INT.withName("reserved_v9"));
+            JAVA_INT.withName("frame_pixel_format"),
+            JAVA_LONG.withName("cached_raw_pass_mask"),
+            JAVA_LONG.withName("cached_denoised_pass_mask"),
+            JAVA_LONG.withName("pass_cache_bytes"),
+            JAVA_LONG.withName("pass_cache_budget_bytes"),
+            JAVA_INT.withName("pass_cache_entry_count"),
+            JAVA_INT.withName("pass_cache_eviction_count"),
+            JAVA_INT.withName("pass_cache_hit_count"),
+            JAVA_INT.withName("active_frame_variant"));
     private static final MemoryLayout VERTEX_LAYOUT = MemoryLayout.structLayout(
             JAVA_FLOAT.withName("position_x"),
             JAVA_FLOAT.withName("position_y"),
@@ -264,7 +273,7 @@ public final class NativeBridge {
                 || FRAME_VIEW_LAYOUT.byteSize() != 72L
                 || SETTINGS_LAYOUT.byteSize() != 208L
                 || CAPABILITIES_LAYOUT.byteSize() != 64L
-                || DIAGNOSTICS_LAYOUT.byteSize() != 240L
+                || DIAGNOSTICS_LAYOUT.byteSize() != 288L
                 || VERTEX_LAYOUT.byteSize() != 40L
                 || TRIANGLE_LAYOUT.byteSize() != 16L
                 || MATERIAL_LAYOUT.byteSize() != 32L
@@ -774,6 +783,7 @@ public final class NativeBridge {
             settingsSegment.set(JAVA_INT, 172L, settings.dynamicResolution() ? 1 : 0);
             settingsSegment.set(
                     JAVA_INT, 176L, settings.interactiveResolutionPercentage());
+            settingsSegment.set(JAVA_INT, 180L, settings.passCacheMegabytes());
             checkRendererStatus(
                     (int) applySettings.invokeExact(renderer, settingsSegment),
                     "settings update");
@@ -852,7 +862,15 @@ public final class NativeBridge {
                     diagnosticsSegment.get(JAVA_INT, 224L),
                     diagnosticsSegment.get(JAVA_INT, 228L),
                     diagnosticsSegment.get(JAVA_INT, 232L),
-                    diagnosticsSegment.get(JAVA_INT, 236L));
+                    diagnosticsSegment.get(JAVA_INT, 236L),
+                    diagnosticsSegment.get(JAVA_LONG, 240L),
+                    diagnosticsSegment.get(JAVA_LONG, 248L),
+                    diagnosticsSegment.get(JAVA_LONG, 256L),
+                    diagnosticsSegment.get(JAVA_LONG, 264L),
+                    diagnosticsSegment.get(JAVA_INT, 272L),
+                    diagnosticsSegment.get(JAVA_INT, 276L),
+                    diagnosticsSegment.get(JAVA_INT, 280L),
+                    diagnosticsSegment.get(JAVA_INT, 284L));
         }
 
         private RenderedFrame renderFrame(
@@ -1323,7 +1341,15 @@ public final class NativeBridge {
             int lastRenderStartMicros,
             int emaRenderStartMicros,
             int maxRenderStartMicros,
-            int framePixelFormat) {
+            int framePixelFormat,
+            long cachedRawPassMask,
+            long cachedDenoisedPassMask,
+            long passCacheBytes,
+            long passCacheBudgetBytes,
+            int passCacheEntryCount,
+            int passCacheEvictionCount,
+            int passCacheHitCount,
+            int activeFrameVariant) {
         public String stateName() {
             return switch (stateCode) {
                 case 1 -> "scene-staging";
@@ -1377,6 +1403,23 @@ public final class NativeBridge {
                 case 1 -> "RGBA8_UNORM";
                 case 2 -> "RGBA16_FLOAT";
                 default -> "unknown";
+            };
+        }
+
+        public String activeFrameVariantName() {
+            return activeFrameVariant == 1 ? "denoised" : "raw";
+        }
+
+        public String activeFramePassName() {
+            return switch (activePassId) {
+                case 0 -> "COMBINED";
+                case 1 -> "DEPTH";
+                case 2 -> "NORMAL";
+                case 3 -> "DIFFUSE_COLOR";
+                case 4 -> "EMISSION";
+                case 5 -> "ROUGHNESS";
+                case 6 -> "SAMPLE_COUNT";
+                default -> "UNKNOWN";
             };
         }
     }

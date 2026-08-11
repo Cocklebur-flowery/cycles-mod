@@ -29,6 +29,7 @@
   "config.cyclesrenderer.output.percentage": "分辨率百分比",
   "config.cyclesrenderer.output.dynamicResolution": "动态分辨率",
   "config.cyclesrenderer.output.interactivePercentage": "交互分辨率百分比",
+  "config.cyclesrenderer.output.passCacheMegabytes": "Pass 缓存预算（MiB）",
   "config.cyclesrenderer.sampling.interactiveSamples": "交互采样",
   "config.cyclesrenderer.sampling.stillSamples": "静止采样",
   "config.cyclesrenderer.sampling.stationaryDelay": "进入静止模式延迟（毫秒）",
