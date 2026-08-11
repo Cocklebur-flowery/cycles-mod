@@ -555,10 +555,13 @@ ccl::Transform camera_transform(
     const float py = static_cast<float>(camera.position_y - scene.origin_y);
     const float pz = static_cast<float>(camera.position_z - scene.origin_z);
 
+    // Minecraft rotates a camera whose local forward axis is -Z, while Cycles
+    // emits perspective rays along local +Z. Negate the local Z basis column,
+    // matching Cycles' own Hydra camera conversion.
     return {
-        ccl::make_float4(1.0F - 2.0F * (yy + zz), 2.0F * (xy - zw), 2.0F * (xz + yw), px),
-        ccl::make_float4(2.0F * (xy + zw), 1.0F - 2.0F * (xx + zz), 2.0F * (yz - xw), py),
-        ccl::make_float4(2.0F * (xz - yw), 2.0F * (yz + xw), 1.0F - 2.0F * (xx + yy), pz),
+        ccl::make_float4(1.0F - 2.0F * (yy + zz), 2.0F * (xy - zw), -2.0F * (xz + yw), px),
+        ccl::make_float4(2.0F * (xy + zw), 1.0F - 2.0F * (xx + zz), -2.0F * (yz - xw), py),
+        ccl::make_float4(2.0F * (xz - yw), 2.0F * (yz + xw), -(1.0F - 2.0F * (xx + yy)), pz),
     };
 }
 

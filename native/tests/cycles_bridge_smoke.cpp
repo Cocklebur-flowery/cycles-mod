@@ -48,6 +48,20 @@ std::uint64_t checksum(const std::vector<std::uint8_t>& pixels) {
     return result;
 }
 
+bool has_rgb_variation(const std::vector<std::uint8_t>& pixels) {
+    if (pixels.size() < 8U) {
+        return false;
+    }
+    for (std::size_t offset = 4U; offset + 2U < pixels.size(); offset += 4U) {
+        if (pixels[offset] != pixels[0]
+            || pixels[offset + 1U] != pixels[1U]
+            || pixels[offset + 2U] != pixels[2U]) {
+            return true;
+        }
+    }
+    return false;
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -147,6 +161,11 @@ int main(int argc, char** argv) {
             cycles_bridge_render(
                 renderer, &camera, pixels.data(), pixels.size()),
             "completed frame readback")) {
+        cycles_bridge_destroy_renderer(renderer);
+        return 1;
+    }
+    if (!has_rgb_variation(pixels)) {
+        std::cerr << "completed frame contains only the background; camera may face away from the scene\n";
         cycles_bridge_destroy_renderer(renderer);
         return 1;
     }
