@@ -465,12 +465,41 @@ int main(int argc, char** argv) {
                 cycles_bridge_query_vulkan_interop_state(
                     renderer, &interop_state),
                 "interop state query")
-            || (interop_state.flags & CYCLES_BRIDGE_VULKAN_INTEROP_BOUND) == 0U
+            || (interop_state.flags & CYCLES_BRIDGE_VULKAN_INTEROP_BOUND) == 0U) {
+            std::cerr << "interop handle ownership was not transferred and closed\n";
+            cycles_bridge_destroy_renderer(renderer);
+            return 1;
+        }
+        HANDLE duplicate_handle = CreateEventW(nullptr, FALSE, FALSE, nullptr);
+        if (duplicate_handle == nullptr) {
+            cycles_bridge_destroy_renderer(renderer);
+            return 1;
+        }
+        interop.memory_handle = static_cast<std::uint64_t>(
+            reinterpret_cast<std::uintptr_t>(duplicate_handle));
+        if (cycles_bridge_bind_vulkan_interop_buffer(renderer, &interop)
+                != CYCLES_BRIDGE_STATUS_RENDER_ERROR
+            || CloseHandle(duplicate_handle) != FALSE) {
+            std::cerr << "duplicate interop handle was not rejected and closed\n";
+            cycles_bridge_destroy_renderer(renderer);
+            return 1;
+        }
+        CyclesBridgeVulkanInteropState acquired_state{};
+        acquired_state.struct_size = sizeof(acquired_state);
+        acquired_state.struct_version = 1U;
+        if (!require_ok(
+                cycles_bridge_acquire_vulkan_interop_frame(
+                    renderer, 0U, &acquired_state),
+                "empty interop frame acquire")
+            || (acquired_state.flags
+                & CYCLES_BRIDGE_VULKAN_INTEROP_FRAME_ACQUIRED) != 0U
+            || cycles_bridge_release_vulkan_interop_frame(renderer, 1U)
+                != CYCLES_BRIDGE_STATUS_RENDER_ERROR
             || !require_ok(
                 cycles_bridge_unbind_vulkan_interop_buffer(renderer),
                 "interop handle unbind")
             || CloseHandle(accepted_handle) != FALSE) {
-            std::cerr << "interop handle ownership was not transferred and closed\n";
+            std::cerr << "empty interop frame ownership was not rejected\n";
             cycles_bridge_destroy_renderer(renderer);
             return 1;
         }
