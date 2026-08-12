@@ -18,9 +18,9 @@ struct CyclesBridgeRenderer {
 
 namespace {
 
-constexpr std::uint32_t kAbiVersion = 28;
+constexpr std::uint32_t kAbiVersion = 29;
 constexpr std::uint32_t kStructVersion = 1;
-constexpr char kBuildInfo[] = "cyclesrenderer-native/cycles-5.2;abi=28";
+constexpr char kBuildInfo[] = "cyclesrenderer-native/cycles-5.2;abi=29";
 
 static_assert(sizeof(CyclesBridgeCamera) == 80);
 static_assert(offsetof(CyclesBridgeCamera, frame_id) == 8);
@@ -36,7 +36,7 @@ static_assert(sizeof(CyclesBridgeFrame) == 40);
 static_assert(sizeof(CyclesBridgeFrameView) == 72);
 static_assert(offsetof(CyclesBridgeFrameView, generation) == 16);
 static_assert(offsetof(CyclesBridgeFrameView, pixels) == 48);
-static_assert(sizeof(CyclesBridgeRenderSettings) == 272);
+static_assert(sizeof(CyclesBridgeRenderSettings) == 280);
 static_assert(sizeof(CyclesBridgePassDescriptor) == 64);
 static_assert(sizeof(CyclesBridgeCapabilities) == 64);
 static_assert(sizeof(CyclesBridgeColorLutDescriptor) == 64);
@@ -285,7 +285,13 @@ bool valid_settings(const CyclesBridgeRenderSettings& settings) {
         && std::isfinite(settings.atmosphere_ozone_density)
         && settings.atmosphere_ozone_density >= 0.0F
         && settings.atmosphere_ozone_density <= 10.0F
-        && settings.atmosphere_reserved == 0U
+        && std::isfinite(settings.pbr_normal_strength)
+        && settings.pbr_normal_strength >= 0.0F
+        && settings.pbr_normal_strength <= 4.0F
+        && std::isfinite(settings.pbr_emission_scale)
+        && settings.pbr_emission_scale >= 0.0F
+        && settings.pbr_emission_scale <= 100.0F
+        && settings.pbr_reserved == 0U
         && settings.interactive_samples >= 1U && settings.interactive_samples <= 4096U
         && settings.still_samples >= 1U && settings.still_samples <= 4096U
         && settings.stationary_delay_millis <= 10000U

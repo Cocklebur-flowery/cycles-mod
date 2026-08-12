@@ -330,7 +330,9 @@ struct CyclesBridgeRenderSettings {
     float atmosphere_air_density;
     float atmosphere_aerosol_density;
     float atmosphere_ozone_density;
-    std::uint32_t atmosphere_reserved;
+    float pbr_normal_strength;
+    float pbr_emission_scale;
+    std::uint32_t pbr_reserved;
 };
 
 struct CyclesBridgePassDescriptor {

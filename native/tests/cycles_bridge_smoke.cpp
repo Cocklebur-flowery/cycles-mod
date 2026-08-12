@@ -260,6 +260,8 @@ CyclesBridgeRenderSettings default_settings() {
     settings.atmosphere_air_density = 1.0F;
     settings.atmosphere_aerosol_density = 1.0F;
     settings.atmosphere_ozone_density = 2.0F;
+    settings.pbr_normal_strength = 1.0F;
+    settings.pbr_emission_scale = 1.0F;
     settings.interactive_samples = 1;
     settings.still_samples = 1;
     settings.stationary_delay_millis = 150;
@@ -412,7 +414,7 @@ bool verify_progressive_sampling(
 int main(int argc, char** argv) {
     const bool require_optix = argc > 1 && std::strcmp(argv[1], "--require-optix") == 0;
     std::cerr << "[smoke] ABI check\n";
-    if (cycles_bridge_abi_version() != 28U) {
+    if (cycles_bridge_abi_version() != 29U) {
         std::cerr << "unexpected native ABI " << cycles_bridge_abi_version() << '\n';
         return 1;
     }

@@ -24,7 +24,7 @@ import static java.lang.foreign.ValueLayout.JAVA_INT;
 import static java.lang.foreign.ValueLayout.JAVA_LONG;
 
 public final class NativeBridge {
-    public static final int ABI_VERSION = 28;
+    public static final int ABI_VERSION = 29;
     public static final int PIXEL_FORMAT_RGBA16_FLOAT = 2;
     public static final int PIXEL_FORMAT_RGBA32_FLOAT = 3;
 
@@ -182,7 +182,9 @@ public final class NativeBridge {
             JAVA_FLOAT.withName("atmosphere_air_density"),
             JAVA_FLOAT.withName("atmosphere_aerosol_density"),
             JAVA_FLOAT.withName("atmosphere_ozone_density"),
-            JAVA_INT.withName("atmosphere_reserved"));
+            JAVA_FLOAT.withName("pbr_normal_strength"),
+            JAVA_FLOAT.withName("pbr_emission_scale"),
+            JAVA_INT.withName("pbr_reserved"));
     private static final MemoryLayout PASS_DESCRIPTOR_LAYOUT = MemoryLayout.structLayout(
             JAVA_INT.withName("struct_size"),
             JAVA_INT.withName("struct_version"),
@@ -405,7 +407,7 @@ public final class NativeBridge {
                 || SECTION_LAYOUT.byteSize() != 48L
                 || FRAME_LAYOUT.byteSize() != 40L
                 || FRAME_VIEW_LAYOUT.byteSize() != 72L
-                || SETTINGS_LAYOUT.byteSize() != 272L
+                || SETTINGS_LAYOUT.byteSize() != 280L
                 || PASS_DESCRIPTOR_LAYOUT.byteSize() != 64L
                 || CAPABILITIES_LAYOUT.byteSize() != 64L
                 || COLOR_LUT_DESCRIPTOR_LAYOUT.byteSize() != 64L
@@ -1262,6 +1264,8 @@ public final class NativeBridge {
             settingsSegment.set(JAVA_FLOAT, 256L, settings.atmosphereAirDensity());
             settingsSegment.set(JAVA_FLOAT, 260L, settings.atmosphereAerosolDensity());
             settingsSegment.set(JAVA_FLOAT, 264L, settings.atmosphereOzoneDensity());
+            settingsSegment.set(JAVA_FLOAT, 268L, settings.pbrNormalStrength());
+            settingsSegment.set(JAVA_FLOAT, 272L, settings.pbrEmissionScale());
             checkRendererStatus(
                     (int) applySettings.invokeExact(renderer, settingsSegment),
                     "settings update");

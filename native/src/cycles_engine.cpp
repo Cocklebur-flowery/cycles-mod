@@ -100,6 +100,8 @@ CyclesBridgeRenderSettings default_settings() {
     settings.atmosphere_air_density = 1.0F;
     settings.atmosphere_aerosol_density = 1.0F;
     settings.atmosphere_ozone_density = 2.0F;
+    settings.pbr_normal_strength = 1.0F;
+    settings.pbr_emission_scale = 1.0F;
     settings.interactive_samples = 1;
     settings.still_samples = 8;
     settings.stationary_delay_millis = 150;
@@ -158,6 +160,13 @@ bool same_atmosphere_settings(
         && first.atmosphere_air_density == second.atmosphere_air_density
         && first.atmosphere_aerosol_density == second.atmosphere_aerosol_density
         && first.atmosphere_ozone_density == second.atmosphere_ozone_density;
+}
+
+bool same_material_shader_settings(
+    const CyclesBridgeRenderSettings& first,
+    const CyclesBridgeRenderSettings& second) {
+    return first.pbr_normal_strength == second.pbr_normal_strength
+        && first.pbr_emission_scale == second.pbr_emission_scale;
 }
 
 const char* pass_name(std::uint32_t pass) {
@@ -1496,6 +1505,7 @@ ccl::Shader* create_material_shader(
     ccl::Scene* scene,
     const CyclesBridgeMaterial& material,
     const std::vector<ccl::ImageHandle>& images,
+    const CyclesBridgeRenderSettings& settings,
     std::size_t index) {
     auto graph = ccl::make_unique<ccl::ShaderGraph>();
     ccl::TextureCoordinateNode* coordinates =
@@ -1532,7 +1542,7 @@ ccl::Shader* create_material_shader(
         ccl::NormalMapNode* normal_map = graph->create_node<ccl::NormalMapNode>();
         normal_map->set_space(ccl::NODE_NORMAL_MAP_TANGENT);
         normal_map->set_convention(ccl::NODE_NORMAL_MAP_CONVENTION_DIRECTX);
-        normal_map->set_strength(1.0F);
+        normal_map->set_strength(settings.pbr_normal_strength);
         graph->connect(normal_texture->output("Color"), normal_map->input("Color"));
         graph->connect(normal_map->output("Normal"), principled->input("Normal"));
 
@@ -1564,8 +1574,13 @@ ccl::Shader* create_material_shader(
             f0_to_specular->output("Value"), principled->input("Specular IOR Level"));
 
         graph->connect(multiply->output("Vector"), principled->input("Emission Color"));
+        ccl::MathNode* emission_scale = graph->create_node<ccl::MathNode>();
+        emission_scale->set_math_type(ccl::NODE_MATH_MULTIPLY);
+        emission_scale->set_value2(settings.pbr_emission_scale);
         graph->connect(
-            material_texture->output("Alpha"), principled->input("Emission Strength"));
+            material_texture->output("Alpha"), emission_scale->input("Value1"));
+        graph->connect(
+            emission_scale->output("Value"), principled->input("Emission Strength"));
     } else if (material.emission_strength > 0.0F) {
         principled->set_emission_strength(material.emission_strength);
         graph->connect(multiply->output("Vector"), principled->input("Emission Color"));
@@ -1764,7 +1779,7 @@ void build_scene(
     for (std::size_t index = 0; index < resources.materials.size(); ++index) {
         const CyclesBridgeMaterial& material = resources.materials[index];
         runtime.shaders[index] = create_material_shader(
-            scene, material, images, index);
+            scene, material, images, settings, index);
     }
 
     for (const auto& entry : request.sections) {
@@ -2442,9 +2457,12 @@ class CyclesEngine::Impl final {
                             != requested_settings_.denoiser_use_gpu);
                 const bool atmosphere_changed = settings_revision_ > 0
                     && !same_atmosphere_settings(settings, requested_settings_);
+                const bool material_shader_changed = settings_revision_ > 0
+                    && !same_material_shader_settings(settings, requested_settings_);
                 if (settings.device_policy != requested_settings_.device_policy
                     || denoiser_topology_changed
-                    || atmosphere_changed) {
+                    || atmosphere_changed
+                    || material_shader_changed) {
                     reset_level = CYCLES_BRIDGE_RESET_SESSION;
                 } else if (settings.resolution_mode != requested_settings_.resolution_mode
                            || settings.render_width != requested_settings_.render_width
