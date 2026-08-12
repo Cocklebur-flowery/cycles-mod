@@ -1,12 +1,12 @@
 # Cycles Renderer Prototype
 
-这是一个面向 Minecraft 26.2 / NeoForge 26.2 的实验性客户端 MOD。Minecraft 本身使用 Vulkan 后端；MOD 将世界快照交给 Blender Cycles 渲染，并把 Cycles 输出的 RGBA 帧上传到 Minecraft 的 Vulkan 主渲染目标。
+这是一个面向 Minecraft 26.2 / NeoForge 26.2 的实验性客户端 MOD。Minecraft 本身使用 Vulkan 后端；MOD 将世界快照交给 Blender Cycles 渲染，并把 Cycles 输出的 RGBA 帧交给 Minecraft 的 Vulkan 主渲染目标。
 
 当前实现优先选择 OptiX，失败后依次回退到 CUDA 和 CPU。F8 用于启用或关闭实验渲染器，F9 打开 Cycles 设置页，F10 切换诊断叠加层；任何 native 错误都会关闭实验路径并恢复原版世界渲染。
 
 ## 当前阶段
 
-- Cycles 5.2 已通过 C ABI v15 接入 Java Foreign Function & Memory API；v12 在 RGBA16F DisplayDriver 后加入三槽帧环与显式 acquire/release 租约，v13 增加类型化 HDR Pass 缓存，v14 增加 Pass descriptor 与按需注册表，v15 增加降噪调度诊断，Minecraft 实时路径已直接上传租约中的 RGBA16F。
+- Cycles 5.2 已通过 C ABI v23 接入 Java Foreign Function & Memory API；默认路径保留 RGBA16F FrameStore/FFM 回退，实验性 P15 路径让 OptiX/CUDA 直接写入 Vulkan 外部 buffer，并以单缓冲 acquire/release 握手复制到 Minecraft RGBA16F 图像。
 - 近景不再扫描固定 `64 × 32 × 64` 方块盒，而是直接复制 Minecraft `SectionCompiler` 生成的 16³ Section 网格。
 - 活跃 Section 范围跟随游戏的“有效渲染距离”；水平判定复用原版区块距离规则，垂直范围复用原版渲染器的 Section 范围和世界高度边界。
 - 方块放置/破坏、光照更新、区块装卸和视距移动触发原版 Section 重编译后，会以稳定 Section ID 增量替换或移除 Native 几何。
@@ -20,10 +20,12 @@
 - Pass 查看器按需创建并显示 `Combined`、`Depth`、`Normal`、`Diffuse Color`、`Emission`、`Roughness` 和 `Sample Count`，不会同时把所有 Pass 复制到 Java/Vulkan。
 - Native 以 `(Pass ID, Raw/Denoised)` 缓存最近查看过的 RGBA16F Pass，默认 LRU 预算为 256 MiB；F10 显示条目、占用、命中、淘汰、注册表和活动 descriptor。Pass 只在首次访问时加入注册 mask；当前每次切换仍重建 Cycles Session，以规避 Cycles 5.2 DisplayDriver 原地切换停在 `0/1` sample 的问题。
 - 运行时能力查询会报告实际设备、可用 Pass 和降噪器。当前构建已在 RTX 5080 上分别验证 OptiX 与 OpenImageDenoise 2.5；移动/Settling 阶段输出 Raw，只有静止 Combined 才实际调度所选降噪器并写入 Denoised cache。
-- Java 每次只租用并上传 Native 的低分辨率 RGBA16F 新帧；Minecraft Vulkan 使用专用全屏 pipeline 在 GPU 上完成基础显示变换并最近邻放大到主渲染目标，不再在 CPU 上生成 4K RGBA 临时帧。
-- Minecraft 的 Vulkan swapchain、纹理和命令编码器仍由 Minecraft 管理；Cycles 不使用 Vulkan。
+- 默认情况下 Java 每次只租用并上传 Native 的低分辨率 RGBA16F 新帧；启用启动级互操作开关后，OptiX/CUDA 直接写 Vulkan 外部 buffer，Minecraft 在 GPU 内复制到显示纹理，不再发生每帧 GPU→CPU→GPU 像素搬运。
+- Minecraft 仍拥有 Vulkan swapchain、纹理和命令提交；Cycles 不是 Vulkan 渲染后端，只使用 Cycles 自带的 CUDA/Vulkan 显示互操作入口。
 
 当前 Native DisplayDriver、类型化 Pass cache 与 Minecraft 上传纹理均保持 scene-linear RGBA16F。`Standard` 和调试用 `Raw` 已生效，EV/Gamma 在 GPU 显示 shader 中应用；`AgX` 与 `Khronos PBR Neutral` 的配置 ID 已预留，但在 Blender OCIO 配置/LUT 正式部署前按 `Standard` 显示，不能视为 Blender 色彩管理已经完成。暂未实现正确的玻璃/水折射材质、方块实体、实体、天空系统、动态光源、LabPBR 和跨平台打包。
+
+P15 互操作默认关闭。启动前加入 JVM 参数 `-Dcyclesrenderer.experimentalVulkanInterop=true`，或设置环境变量 `CYCLESRENDERER_VULKAN_INTEROP=1`，重启后才会为 Minecraft Vulkan 设备请求 Win32 外部内存扩展。当前固定为 `480×270 RGBA16F` 单缓冲保守同步原型；1080p、动态分辨率、三槽并行和跨 API external semaphore 属于 P16。
 
 普通 Section 修改已经下沉到现有 Cycles Scene；但几何规模变化以及 Section 增删仍会让 Cycles 更新设备几何和加速结构，不能视为零成本局部 BVH 更新。共享图集、场景原点或设备变化仍会重建 Session。
 
@@ -94,7 +96,7 @@ run-client.cmd runClient
 
 `buildNative` 会构建 native DLL 和冒烟程序，并把 `.deps/cycles-install` 中的通用运行时 DLL、OIDN 主库/core/CPU/CUDA 插件与 `lib/kernel_*.zst` 自动部署到 `build/native/bin/`。不需要手工复制 JAR、DLL 或 GPU 内核；面向 NVIDIA 的构建不会部署 OIDN HIP/SYCL 插件。
 
-`runNativeSmoke` 会构造一个带 UV、彩色纹理与 Alpha Clip 的小型网格场景，验证 ABI v15 的 RGBA16F DisplayDriver、帧租约 acquire/release、独立相机更新、能力/诊断、实际/目标 sample、Interactive/Settling/Still、动态分辨率尺寸跃迁、全部 7 个 Pass descriptor/按需注册、Raw/Denoised Pass cache、OptiX 与 OIDN 各自的 Interactive Raw/Still Denoised 调度，以及 Section 创建、修改和删除，然后输出实际后端、设备、分辨率和帧校验和。
+`runNativeSmoke` 会构造一个带 UV、彩色纹理与 Alpha Clip 的小型网格场景，验证 ABI v23 的 RGBA16F DisplayDriver、CPU 帧租约、Vulkan interop 描述/所有权状态、独立相机更新、能力/诊断、实际/目标 sample、Interactive/Settling/Still、动态分辨率尺寸跃迁、全部 7 个 Pass descriptor/按需注册、Raw/Denoised Pass cache、OptiX 与 OIDN 各自的 Interactive Raw/Still Denoised 调度，以及 Section 创建、修改和删除，然后输出实际后端、设备、分辨率和帧校验和。真正的 CUDA/Vulkan 外部内存复制仍需在 Minecraft 中实机验收。
 
 `runClient` 只会为启动出的 Minecraft 进程把 `build/native/bin/` 加入 `PATH`，使 Windows 能找到 Cycles 的二级 DLL 依赖；它不会修改系统或用户环境变量。修改 native 运行时文件后必须重新启动客户端。
 
@@ -105,7 +107,7 @@ Minecraft SectionCompiler（16³ Section、流体、NeoForge 追加几何）
   -> SectionCompilerMixin 在 MeshData 关闭前复制 CPU 顶点
   -> SectionGeometryCollector（按 Section ID 合并最新重编译结果）
   -> SectionSceneManager（原版视距、装卸、资源代次、批量提交）
-  -> NativeBridge（ABI v15：Section 流送 + RGBA16F DisplayDriver + 三槽帧租约 + Pass cache/registry + 降噪调度）
+  -> NativeBridge（ABI v23：Section 流送 + RGBA16F DisplayDriver + CPU 帧租约/实验性 Vulkan interop + Pass cache/registry + 降噪调度）
   -> CyclesEngine 后台场景请求
   -> 现有 Cycles Session 内按 Section ID 新建、原地更新或删除 Mesh/Object
   -> 共享图集与 Opaque/Cutout/Blend 材质
@@ -146,7 +148,7 @@ DH Provider 代码仍隔离保留，但本阶段不再把其低模高度场合�
 
 ## ABI 与运行时约束
 
-ABI v15 保留旧的整场景入口、v5 Section 布局和 v6 设置/能力字段；`CyclesBridgeRenderSettings` 固定 208 字节、`CyclesBridgeCapabilities` 固定 64 字节、`CyclesBridgePassDescriptor` 固定 64 字节，`CyclesBridgeDiagnostics` 由 v14 的 304 字节追加为 328 字节。v7 报告实际采样；v8 追加帧管线统计；v9 追加场景更新时间；v10 新增 `update_camera`；v11 切换 scene-linear `half4`；v12 新增 `CyclesBridgeFrameView` 与 `acquire_frame/release_frame`；v13 追加 Raw/Denoised Pass cache；v14 追加只读 descriptor 查询和 Pass registry 遥测；v15 追加 selected/effective 降噪器、调度原因、有效起始 sample 和 run/skip 计数。租约持有期间对应槽位不会被 Cycles 覆写，Java `AcquiredFrame` 必须用 try-with-resources 在 `NativeBridge.close()` 前释放。Minecraft 实时路径直接把租约上传到 `GpuFormat.RGBA16_FLOAT`；旧 `render_frame` 的 RGBA8 转换仅保留给兼容调用和 smoke test。Java 与 DLL 的 ABI 版本不一致时会在启用前拒绝运行。
+ABI v23 保留旧的整场景入口、v5 Section 布局和 v6 设置/能力字段；`CyclesBridgeRenderSettings` 固定 232 字节、`CyclesBridgeCapabilities` 固定 64 字节、`CyclesBridgePassDescriptor` 固定 64 字节。v7-v15 依次加入实际采样、帧/场景遥测、异步相机、RGBA16F 帧租约、Pass cache/registry 与降噪调度；v16-v19 加入 OCIO、采样模式和物理相机；v20 加入 CUDA UUID，v21-v22 加入 Vulkan HANDLE 与 Cycles DisplayDriver interop，v23 加入 interop frame acquire/release。CPU 租约持有期间对应槽位不会被 Cycles 覆写；interop 帧在 Vulkan fence 完成前也不会被 CUDA 重写。Java 与 DLL 的 ABI 版本不一致时会在启用前拒绝运行。
 
 Cycles 的 GPU 内核通过 `path_init()` 相对于 `cyclesrenderer_native.dll` 查找。因此以下布局是运行时契约：
 

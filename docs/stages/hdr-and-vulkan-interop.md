@@ -168,6 +168,23 @@ P15c1 Cycles 图形互操作会话与 Native ABI v22：
 - `update_end` 发生在 Cycles film-convert CUDA stream 同步之后，因此 ABI 状态的 generation 只在共享 buffer 写入完成后推进；本提交只提供可轮询的 ready/generation/sync telemetry，不让 Minecraft 读取 buffer。
 - HANDLE 一旦进入会话，普通 unbind 会被拒绝；必须先销毁 Renderer 并等待 Cycles/CUDA import 释放，再销毁 Vulkan buffer/memory。这样为下一步 F8 安全关闭顺序提供硬约束。
 
+P15c2/c3 保守同步复制与 Native ABI v23：
+
+- ABI v23 为单个共享 buffer 增加 `ready -> acquired -> release` 所有权握手。Cycles 只在 buffer 既不 ready、也未被 Minecraft 获取时开始下一次显示写入；Java 只能获取比上次已显示 generation 更新的帧。
+- Minecraft 使用当前 `VulkanCommandEncoder` 记录 `vkCmdCopyBufferToImage`，把共享 RGBA16F buffer 复制进普通 `TextureTarget` 的 RGBA16F 图像；现有 OCIO/曝光显示 pipeline 直接采样该图像，不经过 FFM 像素视图或 `writeToTexture` 暂存上传。
+- 当前正确性边界是保守的主机握手：Cycles 在 `update_end` 前已经同步 CUDA film-convert stream；Minecraft 提交 Vulkan copy 并等待对应 fence 完成后，才通过 ABI release 允许 CUDA 重写。它不会并行读写同一个 buffer，但仍不是 P16 的外部 semaphore 正式实时方案。
+- F8 和游戏退出先排空未完成 Vulkan copy，再销毁 Renderer/CUDA external-memory import，最后销毁 `TextureTarget`、`VkBuffer` 与 `VkDeviceMemory`。任何 session-attached 状态下直接释放 Vulkan 内存的请求都会被拒绝。
+- F10 报告 Native interop `active/ready/acquired`、generation、实际 sample、CUDA 同步时间，以及 Vulkan copy pending/display generation、提交次数、generation gaps 与 CPU enqueue 时间。旧 `upload` 指标在 interop 活动时应停止增长；它仍用于验证 CPU FrameStore 回退。
+- P15 固定 `480×270 RGBA16F`，单缓冲握手会限制生产/消费重叠，因此只用于证明数据路径和生命周期正确。1080p、三槽重叠、动态分辨率与 external semaphore 留给 P16。
+
+P15 游戏内验收：
+
+1. **必须重新启动客户端**并在启动命令中加入 `-Dcyclesrenderer.experimentalVulkanInterop=true`，或启动前设置 `CYCLESRENDERER_VULKAN_INTEROP=1`；F9 不能热启用设备扩展。
+2. 进入世界后按 F8。F10 应显示 `allocated/bound=true/true`、`active=true`，随后 `copy count` 与 displayed generation 持续推进；画面仍经现有显示 shader 输出。
+3. 观察 CPU 回退指标：interop 活动后 Presenter `upload count/MiB` 不应继续增长，`interop vk copy count` 应增长。若 UUID、扩展或 CUDA import 不满足，原有 FrameStore/FFM 路径仍应出图。
+4. 再按 F8：允许为排空当前 Vulkan copy 发生一次短暂同步，但必须恢复原版、不卡死、不黑屏、不触发 device lost。重新按 F8 应能重新建立资源。
+5. 测试窗口缩放、移动相机、放置/破坏方块和 F9 Pass/降噪切换。P15 仍固定内部 480×270；这些操作不得破坏资源生命周期，但性能和最终分辨率不作为本阶段验收条件。
+
 ### P16：互操作环与正式同步
 
 - 建立至少三槽 external buffer 生命周期与 resize 规则。
