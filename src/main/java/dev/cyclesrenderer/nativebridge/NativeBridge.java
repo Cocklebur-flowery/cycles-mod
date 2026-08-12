@@ -24,7 +24,7 @@ import static java.lang.foreign.ValueLayout.JAVA_INT;
 import static java.lang.foreign.ValueLayout.JAVA_LONG;
 
 public final class NativeBridge {
-    public static final int ABI_VERSION = 27;
+    public static final int ABI_VERSION = 28;
     public static final int PIXEL_FORMAT_RGBA16_FLOAT = 2;
     public static final int PIXEL_FORMAT_RGBA32_FLOAT = 3;
 
@@ -383,16 +383,16 @@ public final class NativeBridge {
             JAVA_INT.withName("flags"),
             JAVA_FLOAT.withName("emission_strength"),
             JAVA_FLOAT.withName("alpha_cutoff"),
-            JAVA_INT.withName("reserved_0"),
-            JAVA_INT.withName("reserved_1"),
-            JAVA_INT.withName("reserved_2"),
-            JAVA_INT.withName("reserved_3"));
+            JAVA_INT.withName("normal_texture_index"),
+            JAVA_INT.withName("material_texture_index"),
+            JAVA_INT.withName("pbr_format"),
+            JAVA_INT.withName("reserved"));
     private static final MemoryLayout TEXTURE_LAYOUT = MemoryLayout.structLayout(
             JAVA_INT.withName("width"),
             JAVA_INT.withName("height"),
             JAVA_INT.withName("pixel_offset"),
             JAVA_INT.withName("pixel_size"),
-            JAVA_INT.withName("reserved_0"),
+            JAVA_INT.withName("role"),
             JAVA_INT.withName("reserved_1"),
             JAVA_INT.withName("reserved_2"),
             JAVA_INT.withName("reserved_3"));
@@ -1635,9 +1635,48 @@ public final class NativeBridge {
                 if (texture.rgbaPixels().length != expected) {
                     throw new IllegalArgumentException("texture byte length mismatch for " + texture.atlas());
                 }
+                if (texture.role() != SectionGeometrySnapshot.TEXTURE_ROLE_COLOR_SRGB
+                        && texture.role() != SectionGeometrySnapshot.TEXTURE_ROLE_DATA_LINEAR) {
+                    throw new IllegalArgumentException("unsupported texture role for " + texture.atlas());
+                }
                 total = Math.addExact(total, expected);
             }
+            for (SectionGeometrySnapshot.MaterialData material : resources.materials()) {
+                validateTextureIndex(resources, material.textureIndex(),
+                        SectionGeometrySnapshot.TEXTURE_ROLE_COLOR_SRGB, "base color");
+                if (material.pbrFormat() == SectionGeometrySnapshot.PBR_FORMAT_NONE) {
+                    if (material.normalTextureIndex()
+                                    != SectionGeometrySnapshot.TEXTURE_INDEX_INVALID
+                            || material.materialTextureIndex()
+                                    != SectionGeometrySnapshot.TEXTURE_INDEX_INVALID) {
+                        throw new IllegalArgumentException(
+                                "non-PBR material references PBR data textures");
+                    }
+                } else if (material.pbrFormat()
+                        == SectionGeometrySnapshot.PBR_FORMAT_LAB_1_3) {
+                    validateTextureIndex(resources, material.normalTextureIndex(),
+                            SectionGeometrySnapshot.TEXTURE_ROLE_DATA_LINEAR, "normal");
+                    validateTextureIndex(resources, material.materialTextureIndex(),
+                            SectionGeometrySnapshot.TEXTURE_ROLE_DATA_LINEAR, "material data");
+                } else {
+                    throw new IllegalArgumentException(
+                            "unsupported PBR format " + material.pbrFormat());
+                }
+            }
             return total;
+        }
+
+        private static void validateTextureIndex(
+                SectionGeometrySnapshot.SceneResources resources,
+                int index,
+                int expectedRole,
+                String usage) {
+            if (index < 0 || index >= resources.textures().length) {
+                throw new IllegalArgumentException(usage + " texture index is out of range");
+            }
+            if (resources.textures()[index].role() != expectedRole) {
+                throw new IllegalArgumentException(usage + " texture has the wrong role");
+            }
         }
 
         private static MemorySegment writeMaterials(
@@ -1653,6 +1692,9 @@ public final class NativeBridge {
                 output.set(JAVA_INT, base + 4L, material.flags());
                 output.set(JAVA_FLOAT, base + 8L, material.emissionStrength());
                 output.set(JAVA_FLOAT, base + 12L, material.alphaCutoff());
+                output.set(JAVA_INT, base + 16L, material.normalTextureIndex());
+                output.set(JAVA_INT, base + 20L, material.materialTextureIndex());
+                output.set(JAVA_INT, base + 24L, material.pbrFormat());
             }
             return output;
         }
@@ -1673,6 +1715,7 @@ public final class NativeBridge {
                 descriptors.set(JAVA_INT, base + 4L, texture.height());
                 descriptors.set(JAVA_INT, base + 8L, pixelOffset);
                 descriptors.set(JAVA_INT, base + 12L, texture.rgbaPixels().length);
+                descriptors.set(JAVA_INT, base + 16L, texture.role());
                 pixels.asSlice(pixelOffset, texture.rgbaPixels().length)
                         .asByteBuffer().put(texture.rgbaPixels());
                 pixelOffset += texture.rgbaPixels().length;

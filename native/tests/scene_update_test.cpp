@@ -214,11 +214,18 @@ bool run_scene_update_integration_test() {
         {0U, 2U, 3U, 0U},
     }};
     const std::array<CyclesBridgeMaterial, 1> materials = {{
-        {0U, 0U, 0.0F, 0.5F, {0U, 0U, 0U, 0U}},
+        {0U,
+         0U,
+         0.0F,
+         0.5F,
+         CYCLES_BRIDGE_TEXTURE_INDEX_INVALID,
+         CYCLES_BRIDGE_TEXTURE_INDEX_INVALID,
+         CYCLES_BRIDGE_PBR_NONE,
+         0U},
     }};
     const std::array<std::uint8_t, 4> texture_pixels = {{255U, 255U, 255U, 255U}};
     const std::array<CyclesBridgeTexture, 1> textures = {{
-        {1U, 1U, 0U, 4U, {0U, 0U, 0U, 0U}},
+        {1U, 1U, 0U, 4U, CYCLES_BRIDGE_TEXTURE_COLOR_SRGB, {0U, 0U, 0U}},
     }};
     CyclesBridgeSceneResources resources{};
     resources.struct_size = sizeof(resources);

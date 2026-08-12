@@ -18,9 +18,9 @@ struct CyclesBridgeRenderer {
 
 namespace {
 
-constexpr std::uint32_t kAbiVersion = 27;
+constexpr std::uint32_t kAbiVersion = 28;
 constexpr std::uint32_t kStructVersion = 1;
-constexpr char kBuildInfo[] = "cyclesrenderer-native/cycles-5.2;abi=27";
+constexpr char kBuildInfo[] = "cyclesrenderer-native/cycles-5.2;abi=28";
 
 static_assert(sizeof(CyclesBridgeCamera) == 80);
 static_assert(offsetof(CyclesBridgeCamera, frame_id) == 8);
@@ -61,7 +61,11 @@ static_assert(sizeof(CyclesBridgeVertex) == 40);
 static_assert(offsetof(CyclesBridgeVertex, packed_rgba) == 32);
 static_assert(sizeof(CyclesBridgeTriangle) == 16);
 static_assert(sizeof(CyclesBridgeMaterial) == 32);
+static_assert(offsetof(CyclesBridgeMaterial, normal_texture_index) == 16);
+static_assert(offsetof(CyclesBridgeMaterial, material_texture_index) == 20);
+static_assert(offsetof(CyclesBridgeMaterial, pbr_format) == 24);
 static_assert(sizeof(CyclesBridgeTexture) == 32);
+static_assert(offsetof(CyclesBridgeTexture, role) == 16);
 
 std::uint8_t to_byte(std::uint64_t value) {
     return static_cast<std::uint8_t>(value & 0xFFU);
@@ -118,13 +122,23 @@ bool valid_scene_data(
     }
     for (std::uint32_t index = 0; index < scene.material_count; ++index) {
         const CyclesBridgeMaterial& material = materials[index];
+        const bool no_pbr = material.pbr_format == CYCLES_BRIDGE_PBR_NONE;
+        const bool lab_pbr = material.pbr_format == CYCLES_BRIDGE_PBR_LAB_1_3;
         if (material.texture_index >= scene.texture_count
             || (material.flags
                 & ~(CYCLES_BRIDGE_MATERIAL_CUTOUT | CYCLES_BRIDGE_MATERIAL_BLEND)) != 0U
             || !std::isfinite(material.emission_strength)
             || !std::isfinite(material.alpha_cutoff)
             || material.emission_strength < 0.0F
-            || material.alpha_cutoff < 0.0F || material.alpha_cutoff > 1.0F) {
+            || material.alpha_cutoff < 0.0F || material.alpha_cutoff > 1.0F
+            || (!no_pbr && !lab_pbr)
+            || (no_pbr
+                && (material.normal_texture_index != CYCLES_BRIDGE_TEXTURE_INDEX_INVALID
+                    || material.material_texture_index != CYCLES_BRIDGE_TEXTURE_INDEX_INVALID))
+            || (lab_pbr
+                && (material.normal_texture_index >= scene.texture_count
+                    || material.material_texture_index >= scene.texture_count))
+            || material.reserved != 0U) {
             return false;
         }
     }
@@ -135,7 +149,22 @@ bool valid_scene_data(
         const std::uint64_t end =
             static_cast<std::uint64_t>(texture.pixel_offset) + texture.pixel_size;
         if (texture.width == 0 || texture.height == 0
-            || expected_size != texture.pixel_size || end > scene.texture_byte_count) {
+            || expected_size != texture.pixel_size || end > scene.texture_byte_count
+            || (texture.role != CYCLES_BRIDGE_TEXTURE_COLOR_SRGB
+                && texture.role != CYCLES_BRIDGE_TEXTURE_DATA_LINEAR)
+            || texture.reserved[0] != 0U || texture.reserved[1] != 0U
+            || texture.reserved[2] != 0U) {
+            return false;
+        }
+    }
+    for (std::uint32_t index = 0; index < scene.material_count; ++index) {
+        const CyclesBridgeMaterial& material = materials[index];
+        if (textures[material.texture_index].role != CYCLES_BRIDGE_TEXTURE_COLOR_SRGB
+            || (material.pbr_format == CYCLES_BRIDGE_PBR_LAB_1_3
+                && (textures[material.normal_texture_index].role
+                        != CYCLES_BRIDGE_TEXTURE_DATA_LINEAR
+                    || textures[material.material_texture_index].role
+                        != CYCLES_BRIDGE_TEXTURE_DATA_LINEAR))) {
             return false;
         }
     }

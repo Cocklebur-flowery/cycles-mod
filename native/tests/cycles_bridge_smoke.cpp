@@ -412,7 +412,7 @@ bool verify_progressive_sampling(
 int main(int argc, char** argv) {
     const bool require_optix = argc > 1 && std::strcmp(argv[1], "--require-optix") == 0;
     std::cerr << "[smoke] ABI check\n";
-    if (cycles_bridge_abi_version() != 27U) {
+    if (cycles_bridge_abi_version() != 28U) {
         std::cerr << "unexpected native ABI " << cycles_bridge_abi_version() << '\n';
         return 1;
     }
@@ -708,7 +708,14 @@ int main(int argc, char** argv) {
         {0U, 2U, 3U, 0U},
     }};
     const std::array<CyclesBridgeMaterial, 1> materials = {{
-        {0U, CYCLES_BRIDGE_MATERIAL_CUTOUT, 0.0F, 0.5F, {0U, 0U, 0U, 0U}},
+        {0U,
+         CYCLES_BRIDGE_MATERIAL_CUTOUT,
+         0.0F,
+         0.5F,
+         CYCLES_BRIDGE_TEXTURE_INDEX_INVALID,
+         CYCLES_BRIDGE_TEXTURE_INDEX_INVALID,
+         CYCLES_BRIDGE_PBR_NONE,
+         0U},
     }};
     const std::array<std::uint8_t, 16> texture_pixels = {{
         255U, 64U, 32U, 255U,
@@ -717,7 +724,12 @@ int main(int argc, char** argv) {
         255U, 255U, 32U, 0U,
     }};
     const std::array<CyclesBridgeTexture, 1> textures = {{
-        {2U, 2U, 0U, static_cast<std::uint32_t>(texture_pixels.size()), {0U, 0U, 0U, 0U}},
+        {2U,
+         2U,
+         0U,
+         static_cast<std::uint32_t>(texture_pixels.size()),
+         CYCLES_BRIDGE_TEXTURE_COLOR_SRGB,
+         {0U, 0U, 0U}},
     }};
     CyclesBridgeSceneResources resources{};
     resources.struct_size = sizeof(resources);
@@ -725,6 +737,30 @@ int main(int argc, char** argv) {
     resources.material_count = static_cast<std::uint32_t>(materials.size());
     resources.texture_count = static_cast<std::uint32_t>(textures.size());
     resources.texture_byte_count = static_cast<std::uint32_t>(texture_pixels.size());
+    auto invalid_materials = materials;
+    invalid_materials[0].pbr_format = CYCLES_BRIDGE_PBR_LAB_1_3;
+    if (cycles_bridge_reset_scene(
+            renderer,
+            &resources,
+            invalid_materials.data(),
+            textures.data(),
+            texture_pixels.data()) != CYCLES_BRIDGE_STATUS_INVALID_ARGUMENT) {
+        std::cerr << "LabPBR material with missing data texture indexes was accepted\n";
+        cycles_bridge_destroy_renderer(renderer);
+        return 1;
+    }
+    auto invalid_textures = textures;
+    invalid_textures[0].role = CYCLES_BRIDGE_TEXTURE_DATA_LINEAR;
+    if (cycles_bridge_reset_scene(
+            renderer,
+            &resources,
+            materials.data(),
+            invalid_textures.data(),
+            texture_pixels.data()) != CYCLES_BRIDGE_STATUS_INVALID_ARGUMENT) {
+        std::cerr << "base color texture with a linear-data role was accepted\n";
+        cycles_bridge_destroy_renderer(renderer);
+        return 1;
+    }
     CyclesBridgeSection section{};
     section.struct_size = sizeof(section);
     section.struct_version = 1;

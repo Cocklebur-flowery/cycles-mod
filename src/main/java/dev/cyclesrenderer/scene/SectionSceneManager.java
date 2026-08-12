@@ -491,26 +491,69 @@ public final class SectionSceneManager {
             }
         }
 
+        boolean hasPbrAtlases = pbrAtlases.width() == atlasWidth
+                && pbrAtlases.height() == atlasHeight;
+        int normalTextureIndex = hasPbrAtlases
+                ? 1
+                : SectionGeometrySnapshot.TEXTURE_INDEX_INVALID;
+        int materialTextureIndex = hasPbrAtlases
+                ? 2
+                : SectionGeometrySnapshot.TEXTURE_INDEX_INVALID;
+        int pbrFormat = hasPbrAtlases
+                ? SectionGeometrySnapshot.PBR_FORMAT_LAB_1_3
+                : SectionGeometrySnapshot.PBR_FORMAT_NONE;
         SectionGeometrySnapshot.MaterialData[] materials = {
-                new SectionGeometrySnapshot.MaterialData(0, 0, 0.0F, 0.0F),
+                new SectionGeometrySnapshot.MaterialData(
+                        0, 0, 0.0F, 0.0F,
+                        normalTextureIndex, materialTextureIndex, pbrFormat),
                 new SectionGeometrySnapshot.MaterialData(
                         0,
                         SectionGeometrySnapshot.MATERIAL_FLAG_CUTOUT,
                         0.0F,
-                        0.5F),
+                        0.5F,
+                        normalTextureIndex,
+                        materialTextureIndex,
+                        pbrFormat),
                 new SectionGeometrySnapshot.MaterialData(
                         0,
                         SectionGeometrySnapshot.MATERIAL_FLAG_BLEND,
                         0.0F,
-                        0.0F)
+                        0.0F,
+                        normalTextureIndex,
+                        materialTextureIndex,
+                        pbrFormat)
         };
-        SectionGeometrySnapshot.TextureData[] textures = {
-                new SectionGeometrySnapshot.TextureData(
-                        TextureAtlas.LOCATION_BLOCKS,
-                        atlasWidth,
-                        atlasHeight,
-                        pixels)
-        };
+        SectionGeometrySnapshot.TextureData[] textures = hasPbrAtlases
+                ? new SectionGeometrySnapshot.TextureData[] {
+                    new SectionGeometrySnapshot.TextureData(
+                            TextureAtlas.LOCATION_BLOCKS,
+                            atlasWidth,
+                            atlasHeight,
+                            pixels,
+                            SectionGeometrySnapshot.TEXTURE_ROLE_COLOR_SRGB),
+                    new SectionGeometrySnapshot.TextureData(
+                            Identifier.fromNamespaceAndPath(
+                                    "cyclesrenderer", "blocks_normal"),
+                            atlasWidth,
+                            atlasHeight,
+                            pbrAtlases.normalPixels(),
+                            SectionGeometrySnapshot.TEXTURE_ROLE_DATA_LINEAR),
+                    new SectionGeometrySnapshot.TextureData(
+                            Identifier.fromNamespaceAndPath(
+                                    "cyclesrenderer", "blocks_material"),
+                            atlasWidth,
+                            atlasHeight,
+                            pbrAtlases.materialPixels(),
+                            SectionGeometrySnapshot.TEXTURE_ROLE_DATA_LINEAR)
+                }
+                : new SectionGeometrySnapshot.TextureData[] {
+                    new SectionGeometrySnapshot.TextureData(
+                            TextureAtlas.LOCATION_BLOCKS,
+                            atlasWidth,
+                            atlasHeight,
+                            pixels,
+                            SectionGeometrySnapshot.TEXTURE_ROLE_COLOR_SRGB)
+                };
         return new SectionGeometrySnapshot.SceneResources(
                 originX, originY, originZ, materials, textures);
     }

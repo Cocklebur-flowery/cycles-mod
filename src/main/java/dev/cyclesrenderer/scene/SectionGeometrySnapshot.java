@@ -19,6 +19,11 @@ public record SectionGeometrySnapshot(
     public static final int MATERIAL_TRANSLUCENT = 2;
     public static final int MATERIAL_FLAG_CUTOUT = 1;
     public static final int MATERIAL_FLAG_BLEND = 2;
+    public static final int PBR_FORMAT_NONE = 0;
+    public static final int PBR_FORMAT_LAB_1_3 = 1;
+    public static final int TEXTURE_INDEX_INVALID = -1;
+    public static final int TEXTURE_ROLE_COLOR_SRGB = 0;
+    public static final int TEXTURE_ROLE_DATA_LINEAR = 1;
 
     public int vertexCount() {
         return vertexColors.length;
@@ -44,13 +49,17 @@ public record SectionGeometrySnapshot(
             int textureIndex,
             int flags,
             float emissionStrength,
-            float alphaCutoff) {
+            float alphaCutoff,
+            int normalTextureIndex,
+            int materialTextureIndex,
+            int pbrFormat) {
     }
 
     public record TextureData(
             Identifier atlas,
             int width,
             int height,
-            byte[] rgbaPixels) {
+            byte[] rgbaPixels,
+            int role) {
     }
 }

@@ -28,6 +28,20 @@ enum CyclesBridgeMaterialFlags : std::uint32_t {
     CYCLES_BRIDGE_MATERIAL_BLEND = 1U << 1U,
 };
 
+enum CyclesBridgePbrFormat : std::uint32_t {
+    CYCLES_BRIDGE_PBR_NONE = 0,
+    CYCLES_BRIDGE_PBR_LAB_1_3 = 1,
+};
+
+enum CyclesBridgeTextureRole : std::uint32_t {
+    CYCLES_BRIDGE_TEXTURE_COLOR_SRGB = 0,
+    CYCLES_BRIDGE_TEXTURE_DATA_LINEAR = 1,
+};
+
+enum CyclesBridgeTextureIndex : std::uint32_t {
+    CYCLES_BRIDGE_TEXTURE_INDEX_INVALID = 0xFFFFFFFFU,
+};
+
 enum CyclesBridgeFrameFlags : std::uint32_t {
     CYCLES_BRIDGE_FRAME_READY = 1U << 0U,
     CYCLES_BRIDGE_FRAME_UPDATED = 1U << 1U,
@@ -532,7 +546,10 @@ struct CyclesBridgeMaterial {
     std::uint32_t flags;
     float emission_strength;
     float alpha_cutoff;
-    std::uint32_t reserved[4];
+    std::uint32_t normal_texture_index;
+    std::uint32_t material_texture_index;
+    std::uint32_t pbr_format;
+    std::uint32_t reserved;
 };
 
 struct CyclesBridgeTexture {
@@ -540,7 +557,8 @@ struct CyclesBridgeTexture {
     std::uint32_t height;
     std::uint32_t pixel_offset;
     std::uint32_t pixel_size;
-    std::uint32_t reserved[4];
+    std::uint32_t role;
+    std::uint32_t reserved[3];
 };
 
 struct CyclesBridgeRenderer;

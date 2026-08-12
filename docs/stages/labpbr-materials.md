@@ -1,6 +1,6 @@
 # LabPBR 1.3 材质桥（PBR-0）
 
-状态：设计与验收基线已固定；PBR-1 至 PBR-6 待实现
+状态：PBR-0 至 PBR-3 已完成；PBR-4 至 PBR-6 待实现
 目标资源包：`run/resourcepacks/SPBR-21.zip`
 目标格式：ShaderLABS LabPBR 1.3
 
@@ -107,7 +107,7 @@ Normal 与 Material 图集不是对原始 `_n`/`_s` 文件的无损复制，而�
 
 ## 5. ABI 与稳定合约
 
-PBR-3 才允许修改 Java/FFM/C ABI。实施前必须重新检查优化线程是否仍修改以下路径：
+PBR-3 已在优化线程提交后修改 Java/FFM/C ABI。实施前检查并确认以下路径已无外部未提交改动：
 
 - `native/include/cycles_bridge.h`
 - `native/src/cycles_bridge.cpp`
@@ -117,13 +117,14 @@ PBR-3 才允许修改 Java/FFM/C ABI。实施前必须重新检查优化线程�
 
 存在未提交的外部改动时，不进入 PBR-3，也不暂存这些文件。
 
-计划保持 `CyclesBridgeMaterial` 与 `CyclesBridgeTexture` 的结构大小不变，优先定义现有保留槽位：
+ABI v28 保持 `CyclesBridgeMaterial` 与 `CyclesBridgeTexture` 的 32 字节结构大小不变，并定义了原有保留槽位：
 
-- Material 增加 normal/material texture index 和 PBR 格式/能力标志；
-- Texture 增加颜色或线性数据的角色标志；
-- 缺失索引使用明确的无效值；
-- ABI 版本只递增，不重排既有字段；
-- Native smoke 必须覆盖结构大小、偏移、无效索引、纹理角色和回退路径。
+- Material 增加 normal/material texture index 和 PBR 格式标志；
+- Texture 增加 `COLOR_SRGB` 或 `DATA_LINEAR` 角色；
+- 缺失索引使用 `UINT32_MAX`（Java 侧为 `-1`）；
+- ABI 从 v27 递增到 v28，未重排既有字段；
+- Java 和 C 两侧都拒绝越界索引、错误纹理角色、未知 PBR 格式及不一致的回退材质；
+- Native smoke 覆盖结构大小、偏移、无效索引和纹理角色错误路径。
 
 若当前代码证明保留槽位不足，必须先停止并重新确认结构扩展方案。
 
