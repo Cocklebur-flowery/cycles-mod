@@ -199,9 +199,13 @@ P15/P16 游戏内验收：
 
 ### P16：互操作环与正式同步（代码完成，等待游戏内验收）
 
+- P16 默认请求 `VK_KHR_external_memory_win32` 与 `VK_KHR_external_semaphore_win32`。Mixin 必须在 Minecraft 调用 `vkCreateDevice` 前把它们加入设备扩展集合；扩展不能在运行中补开，因此更新本 MOD 后必须完整退出并重启客户端。
+- 启动日志中的 `bootstrap ... injected=true` 只证明创建前请求成功。最终“已启用”状态以创建完成后的 LWJGL `VkDevice` capabilities 为准，不再从面向显示的 `DeviceInfo.underlyingExtensions()` 文本反向解析。
 - 已建立三槽 external buffer 生命周期、容量热重建和安全销毁顺序。
 - 已实现 CUDA/Vulkan 双 timeline semaphore 所有权与 GPU wait/signal，并保留无法启用 interop 时的 CPU FrameStore 回退。
 - 已通过 Java 编译、Native smoke、完整 Cycles Release 构建及四补丁干净重放；1080p、动态分辨率、Pass、OptiX/OIDN、F8 往返和长时间移动仍需游戏内人工验收。
+
+重启后 F10 的预期状态是 `interop available=true enabled=true`、外部缓冲 `allocated/bound=true/true`、`active=true`，并且 Vulkan copy 计数持续增长。若任一 capabilities 未启用，P16 会保持禁用并回退 CPU 上传链路，不会在不满足创建契约的 VkDevice 上强行分配共享资源。
 
 ### P17：HDR swapchain 原型
 

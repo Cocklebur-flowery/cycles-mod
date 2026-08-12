@@ -144,6 +144,7 @@ public final class VulkanCapabilityProbe {
             Set<String> enabledInstanceExtensions =
                     Set.copyOf(device.instance().getEnabledExtensions());
             Set<String> enabledDeviceExtensions = enabledDeviceExtensions();
+            var deviceCapabilities = device.vkDevice().getCapabilities();
             long surfaceHandle = ((VulkanGpuSurfaceAccessor) (Object) surface)
                     .cyclesrenderer$getSurface();
             List<SurfaceFormat> surfaceFormats = surfaceFormats(physicalDevice, surfaceHandle);
@@ -155,9 +156,11 @@ public final class VulkanCapabilityProbe {
                     state(SWAPCHAIN_COLORSPACE,
                             supportedInstanceExtensions, enabledInstanceExtensions),
                     state(EXTERNAL_MEMORY_WIN32,
-                            supportedDeviceExtensions, enabledDeviceExtensions),
+                            supportedDeviceExtensions,
+                            deviceCapabilities.VK_KHR_external_memory_win32),
                     state(EXTERNAL_SEMAPHORE_WIN32,
-                            supportedDeviceExtensions, enabledDeviceExtensions),
+                            supportedDeviceExtensions,
+                            deviceCapabilities.VK_KHR_external_semaphore_win32),
                     state(HDR_METADATA,
                             supportedDeviceExtensions, enabledDeviceExtensions),
                     List.copyOf(surfaceFormats),
@@ -294,6 +297,13 @@ public final class VulkanCapabilityProbe {
             Set<String> supported,
             Set<String> enabled) {
         return new ExtensionState(name, supported.contains(name), enabled.contains(name));
+    }
+
+    private static ExtensionState state(
+            String name,
+            Set<String> supported,
+            boolean enabled) {
+        return new ExtensionState(name, supported.contains(name), enabled);
     }
 
     private static void check(int result, String operation) {
