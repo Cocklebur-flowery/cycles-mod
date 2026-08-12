@@ -1583,11 +1583,20 @@ void configure_background(
     ccl::Scene* scene,
     const CyclesBridgeRenderSettings& settings) {
     auto graph = ccl::make_unique<ccl::ShaderGraph>();
+    ccl::TextureCoordinateNode* coordinates =
+        graph->create_node<ccl::TextureCoordinateNode>();
+    ccl::MappingNode* y_up_to_z_up = graph->create_node<ccl::MappingNode>();
+    y_up_to_z_up->set_mapping_type(ccl::NODE_MAPPING_TYPE_VECTOR);
+    // (x, y, z) -> (x, -z, y): Minecraft +Y becomes Cycles sky +Z.
+    y_up_to_z_up->set_rotation(ccl::make_float3(
+        90.0F * kDegreesToRadians, 0.0F, 0.0F));
     ccl::SkyTextureNode* sky = graph->create_node<ccl::SkyTextureNode>();
     apply_atmosphere_settings(sky, settings);
 
     ccl::BackgroundNode* background = graph->create_node<ccl::BackgroundNode>();
     background->set_strength(1.0F);
+    graph->connect(coordinates->output("Generated"), y_up_to_z_up->input("Vector"));
+    graph->connect(y_up_to_z_up->output("Vector"), sky->input("Vector"));
     graph->connect(sky->output("Color"), background->input("Color"));
     graph->connect(background->output("Background"), graph->output()->input("Surface"));
     scene->default_background->set_graph(std::move(graph));
