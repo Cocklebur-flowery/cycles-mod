@@ -1,0 +1,266 @@
+diff --git a/src/device/cuda/graphics_interop.cpp b/src/device/cuda/graphics_interop.cpp
+index b973d80..b327f4d 100644
+--- a/src/device/cuda/graphics_interop.cpp
++++ b/src/device/cuda/graphics_interop.cpp
+@@ -39,14 +39,25 @@ void CUDADeviceGraphicsInterop::set_buffer(GraphicsInteropBuffer &interop_buffer
+     return;
+   }
+ 
+-  need_zero_ |= interop_buffer.take_zero();
+-  buffer_offset_ = interop_buffer.get_offset();
+-  buffer_range_size_ = interop_buffer.get_range_size();
+-
+-  if (!interop_buffer.has_new_handle()) {
++  const bool need_zero = interop_buffer.take_zero();
++  const size_t buffer_offset = interop_buffer.get_offset();
++  const size_t buffer_range_size = interop_buffer.get_range_size();
++  const uint64_t timeline_signal_value = interop_buffer.get_timeline_signal_value();
++  const bool timeline_semaphore_requested = interop_buffer.has_timeline_semaphore();
++  if (!interop_buffer.has_new_handle() && !interop_buffer.has_new_timeline_semaphore()) {
++    need_zero_ |= need_zero;
++    buffer_offset_ = buffer_offset;
++    buffer_range_size_ = buffer_range_size;
++    timeline_signal_value_ = timeline_signal_value;
++    timeline_semaphore_requested_ = timeline_semaphore_requested;
+     return;
+   }
+   free();
++  need_zero_ = need_zero;
++  buffer_offset_ = buffer_offset;
++  buffer_range_size_ = buffer_range_size;
++  timeline_signal_value_ = timeline_signal_value;
++  timeline_semaphore_requested_ = timeline_semaphore_requested;
+ 
+   switch (interop_buffer.get_type()) {
+     case GraphicsInteropDevice::OPENGL: {
+@@ -108,6 +119,32 @@ void CUDADeviceGraphicsInterop::set_buffer(GraphicsInteropBuffer &interop_buffer
+       }
+ 
+       cu_external_memory_ptr_ = external_memory_device_ptr;
++
++      if (interop_buffer.has_new_timeline_semaphore()) {
++        CUDA_EXTERNAL_SEMAPHORE_HANDLE_DESC semaphore_desc = {};
++#  ifdef _WIN32
++        vulkan_semaphore_windows_handle_ = interop_buffer.take_timeline_semaphore();
++        semaphore_desc.type = CU_EXTERNAL_SEMAPHORE_HANDLE_TYPE_TIMELINE_SEMAPHORE_WIN32;
++        semaphore_desc.handle.win32.handle = reinterpret_cast<void *>(
++            vulkan_semaphore_windows_handle_);
++#  else
++        semaphore_desc.type = CU_EXTERNAL_SEMAPHORE_HANDLE_TYPE_TIMELINE_SEMAPHORE_FD;
++        semaphore_desc.handle.fd = interop_buffer.take_timeline_semaphore();
++#  endif
++        result = cuImportExternalSemaphore(&cu_external_semaphore_, &semaphore_desc);
++        if (result != CUDA_SUCCESS) {
++#  ifdef _WIN32
++          CloseHandle(HANDLE(vulkan_semaphore_windows_handle_));
++          vulkan_semaphore_windows_handle_ = 0;
++#  else
++          close(semaphore_desc.handle.fd);
++#  endif
++          LOG_ERROR << "Error importing Vulkan timeline semaphore: "
++                    << cuewErrorString(result);
++          break;
++        }
++        timeline_semaphore_valid_ = true;
++      }
+       break;
+     }
+     case GraphicsInteropDevice::METAL:
+@@ -118,6 +155,9 @@ void CUDADeviceGraphicsInterop::set_buffer(GraphicsInteropBuffer &interop_buffer
+ 
+ device_ptr CUDADeviceGraphicsInterop::map()
+ {
++  if (timeline_semaphore_requested_ && !timeline_semaphore_valid_) {
++    return 0;
++  }
+   CUdeviceptr cu_buffer = 0;
+ 
+   if (cu_graphics_resource_) {
+@@ -153,6 +193,14 @@ void CUDADeviceGraphicsInterop::unmap()
+     cuda_device_assert(device_,
+                        cuGraphicsUnmapResources(1, &cu_graphics_resource_, queue_->stream()));
+   }
++  if (cu_external_semaphore_ && timeline_signal_value_ != 0) {
++    CUDA_EXTERNAL_SEMAPHORE_SIGNAL_PARAMS signal_params = {};
++    signal_params.params.fence.value = timeline_signal_value_;
++    cuda_device_assert(
++        device_,
++        cuSignalExternalSemaphoresAsync(
++            &cu_external_semaphore_, &signal_params, 1, queue_->stream()));
++  }
+ }
+ 
+ void CUDADeviceGraphicsInterop::free()
+@@ -171,17 +219,28 @@ void CUDADeviceGraphicsInterop::free()
+     cuda_device_assert(device_, cuDestroyExternalMemory(cu_external_memory_));
+     cu_external_memory_ = nullptr;
+   }
++  if (cu_external_semaphore_) {
++    cuda_device_assert(device_, cuDestroyExternalSemaphore(cu_external_semaphore_));
++    cu_external_semaphore_ = nullptr;
++  }
+ 
+ #  ifdef _WIN32
+   if (vulkan_windows_handle_) {
+     CloseHandle(HANDLE(vulkan_windows_handle_));
+     vulkan_windows_handle_ = 0;
+   }
++  if (vulkan_semaphore_windows_handle_) {
++    CloseHandle(HANDLE(vulkan_semaphore_windows_handle_));
++    vulkan_semaphore_windows_handle_ = 0;
++  }
+ #  endif
+ 
+   buffer_size_ = 0;
+   buffer_offset_ = 0;
+   buffer_range_size_ = 0;
++  timeline_signal_value_ = 0;
++  timeline_semaphore_requested_ = false;
++  timeline_semaphore_valid_ = false;
+ 
+   need_zero_ = false;
+ }
+diff --git a/src/device/cuda/graphics_interop.h b/src/device/cuda/graphics_interop.h
+index 1ccdb76..acf8494 100644
+--- a/src/device/cuda/graphics_interop.h
++++ b/src/device/cuda/graphics_interop.h
+@@ -53,10 +53,15 @@ class CUDADeviceGraphicsInterop : public DeviceGraphicsInterop {
+   CUgraphicsResource cu_graphics_resource_ = nullptr;
+   CUexternalMemory cu_external_memory_ = nullptr;
+   CUdeviceptr cu_external_memory_ptr_ = 0;
++  CUexternalSemaphore cu_external_semaphore_ = nullptr;
++  uint64_t timeline_signal_value_ = 0;
++  bool timeline_semaphore_requested_ = false;
++  bool timeline_semaphore_valid_ = false;
+ 
+   /* Vulkan handle to free. */
+ #  ifdef _WIN32
+   int64_t vulkan_windows_handle_ = 0;
++  int64_t vulkan_semaphore_windows_handle_ = 0;
+ #  endif
+ 
+   void free();
+diff --git a/src/integrator/path_trace_work_gpu.cpp b/src/integrator/path_trace_work_gpu.cpp
+index f6ff06f..bb3ef45 100644
+--- a/src/integrator/path_trace_work_gpu.cpp
++++ b/src/integrator/path_trace_work_gpu.cpp
+@@ -1081,8 +1081,8 @@ bool PathTraceWorkGPU::copy_to_display_interop(PathTraceDisplay *display,
+ 
+   GraphicsInteropBuffer &interop_buffer = display->graphics_interop_get_buffer();
+   device_graphics_interop_->set_buffer(interop_buffer);
+-  const bool synchronize_vulkan =
+-      interop_buffer.get_type() == GraphicsInteropDevice::VULKAN;
++  const bool synchronize_vulkan = interop_buffer.get_type() == GraphicsInteropDevice::VULKAN &&
++                                  !interop_buffer.has_timeline_semaphore();
+ 
+   const device_ptr d_rgba_half = device_graphics_interop_->map();
+   if (!d_rgba_half) {
+@@ -1096,9 +1096,8 @@ bool PathTraceWorkGPU::copy_to_display_interop(PathTraceDisplay *display,
+ 
+   device_graphics_interop_->unmap();
+ 
+-  /* Vulkan external memory is not implicitly synchronized with the CUDA queue. Keep the host
+-   * display handshake correct until external semaphores can transfer ownership entirely on the
+-   * GPU. */
++  /* Vulkan external memory without a timeline semaphore is not implicitly synchronized with the
++   * CUDA queue. Keep the host fallback for embedders that only provide an external allocation. */
+   if (synchronize_vulkan && !queue_->synchronize()) {
+     return false;
+   }
+diff --git a/src/session/display_driver.cpp b/src/session/display_driver.cpp
+index 3827509..50c0d62 100644
+--- a/src/session/display_driver.cpp
++++ b/src/session/display_driver.cpp
+@@ -48,12 +48,22 @@ void GraphicsInteropBuffer::clear()
+     close(handle_);
+ #endif
+   }
++  if (timeline_semaphore_handle_ && own_timeline_semaphore_handle_) {
++#ifdef _WIN32
++    CloseHandle(HANDLE(timeline_semaphore_handle_));
++#else
++    close(timeline_semaphore_handle_);
++#endif
++  }
+ 
+   type_ = GraphicsInteropDevice::NONE;
+   handle_ = 0;
+   size_ = 0;
+   offset_ = 0;
+   range_size_ = 0;
++  timeline_semaphore_handle_ = 0;
++  own_timeline_semaphore_handle_ = false;
++  timeline_signal_value_ = 0;
+   need_zero_ = false;
+   own_handle_ = false;
+ }
+@@ -85,6 +95,40 @@ size_t GraphicsInteropBuffer::get_range_size() const
+   return range_size_;
+ }
+ 
++void GraphicsInteropBuffer::assign_timeline_semaphore(const int64_t handle)
++{
++  assert(handle != 0 && timeline_semaphore_handle_ == 0);
++  timeline_semaphore_handle_ = handle;
++  own_timeline_semaphore_handle_ = true;
++}
++
++void GraphicsInteropBuffer::set_timeline_signal_value(const uint64_t value)
++{
++  timeline_signal_value_ = value;
++}
++
++uint64_t GraphicsInteropBuffer::get_timeline_signal_value() const
++{
++  return timeline_signal_value_;
++}
++
++bool GraphicsInteropBuffer::has_timeline_semaphore() const
++{
++  return timeline_semaphore_handle_ != 0;
++}
++
++bool GraphicsInteropBuffer::has_new_timeline_semaphore() const
++{
++  return own_timeline_semaphore_handle_;
++}
++
++int64_t GraphicsInteropBuffer::take_timeline_semaphore()
++{
++  assert(own_timeline_semaphore_handle_);
++  own_timeline_semaphore_handle_ = false;
++  return timeline_semaphore_handle_;
++}
++
+ bool GraphicsInteropBuffer::has_new_handle() const
+ {
+   return own_handle_;
+diff --git a/src/session/display_driver.h b/src/session/display_driver.h
+index c3844a1..73371f5 100644
+--- a/src/session/display_driver.h
++++ b/src/session/display_driver.h
+@@ -65,6 +65,14 @@ class GraphicsInteropBuffer {
+   size_t get_offset() const;
+   /* Get byte size used for the current display update. */
+   size_t get_range_size() const;
++  /* Assign an exported Vulkan timeline semaphore handle. */
++  void assign_timeline_semaphore(int64_t handle);
++  /* Set/get the value signaled after the current display write. */
++  void set_timeline_signal_value(uint64_t value);
++  uint64_t get_timeline_signal_value() const;
++  bool has_timeline_semaphore() const;
++  bool has_new_timeline_semaphore() const;
++  int64_t take_timeline_semaphore();
+ 
+   /* Is there a new handle to take ownership of? */
+   bool has_new_handle() const;
+@@ -90,6 +98,9 @@ class GraphicsInteropBuffer {
+   size_t offset_ = 0;
+   /* Byte size of the current frame slot. */
+   size_t range_size_ = 0;
++  int64_t timeline_semaphore_handle_ = 0;
++  bool own_timeline_semaphore_handle_ = false;
++  uint64_t timeline_signal_value_ = 0;
+ 
+   /* Clear the entire buffer before doing partial write to it. */
+   bool need_zero_ = false;

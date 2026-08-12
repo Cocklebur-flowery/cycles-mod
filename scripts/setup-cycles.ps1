@@ -28,7 +28,8 @@ $colorManagementInstall = Join-Path $cyclesInstall 'color\ocio'
 $cyclesPatches = @(
     (Join-Path $projectRoot 'patches\cycles-v5.2-cuew-external-semaphore.patch'),
     (Join-Path $projectRoot 'patches\cycles-v5.2-vulkan-interop-sync.patch'),
-    (Join-Path $projectRoot 'patches\cycles-v5.2-vulkan-interop-range.patch')
+    (Join-Path $projectRoot 'patches\cycles-v5.2-vulkan-interop-range.patch'),
+    (Join-Path $projectRoot 'patches\cycles-v5.2-vulkan-interop-timeline.patch')
 )
 $requiredLibraryDirectories = @(
     'OpenImageIO',
