@@ -179,6 +179,7 @@ P15c2/c3 保守同步复制与 Native ABI v23：
 - P16c3 在 F9 应用设置时比较所需逻辑字节数与当前共享容量。容量内的分辨率变化只交给 Cycles reset；超出容量时按 `排空 Vulkan copy -> 关闭 Renderer/CUDA import -> 释放旧 Vulkan memory -> 重新 probe/apply/bind -> 重建场景` 的顺序热重建，避免越界、悬挂 HANDLE 或静默回退到大体积 CPU 上传。
 - P16d1 用项目补丁 `cycles-v5.2-vulkan-interop-range.patch` 扩展 Cycles `GraphicsInteropBuffer`：一次导入整块 Vulkan external memory，后续显示更新可选择其中的 byte offset/range。默认 offset 为零且 range 为整块分配，所以本提交不改变单槽路径；它为一块连续分配内的三槽环避免逐帧销毁和重新 `cuImportExternalMemory`。
 - P16d2 将 Native/Java 契约升级到 ABI v24。buffer descriptor 显式声明 `slot_count` 与 `slot_stride_bytes`；state 返回本帧 `slot_index`、ready 槽数和生产者因槽耗尽而等待的累计次数。Native 为每槽维护 `FREE/WRITING/READY/ACQUIRED`，优先交付最新 ready 帧并回收更旧的未获取帧。Java 本子阶段仍声明一个槽，因此现有运行路径保持兼容，三槽 Vulkan 分配在下一提交启用。
+- P16d3 把 Java/Vulkan 资源切换为一块连续的三槽分配。每槽大小等于配置的单帧 RGBA16F 容量；Native/Cycles 用 `slot_index × slot_stride_bytes` 选择 CUDA 写入范围，Vulkan copy 使用相同 offset 读取。F10 展示单槽/总分配 MiB、最新显示槽、ready 槽数与生产者等待次数。
 - F8 和游戏退出先排空未完成 Vulkan copy，再销毁 Renderer/CUDA external-memory import，最后销毁 `TextureTarget`、`VkBuffer` 与 `VkDeviceMemory`。任何 session-attached 状态下直接释放 Vulkan 内存的请求都会被拒绝。
 - F10 报告 Native interop `active/ready/acquired`、generation、实际 sample、CUDA 同步时间，以及 Vulkan copy pending/display generation、提交次数、generation gaps 与 CPU enqueue 时间。旧 `upload` 指标在 interop 活动时应停止增长；它仍用于验证 CPU FrameStore 回退。
 - P15 的固定 `480×270 RGBA16F` 限制已由 P16c2 移除；单缓冲握手仍会限制生产/消费重叠。三槽重叠与 external semaphore 留给后续 P16 子阶段。

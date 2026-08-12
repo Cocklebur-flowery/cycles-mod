@@ -548,7 +548,8 @@ public final class CyclesRendererMod {
                                 + "/" + interopBuffer.nativeBound()
                                 + " capacity=" + interopBuffer.capacityWidth()
                                 + "x" + interopBuffer.capacityHeight()
-                                + " logical/alloc MiB="
+                                + " slots=" + VulkanExternalBufferPrototype.SLOT_COUNT
+                                + " slot/alloc MiB="
                                 + oneDecimalMebibytes(interopBuffer.logicalBytes())
                                 + "/" + oneDecimalMebibytes(
                                         interopBuffer.allocationBytes()),
@@ -563,6 +564,9 @@ public final class CyclesRendererMod {
                                 + interopState.frameReady() + "/"
                                 + interopState.frameAcquired()
                                 + " gen=" + interopState.generation()
+                                + " slots=" + interopState.readySlotCount()
+                                + "/" + interopState.slotCount()
+                                + " waits=" + interopState.producerWaitCount()
                                 + " sample=" + interopState.sampleCount()
                                 + " sync us=" + interopState.lastSyncMicros()
                                 + "/" + interopState.emaSyncMicros()
@@ -575,6 +579,7 @@ public final class CyclesRendererMod {
                                 + "/" + interopCopy.displayedGeneration()
                                 + " size=" + interopCopy.displayedWidth()
                                 + "x" + interopCopy.displayedHeight()
+                                + " slot=" + interopCopy.displayedSlotIndex()
                                 + " count=" + interopCopy.copyCount()
                                 + " gaps=" + interopCopy.generationGaps()
                                 + " enqueue us=" + interopCopy.lastCopyMicros()

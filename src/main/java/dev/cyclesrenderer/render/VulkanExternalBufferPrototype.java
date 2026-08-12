@@ -43,6 +43,7 @@ import java.nio.LongBuffer;
 
 public final class VulkanExternalBufferPrototype implements AutoCloseable {
     public static final int BYTES_PER_PIXEL = 8;
+    public static final int SLOT_COUNT = 3;
 
     private static final int HANDLE_TYPE =
             VK11.VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_WIN32_BIT;
@@ -54,6 +55,7 @@ public final class VulkanExternalBufferPrototype implements AutoCloseable {
     private long buffer;
     private long memory;
     private long allocationBytes;
+    private int slotStrideBytes;
     private int capacityWidth;
     private int capacityHeight;
     private long logicalBytes;
@@ -63,9 +65,11 @@ public final class VulkanExternalBufferPrototype implements AutoCloseable {
     private long pendingGeneration;
     private int pendingWidth;
     private int pendingHeight;
+    private int pendingSlotIndex;
     private long displayedGeneration;
     private int displayedWidth;
     private int displayedHeight;
+    private int displayedSlotIndex;
     private long copyCount;
     private long generationGaps;
     private long lastCopyMicros;
@@ -82,6 +86,7 @@ public final class VulkanExternalBufferPrototype implements AutoCloseable {
         capacityWidth = capacity.width();
         capacityHeight = capacity.height();
         logicalBytes = capacity.logicalBytes();
+        slotStrideBytes = Math.toIntExact(logicalBytes);
 
         VulkanCapabilityProbe.InteropBootstrap bootstrap =
                 VulkanCapabilityProbe.interopBootstrap();
@@ -111,14 +116,17 @@ public final class VulkanExternalBufferPrototype implements AutoCloseable {
                         "active graphics backend is not Vulkan");
                 return;
             }
-            allocate(vulkanDevice, logicalBytes);
+            long ringBytes = Math.multiplyExact(logicalBytes, SLOT_COUNT);
+            allocate(vulkanDevice, ringBytes);
             long exportedHandle = exportMemoryHandle();
             NativeBridge.bindVulkanInteropBuffer(
                     capacityWidth,
                     capacityHeight,
                     allocationBytes,
                     exportedHandle,
-                    capabilities.physicalDeviceUuid());
+                    capabilities.physicalDeviceUuid(),
+                    SLOT_COUNT,
+                    slotStrideBytes);
             nativeBound = true;
             telemetry = new Telemetry(
                     true, true, true,
@@ -168,11 +176,12 @@ public final class VulkanExternalBufferPrototype implements AutoCloseable {
         pendingGeneration = state.generation();
         pendingWidth = state.width();
         pendingHeight = state.height();
+        pendingSlotIndex = state.slotIndex();
         try {
-            validateFrameDimensions(pendingWidth, pendingHeight);
+            validateFrame(pendingWidth, pendingHeight, pendingSlotIndex);
             ensureFrameTarget(pendingWidth, pendingHeight);
             long start = System.nanoTime();
-            encodeCopy(pendingWidth, pendingHeight);
+            encodeCopy(pendingWidth, pendingHeight, pendingSlotIndex);
             lastCopyMicros = nanosToMicros(System.nanoTime() - start);
             emaCopyMicros = emaCopyMicros == 0L
                     ? lastCopyMicros
@@ -183,6 +192,7 @@ public final class VulkanExternalBufferPrototype implements AutoCloseable {
             pendingGeneration = 0L;
             pendingWidth = 0;
             pendingHeight = 0;
+            pendingSlotIndex = 0;
             throw error;
         }
     }
@@ -215,6 +225,7 @@ public final class VulkanExternalBufferPrototype implements AutoCloseable {
                 generationGaps,
                 displayedWidth,
                 displayedHeight,
+                displayedSlotIndex,
                 lastCopyMicros,
                 emaCopyMicros,
                 maxCopyMicros);
@@ -225,7 +236,11 @@ public final class VulkanExternalBufferPrototype implements AutoCloseable {
         finishPendingCopy(true);
     }
 
-    private void validateFrameDimensions(int width, int height) {
+    private void validateFrame(int width, int height, int slotIndex) {
+        if (slotIndex < 0 || slotIndex >= SLOT_COUNT) {
+            throw new IllegalStateException(
+                    "native interop frame has invalid slot " + slotIndex);
+        }
         if (width <= 0 || height <= 0) {
             throw new IllegalStateException(
                     "native interop frame has invalid dimensions " + width + "x" + height);
@@ -262,7 +277,7 @@ public final class VulkanExternalBufferPrototype implements AutoCloseable {
         }
     }
 
-    private void encodeCopy(int width, int height) {
+    private void encodeCopy(int width, int height, int slotIndex) {
         if (vulkanDevice == null || frameTarget == null) {
             throw new IllegalStateException("Vulkan interop copy target is not initialized");
         }
@@ -282,7 +297,7 @@ public final class VulkanExternalBufferPrototype implements AutoCloseable {
                         VK13.VK_PIPELINE_STAGE_2_COPY_BIT,
                         VK13.VK_ACCESS_2_TRANSFER_READ_BIT);
                 VkBufferImageCopy.Buffer region = VkBufferImageCopy.calloc(1, stack);
-                region.bufferOffset(0L);
+                region.bufferOffset(Math.multiplyExact((long) slotIndex, slotStrideBytes));
                 region.bufferRowLength(width);
                 region.bufferImageHeight(height);
                 VkImageSubresourceLayers subresource = region.imageSubresource();
@@ -357,9 +372,11 @@ public final class VulkanExternalBufferPrototype implements AutoCloseable {
         displayedGeneration = pendingGeneration;
         displayedWidth = pendingWidth;
         displayedHeight = pendingHeight;
+        displayedSlotIndex = pendingSlotIndex;
         pendingGeneration = 0L;
         pendingWidth = 0;
         pendingHeight = 0;
+        pendingSlotIndex = 0;
         copyCount++;
     }
 
@@ -524,6 +541,7 @@ public final class VulkanExternalBufferPrototype implements AutoCloseable {
         displayedGeneration = 0L;
         displayedWidth = 0;
         displayedHeight = 0;
+        displayedSlotIndex = 0;
         pendingGeneration = 0L;
         pendingWidth = 0;
         pendingHeight = 0;
@@ -600,6 +618,7 @@ public final class VulkanExternalBufferPrototype implements AutoCloseable {
             long generationGaps,
             int displayedWidth,
             int displayedHeight,
+            int displayedSlotIndex,
             long lastCopyMicros,
             long emaCopyMicros,
             long maxCopyMicros) {}

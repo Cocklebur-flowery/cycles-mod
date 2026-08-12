@@ -529,11 +529,14 @@ public final class NativeBridge {
             int height,
             long allocationBytes,
             long memoryHandle,
-            String deviceUuid) {
+            String deviceUuid,
+            int slotCount,
+            int slotStrideBytes) {
         BridgeState state = requireState();
         try {
             state.bindVulkanInteropBuffer(
-                    width, height, allocationBytes, memoryHandle, deviceUuid);
+                    width, height, allocationBytes, memoryHandle, deviceUuid,
+                    slotCount, slotStrideBytes);
         } catch (Throwable error) {
             rethrowFatalError(error);
             throw new IllegalStateException(
@@ -973,11 +976,14 @@ public final class NativeBridge {
                 int height,
                 long allocationBytes,
                 long memoryHandle,
-                String deviceUuid) throws Throwable {
+                String deviceUuid,
+                int slotCount,
+                int slotStrideBytes) throws Throwable {
             boolean nativeCalled = false;
             try (Arena arena = Arena.ofConfined()) {
                 if (width <= 0 || height <= 0 || allocationBytes <= 0L
-                        || memoryHandle == 0L) {
+                        || memoryHandle == 0L || slotCount <= 0
+                        || slotStrideBytes <= 0) {
                     throw new IllegalArgumentException(
                             "invalid Vulkan interop buffer descriptor");
                 }
@@ -996,12 +1002,8 @@ public final class NativeBridge {
                 for (int index = 0; index < uuid.length; index++) {
                     descriptor.set(JAVA_BYTE, 40L + index, uuid[index]);
                 }
-                descriptor.set(JAVA_INT, 56L, 1);
-                descriptor.set(
-                        JAVA_INT, 60L,
-                        Math.toIntExact(Math.multiplyExact(
-                                Math.multiplyExact((long) width, height),
-                                8L)));
+                descriptor.set(JAVA_INT, 56L, slotCount);
+                descriptor.set(JAVA_INT, 60L, slotStrideBytes);
                 nativeCalled = true;
                 int status = (int) bindVulkanInteropBuffer.invokeExact(
                         renderer, descriptor);
