@@ -24,7 +24,7 @@ import static java.lang.foreign.ValueLayout.JAVA_INT;
 import static java.lang.foreign.ValueLayout.JAVA_LONG;
 
 public final class NativeBridge {
-    public static final int ABI_VERSION = 21;
+    public static final int ABI_VERSION = 22;
     public static final int PIXEL_FORMAT_RGBA16_FLOAT = 2;
     public static final int PIXEL_FORMAT_RGBA32_FLOAT = 3;
 
@@ -309,6 +309,21 @@ public final class NativeBridge {
                     MemoryLayout.sequenceLayout(16, JAVA_BYTE).withName("device_uuid"),
                     JAVA_INT.withName("reserved_0"),
                     JAVA_INT.withName("reserved_1"));
+    private static final MemoryLayout VULKAN_INTEROP_STATE_LAYOUT =
+            MemoryLayout.structLayout(
+                    JAVA_INT.withName("struct_size"),
+                    JAVA_INT.withName("struct_version"),
+                    JAVA_INT.withName("flags"),
+                    JAVA_INT.withName("width"),
+                    JAVA_INT.withName("height"),
+                    JAVA_INT.withName("sample_count"),
+                    JAVA_LONG.withName("generation"),
+                    JAVA_LONG.withName("completed_frame_count"),
+                    JAVA_INT.withName("last_sync_micros"),
+                    JAVA_INT.withName("ema_sync_micros"),
+                    JAVA_INT.withName("max_sync_micros"),
+                    JAVA_INT.withName("reserved_0"),
+                    JAVA_LONG.withName("reserved_1"));
     private static final MemoryLayout VERTEX_LAYOUT = MemoryLayout.structLayout(
             JAVA_FLOAT.withName("position_x"),
             JAVA_FLOAT.withName("position_y"),
@@ -358,6 +373,7 @@ public final class NativeBridge {
                 || COLOR_LUT_DESCRIPTOR_LAYOUT.byteSize() != 64L
                 || DIAGNOSTICS_LAYOUT.byteSize() != 400L
                 || VULKAN_INTEROP_BUFFER_LAYOUT.byteSize() != 64L
+                || VULKAN_INTEROP_STATE_LAYOUT.byteSize() != 64L
                 || VERTEX_LAYOUT.byteSize() != 40L
                 || TRIANGLE_LAYOUT.byteSize() != 16L
                 || MATERIAL_LAYOUT.byteSize() != 32L
@@ -527,6 +543,17 @@ public final class NativeBridge {
         invoke("native Vulkan interop unbind", BridgeState::unbindVulkanInteropBuffer);
     }
 
+    public static VulkanInteropState vulkanInteropState() {
+        BridgeState state = requireState();
+        try {
+            return state.vulkanInteropState();
+        } catch (Throwable error) {
+            rethrowFatalError(error);
+            throw new IllegalStateException(
+                    "native Vulkan interop state query failed: " + describe(error), error);
+        }
+    }
+
     public static PassDescriptor passDescriptor(int passId) {
         BridgeState state = requireState();
         try {
@@ -622,6 +649,7 @@ public final class NativeBridge {
         private final MethodHandle queryDiagnostics;
         private final MethodHandle bindVulkanInteropBuffer;
         private final MethodHandle unbindVulkanInteropBuffer;
+        private final MethodHandle queryVulkanInteropState;
         private final MethodHandle closeWin32Handle;
         private final MethodHandle resetScene;
         private final MethodHandle upsertSection;
@@ -639,6 +667,7 @@ public final class NativeBridge {
         private final MemorySegment passDescriptorSegment;
         private final MemorySegment capabilitiesSegment;
         private final MemorySegment diagnosticsSegment;
+        private final MemorySegment vulkanInteropStateSegment;
         private final MemorySegment framePixelsSegment;
         private final ByteBuffer framePixels;
         private final String buildInfo;
@@ -660,6 +689,7 @@ public final class NativeBridge {
                 MethodHandle queryDiagnostics,
                 MethodHandle bindVulkanInteropBuffer,
                 MethodHandle unbindVulkanInteropBuffer,
+                MethodHandle queryVulkanInteropState,
                 MethodHandle closeWin32Handle,
                 MethodHandle resetScene,
                 MethodHandle upsertSection,
@@ -683,6 +713,7 @@ public final class NativeBridge {
             this.queryDiagnostics = queryDiagnostics;
             this.bindVulkanInteropBuffer = bindVulkanInteropBuffer;
             this.unbindVulkanInteropBuffer = unbindVulkanInteropBuffer;
+            this.queryVulkanInteropState = queryVulkanInteropState;
             this.closeWin32Handle = closeWin32Handle;
             this.resetScene = resetScene;
             this.upsertSection = upsertSection;
@@ -700,6 +731,8 @@ public final class NativeBridge {
             this.passDescriptorSegment = libraryArena.allocate(PASS_DESCRIPTOR_LAYOUT);
             this.capabilitiesSegment = libraryArena.allocate(CAPABILITIES_LAYOUT);
             this.diagnosticsSegment = libraryArena.allocate(DIAGNOSTICS_LAYOUT);
+            this.vulkanInteropStateSegment = libraryArena.allocate(
+                    VULKAN_INTEROP_STATE_LAYOUT);
             this.framePixelsSegment = libraryArena.allocate(MAX_NATIVE_FRAME_BYTES, 16);
             this.framePixels = framePixelsSegment.asByteBuffer();
             this.buildInfo = buildInfo;
@@ -758,6 +791,11 @@ public final class NativeBridge {
                         symbols,
                         "cycles_bridge_unbind_vulkan_interop_buffer",
                         FunctionDescriptor.of(JAVA_INT, ADDRESS));
+                MethodHandle queryVulkanInteropState = downcall(
+                        linker,
+                        symbols,
+                        "cycles_bridge_query_vulkan_interop_state",
+                        FunctionDescriptor.of(JAVA_INT, ADDRESS, ADDRESS));
                 MethodHandle closeWin32Handle = downcall(
                         linker,
                         symbols,
@@ -828,6 +866,7 @@ public final class NativeBridge {
                         queryDiagnostics,
                         bindVulkanInteropBuffer,
                         unbindVulkanInteropBuffer,
+                        queryVulkanInteropState,
                         closeWin32Handle,
                         resetScene,
                         upsertSection,
@@ -927,6 +966,28 @@ public final class NativeBridge {
             checkRendererStatus(
                     (int) unbindVulkanInteropBuffer.invokeExact(renderer),
                     "Vulkan interop buffer unbind");
+        }
+
+        private VulkanInteropState vulkanInteropState() throws Throwable {
+            vulkanInteropStateSegment.fill((byte) 0);
+            vulkanInteropStateSegment.set(
+                    JAVA_INT, 0L,
+                    Math.toIntExact(VULKAN_INTEROP_STATE_LAYOUT.byteSize()));
+            vulkanInteropStateSegment.set(JAVA_INT, 4L, STRUCT_VERSION);
+            checkRendererStatus(
+                    (int) queryVulkanInteropState.invokeExact(
+                            renderer, vulkanInteropStateSegment),
+                    "Vulkan interop state query");
+            return new VulkanInteropState(
+                    vulkanInteropStateSegment.get(JAVA_INT, 8L),
+                    vulkanInteropStateSegment.get(JAVA_INT, 12L),
+                    vulkanInteropStateSegment.get(JAVA_INT, 16L),
+                    vulkanInteropStateSegment.get(JAVA_INT, 20L),
+                    vulkanInteropStateSegment.get(JAVA_LONG, 24L),
+                    vulkanInteropStateSegment.get(JAVA_LONG, 32L),
+                    vulkanInteropStateSegment.get(JAVA_INT, 40L),
+                    vulkanInteropStateSegment.get(JAVA_INT, 44L),
+                    vulkanInteropStateSegment.get(JAVA_INT, 48L));
         }
 
         private static byte[] parseDeviceUuid(String value) {
@@ -1747,6 +1808,37 @@ public final class NativeBridge {
             return pixelFormat == PIXEL_FORMAT_RGBA16_FLOAT
                     ? "RGBA16_FLOAT"
                     : "unknown";
+        }
+    }
+
+    public record VulkanInteropState(
+            int flags,
+            int width,
+            int height,
+            int sampleCount,
+            long generation,
+            long completedFrameCount,
+            int lastSyncMicros,
+            int emaSyncMicros,
+            int maxSyncMicros) {
+        public boolean bound() {
+            return (flags & 1) != 0;
+        }
+
+        public boolean active() {
+            return (flags & 2) != 0;
+        }
+
+        public boolean frameReady() {
+            return (flags & 4) != 0;
+        }
+
+        public boolean failed() {
+            return (flags & 8) != 0;
+        }
+
+        public boolean sessionAttached() {
+            return (flags & 16) != 0;
         }
     }
 

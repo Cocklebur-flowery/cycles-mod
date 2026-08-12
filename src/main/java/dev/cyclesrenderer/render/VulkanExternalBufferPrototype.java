@@ -245,6 +245,11 @@ public final class VulkanExternalBufferPrototype implements AutoCloseable {
         }
         try {
             if (nativeBound && NativeBridge.isReady()) {
+                NativeBridge.VulkanInteropState state = NativeBridge.vulkanInteropState();
+                if (state.sessionAttached()) {
+                    throw new IllegalStateException(
+                            "native renderer must close before Vulkan interop memory");
+                }
                 NativeBridge.unbindVulkanInteropBuffer();
             }
         } finally {

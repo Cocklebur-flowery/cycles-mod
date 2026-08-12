@@ -616,6 +616,15 @@ class FrameStore final {
         mutex_.unlock();
     }
 
+    void display_update_cancel() {
+        if (!display_update_active_) {
+            return;
+        }
+        writing_slot_ = -1;
+        display_update_active_ = false;
+        mutex_.unlock();
+    }
+
     void zero_display() {
         std::lock_guard lock(mutex_);
         zero_next_display_ = true;
@@ -1062,6 +1071,153 @@ class FrameDisplayDriver final : public ccl::DisplayDriver {
 
  private:
     FrameStore& frames_;
+};
+
+struct VulkanInteropSnapshot {
+    HANDLE memory_handle = nullptr;
+    CyclesBridgeVulkanInteropBuffer descriptor{};
+
+    VulkanInteropSnapshot() = default;
+    ~VulkanInteropSnapshot() {
+        if (memory_handle != nullptr) {
+            CloseHandle(memory_handle);
+        }
+    }
+    VulkanInteropSnapshot(const VulkanInteropSnapshot&) = delete;
+    VulkanInteropSnapshot& operator=(const VulkanInteropSnapshot&) = delete;
+    VulkanInteropSnapshot(VulkanInteropSnapshot&& other) noexcept
+        : memory_handle(std::exchange(other.memory_handle, nullptr)),
+          descriptor(other.descriptor) {}
+    VulkanInteropSnapshot& operator=(VulkanInteropSnapshot&& other) noexcept {
+        if (this != &other) {
+            if (memory_handle != nullptr) {
+                CloseHandle(memory_handle);
+            }
+            memory_handle = std::exchange(other.memory_handle, nullptr);
+            descriptor = other.descriptor;
+        }
+        return *this;
+    }
+};
+
+class VulkanInteropDisplayDriver final : public ccl::DisplayDriver {
+ public:
+    VulkanInteropDisplayDriver(
+        VulkanInteropSnapshot&& snapshot,
+        FrameStore& frames,
+        CyclesBridgeVulkanInteropState& state,
+        std::mutex& state_mutex,
+        std::uint64_t& configured_camera_revision,
+        std::uint64_t& produced_camera_revision)
+        : snapshot_(std::move(snapshot)),
+          frames_(frames),
+          state_(state),
+          state_mutex_(state_mutex),
+          configured_camera_revision_(configured_camera_revision),
+          produced_camera_revision_(produced_camera_revision) {}
+
+    ~VulkanInteropDisplayDriver() override {
+        std::lock_guard lock(state_mutex_);
+        state_.flags &= ~(CYCLES_BRIDGE_VULKAN_INTEROP_BOUND
+                          | CYCLES_BRIDGE_VULKAN_INTEROP_ACTIVE
+                          | CYCLES_BRIDGE_VULKAN_INTEROP_SESSION_ATTACHED);
+    }
+
+    void next_tile_begin() override {}
+
+    bool update_begin(
+        const Params& params,
+        int texture_width,
+        int texture_height) override {
+        if (params.full_size.x <= 0 || params.full_size.y <= 0
+            || texture_width <= 0 || texture_height <= 0) {
+            return false;
+        }
+        if (!frames_.display_update_begin(params, texture_width, texture_height)) {
+            return false;
+        }
+        compatible_ = static_cast<std::uint32_t>(params.full_size.x)
+                == snapshot_.descriptor.width
+            && static_cast<std::uint32_t>(params.full_size.y)
+                == snapshot_.descriptor.height;
+        used_interop_ = false;
+        update_started_ = std::chrono::steady_clock::now();
+        return true;
+    }
+
+    void update_end() override {
+        if (!used_interop_) {
+            frames_.display_update_end();
+            return;
+        }
+        frames_.display_update_cancel();
+        const std::uint32_t elapsed = elapsed_micros(
+            update_started_, std::chrono::steady_clock::now());
+        std::lock_guard lock(state_mutex_);
+        state_.flags |= CYCLES_BRIDGE_VULKAN_INTEROP_ACTIVE;
+        state_.flags |= CYCLES_BRIDGE_VULKAN_INTEROP_FRAME_READY;
+        state_.generation++;
+        state_.completed_frame_count++;
+        state_.width = snapshot_.descriptor.width;
+        state_.height = snapshot_.descriptor.height;
+        state_.last_sync_micros = elapsed;
+        state_.ema_sync_micros = update_ema(state_.ema_sync_micros, elapsed);
+        state_.max_sync_micros = std::max(state_.max_sync_micros, elapsed);
+        produced_camera_revision_ = configured_camera_revision_;
+    }
+
+    ccl::half4* map_texture_buffer() override {
+        used_interop_ = false;
+        return frames_.display_buffer();
+    }
+
+    void unmap_texture_buffer() override {}
+
+    ccl::GraphicsInteropDevice graphics_interop_get_device() override {
+        ccl::GraphicsInteropDevice device;
+        if (!compatible_) {
+            return device;
+        }
+        device.type = ccl::GraphicsInteropDevice::VULKAN;
+        device.uuid.assign(
+            std::begin(snapshot_.descriptor.device_uuid),
+            std::end(snapshot_.descriptor.device_uuid));
+        return device;
+    }
+
+    void graphics_interop_update_buffer() override {
+        if (snapshot_.memory_handle == nullptr
+            || !graphics_interop_buffer_.is_empty()) {
+            used_interop_ = !graphics_interop_buffer_.is_empty();
+            return;
+        }
+        const auto handle = static_cast<std::int64_t>(
+            reinterpret_cast<std::intptr_t>(snapshot_.memory_handle));
+        graphics_interop_buffer_.assign(
+            ccl::GraphicsInteropDevice::VULKAN,
+            handle,
+            static_cast<std::size_t>(snapshot_.descriptor.allocation_byte_count));
+        snapshot_.memory_handle = nullptr;
+        used_interop_ = true;
+    }
+
+    void zero() override {
+        graphics_interop_buffer_.zero();
+        frames_.zero_display();
+    }
+
+    void draw(const Params&) override {}
+
+ private:
+    VulkanInteropSnapshot snapshot_;
+    FrameStore& frames_;
+    CyclesBridgeVulkanInteropState& state_;
+    std::mutex& state_mutex_;
+    std::uint64_t& configured_camera_revision_;
+    std::uint64_t& produced_camera_revision_;
+    std::chrono::steady_clock::time_point update_started_{};
+    bool compatible_ = false;
+    bool used_interop_ = false;
 };
 
 class MemoryImageLoader final : public ccl::ImageLoader {
@@ -1603,7 +1759,8 @@ class CyclesEngine::Impl final {
         if (worker_.joinable()) {
             worker_.join();
         }
-        unbind_vulkan_interop_buffer();
+        std::string ignored;
+        unbind_vulkan_interop_buffer(ignored);
     }
 
     bool bind_vulkan_interop_buffer(
@@ -1625,6 +1782,11 @@ class CyclesEngine::Impl final {
             }
         }
         std::lock_guard lock(interop_mutex_);
+        if (interop_memory_handle_ != nullptr
+            || (interop_state_.flags & CYCLES_BRIDGE_VULKAN_INTEROP_ACTIVE) != 0U) {
+            error = "Vulkan interop buffer is already bound";
+            return false;
+        }
         if (interop_memory_handle_ != nullptr) {
             CloseHandle(interop_memory_handle_);
         }
@@ -1632,16 +1794,40 @@ class CyclesEngine::Impl final {
             static_cast<std::uintptr_t>(memory_handle));
         interop_descriptor_ = descriptor;
         interop_descriptor_.memory_handle = 0U;
+        interop_state_ = {};
+        interop_state_.struct_size = sizeof(interop_state_);
+        interop_state_.struct_version = 1U;
+        interop_state_.flags = CYCLES_BRIDGE_VULKAN_INTEROP_BOUND;
+        interop_state_.width = descriptor.width;
+        interop_state_.height = descriptor.height;
         return true;
     }
 
-    void unbind_vulkan_interop_buffer() {
+    bool unbind_vulkan_interop_buffer(std::string& error) {
         std::lock_guard lock(interop_mutex_);
+        if ((interop_state_.flags
+             & (CYCLES_BRIDGE_VULKAN_INTEROP_ACTIVE
+                | CYCLES_BRIDGE_VULKAN_INTEROP_SESSION_ATTACHED)) != 0U) {
+            error = "Vulkan interop is active; destroy the renderer before releasing Vulkan memory";
+            return false;
+        }
         if (interop_memory_handle_ != nullptr) {
             CloseHandle(interop_memory_handle_);
             interop_memory_handle_ = nullptr;
         }
         interop_descriptor_ = {};
+        interop_state_ = {};
+        return true;
+    }
+
+    void query_vulkan_interop_state(
+        CyclesBridgeVulkanInteropState& state) const {
+        std::lock_guard lock(interop_mutex_);
+        const std::uint32_t struct_size = state.struct_size;
+        const std::uint32_t struct_version = state.struct_version;
+        state = interop_state_;
+        state.struct_size = struct_size;
+        state.struct_version = struct_version;
     }
 
     bool upload(
@@ -1883,6 +2069,9 @@ class CyclesEngine::Impl final {
                             requested_camera_->camera.viewport_height,
                             requested_settings_,
                             CYCLES_BRIDGE_SAMPLING_INTERACTIVE);
+                    apply_vulkan_interop_dimensions(
+                        requested_camera_->render_width,
+                        requested_camera_->render_height);
                     requested_camera_->sample_count =
                         static_cast<int>(requested_settings_.interactive_samples);
                     requested_camera_->sampling_state =
@@ -2159,6 +2348,8 @@ class CyclesEngine::Impl final {
                 camera.viewport_height,
                 requested_settings_,
                 current_sampling_state);
+            apply_vulkan_interop_dimensions(
+                request.render_width, request.render_height);
             if (!requested_camera_
                 || !same_camera(
                     *requested_camera_,
@@ -2171,6 +2362,8 @@ class CyclesEngine::Impl final {
                     camera.viewport_height,
                     requested_settings_,
                     CYCLES_BRIDGE_SAMPLING_INTERACTIVE);
+                apply_vulkan_interop_dimensions(
+                    request.render_width, request.render_height);
                 request.sample_count =
                     static_cast<int>(requested_settings_.interactive_samples);
                 request.sampling_state = CYCLES_BRIDGE_SAMPLING_INTERACTIVE;
@@ -2196,6 +2389,8 @@ class CyclesEngine::Impl final {
                         camera.viewport_height,
                         requested_settings_,
                         CYCLES_BRIDGE_SAMPLING_STILL);
+                    apply_vulkan_interop_dimensions(
+                        request.render_width, request.render_height);
                     request.sample_count = static_cast<int>(requested_settings_.still_samples);
                     request.sampling_state = CYCLES_BRIDGE_SAMPLING_STILL;
                     request.preserve_pass_cache = true;
@@ -2243,6 +2438,18 @@ class CyclesEngine::Impl final {
         }
     }
 
+    void apply_vulkan_interop_dimensions(
+        std::uint32_t& width,
+        std::uint32_t& height) const {
+        std::lock_guard lock(interop_mutex_);
+        if ((interop_state_.flags
+             & (CYCLES_BRIDGE_VULKAN_INTEROP_BOUND
+                | CYCLES_BRIDGE_VULKAN_INTEROP_SESSION_ATTACHED)) != 0U) {
+            width = interop_descriptor_.width;
+            height = interop_descriptor_.height;
+        }
+    }
+
     void set_state(std::string state, std::string terminal_error) {
         std::lock_guard lock(state_mutex_);
         state_code_ = state == "failed" ? 7U
@@ -2279,11 +2486,13 @@ class CyclesEngine::Impl final {
         terminal_error_ = std::move(terminal_error);
     }
 
-    ccl::SessionParams make_session_params(const ccl::DeviceInfo& device) const {
+    ccl::SessionParams make_session_params(
+        const ccl::DeviceInfo& device,
+        bool use_graphics_interop) const {
         ccl::SessionParams params;
         params.device = device;
         params.denoise_device = device;
-        params.headless = true;
+        params.headless = !use_graphics_interop;
         params.background = false;
         params.samples = 1;
         params.use_auto_tile = false;
@@ -2298,11 +2507,43 @@ class CyclesEngine::Impl final {
         std::uint64_t registered_pass_mask,
         ccl::SessionParams& session_params,
         SceneRuntime& runtime) {
-        session_params = make_session_params(device);
+        VulkanInteropSnapshot interop_snapshot;
+        {
+            std::lock_guard lock(interop_mutex_);
+            const auto device_uuid = query_cuda_device_uuid(device);
+            const bool compatible_device = device_uuid.has_value()
+                && std::memcmp(
+                    interop_descriptor_.device_uuid,
+                    device_uuid->data(),
+                    device_uuid->size()) == 0;
+            if (interop_memory_handle_ != nullptr && compatible_device) {
+                interop_snapshot.memory_handle = interop_memory_handle_;
+                interop_snapshot.descriptor = interop_descriptor_;
+                interop_memory_handle_ = nullptr;
+            }
+        }
+        const bool use_graphics_interop = interop_snapshot.memory_handle != nullptr;
+        session_params = make_session_params(device, use_graphics_interop);
         ccl::SceneParams scene_params;
         scene_params.background = false;
         auto session = ccl::make_unique<ccl::Session>(session_params, scene_params);
-        session->set_display_driver(ccl::make_unique<FrameDisplayDriver>(frames_));
+        if (use_graphics_interop) {
+            session->set_display_driver(
+                ccl::make_unique<VulkanInteropDisplayDriver>(
+                    std::move(interop_snapshot),
+                    frames_,
+                    interop_state_,
+                    interop_mutex_,
+                    interop_configured_camera_revision_,
+                    interop_produced_camera_revision_));
+            {
+                std::lock_guard lock(interop_mutex_);
+                interop_state_.flags |=
+                    CYCLES_BRIDGE_VULKAN_INTEROP_SESSION_ATTACHED;
+            }
+        } else {
+            session->set_display_driver(ccl::make_unique<FrameDisplayDriver>(frames_));
+        }
         create_output_passes(session->scene.get(), registered_pass_mask);
         build_scene(session->scene.get(), scene_request, runtime);
         const DenoiserSchedule denoiser_schedule = configure_scene_settings(
@@ -2494,10 +2735,22 @@ class CyclesEngine::Impl final {
         render_start_count_++;
     }
 
+    [[nodiscard]] std::uint64_t produced_camera_revision() const {
+        std::lock_guard lock(interop_mutex_);
+        if ((interop_state_.flags & CYCLES_BRIDGE_VULKAN_INTEROP_ACTIVE) != 0U) {
+            return interop_produced_camera_revision_;
+        }
+        return frames_.produced_camera_revision();
+    }
+
     void update_sampling_progress(ccl::Session& session) {
         const int actual = std::clamp(
             session.progress.get_current_sample(), 0, sampling_target_);
         frames_.set_sample_count(actual);
+        {
+            std::lock_guard lock(interop_mutex_);
+            interop_state_.sample_count = static_cast<std::uint32_t>(actual);
+        }
 
         const auto now = std::chrono::steady_clock::now();
         if (actual != sampling_measure_count_) {
@@ -2635,7 +2888,7 @@ class CyclesEngine::Impl final {
                     render_in_flight = false;
                     frames_.clear();
                 } else if (render_in_flight
-                           && frames_.produced_camera_revision()
+                           && produced_camera_revision()
                                == render_camera_revision) {
                     render_in_flight = false;
                 }
@@ -2686,6 +2939,10 @@ class CyclesEngine::Impl final {
                         frames_.invalidate_pass_cache();
                     }
                     render_camera_revision = requested_camera->revision;
+                    {
+                        std::lock_guard lock(interop_mutex_);
+                        interop_configured_camera_revision_ = render_camera_revision;
+                    }
                     start_render(
                         *session,
                         session_params,
@@ -2791,6 +3048,9 @@ class CyclesEngine::Impl final {
     mutable std::mutex interop_mutex_;
     HANDLE interop_memory_handle_ = nullptr;
     CyclesBridgeVulkanInteropBuffer interop_descriptor_{};
+    CyclesBridgeVulkanInteropState interop_state_{};
+    std::uint64_t interop_configured_camera_revision_ = 0;
+    std::uint64_t interop_produced_camera_revision_ = 0;
 };
 
 CyclesEngine::CyclesEngine() : impl_(std::make_unique<Impl>()) {}
@@ -2869,8 +3129,13 @@ bool CyclesEngine::bind_vulkan_interop_buffer(
     return impl_->bind_vulkan_interop_buffer(descriptor, memory_handle, error);
 }
 
-void CyclesEngine::unbind_vulkan_interop_buffer() {
-    impl_->unbind_vulkan_interop_buffer();
+bool CyclesEngine::unbind_vulkan_interop_buffer(std::string& error) {
+    return impl_->unbind_vulkan_interop_buffer(error);
+}
+
+void CyclesEngine::query_vulkan_interop_state(
+    CyclesBridgeVulkanInteropState& state) const {
+    impl_->query_vulkan_interop_state(state);
 }
 
 bool CyclesEngine::render(

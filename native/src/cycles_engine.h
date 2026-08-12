@@ -62,7 +62,10 @@ class CyclesEngine final {
         std::uint64_t memory_handle,
         std::string& error);
 
-    void unbind_vulkan_interop_buffer();
+    bool unbind_vulkan_interop_buffer(std::string& error);
+
+    void query_vulkan_interop_state(
+        CyclesBridgeVulkanInteropState& state) const;
 
     bool render(
         const CyclesBridgeCamera& camera,

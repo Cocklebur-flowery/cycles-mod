@@ -161,6 +161,13 @@ P15b2 HANDLE 描述与 Native ABI v21：
 - Native 再次比较 Vulkan UUID 与当前 Cycles CUDA/OptiX UUID。CPU 或 UUID 不可用时拒绝绑定。
 - F8 关闭顺序为 Native unbind/CloseHandle，然后销毁 Vulkan buffer/memory。这一子阶段仍不调用 CUDA external-memory import，不改变 FrameStore 出图。
 
+P15c1 Cycles 图形互操作会话与 Native ABI v22：
+
+- Cycles 会话在创建时领取已绑定的 Win32 HANDLE，`DisplayDriver` 报告 Vulkan UUID 并把 HANDLE 交给 Cycles 5.2 `GraphicsInteropBuffer`；OptiX/CUDA 随后通过 `cuImportExternalMemory` 直接映射共享 buffer。
+- 共享原型固定为 `480×270 RGBA16F`，Native 在互操作会话中强制该内部尺寸。若 Cycles 拒绝互操作，`DisplayDriver` 仍允许 naive CPU `FrameStore` 路径继续出图。
+- `update_end` 发生在 Cycles film-convert CUDA stream 同步之后，因此 ABI 状态的 generation 只在共享 buffer 写入完成后推进；本提交只提供可轮询的 ready/generation/sync telemetry，不让 Minecraft 读取 buffer。
+- HANDLE 一旦进入会话，普通 unbind 会被拒绝；必须先销毁 Renderer 并等待 Cycles/CUDA import 释放，再销毁 Vulkan buffer/memory。这样为下一步 F8 安全关闭顺序提供硬约束。
+
 ### P16：互操作环与正式同步
 
 - 建立至少三槽 external buffer 生命周期与 resize 规则。

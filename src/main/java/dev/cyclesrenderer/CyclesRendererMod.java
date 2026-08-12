@@ -347,6 +347,14 @@ public final class CyclesRendererMod {
         SectionGeometryCollector.setEnabled(false);
         SCENE_MANAGER.reset();
         FRAME_PRESENTER.reset();
+        boolean interopAttached = INTEROP_BUFFER.telemetry().nativeBound()
+                && NativeBridge.isReady()
+                && NativeBridge.vulkanInteropState().sessionAttached();
+        if (interopAttached) {
+            NativeBridge.close();
+            nativeBridgeReady = false;
+            appliedSettingsRevision = -1L;
+        }
         INTEROP_BUFFER.close();
         DistantHorizonsSceneProvider.reset();
         LOGGER.info("Experimental renderer suspended; native bridge kept warm");
@@ -359,6 +367,11 @@ public final class CyclesRendererMod {
     }
 
     private static void onGameShuttingDown(GameShuttingDownEvent event) {
+        if (INTEROP_BUFFER.telemetry().nativeBound() && NativeBridge.isReady()) {
+            NativeBridge.close();
+            nativeBridgeReady = false;
+            appliedSettingsRevision = -1L;
+        }
         INTEROP_BUFFER.close();
     }
 

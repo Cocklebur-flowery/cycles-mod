@@ -18,9 +18,9 @@ struct CyclesBridgeRenderer {
 
 namespace {
 
-constexpr std::uint32_t kAbiVersion = 21;
+constexpr std::uint32_t kAbiVersion = 22;
 constexpr std::uint32_t kStructVersion = 1;
-constexpr char kBuildInfo[] = "cyclesrenderer-native/cycles-5.2;abi=21";
+constexpr char kBuildInfo[] = "cyclesrenderer-native/cycles-5.2;abi=22";
 
 static_assert(sizeof(CyclesBridgeCamera) == 80);
 static_assert(offsetof(CyclesBridgeCamera, frame_id) == 8);
@@ -48,6 +48,9 @@ static_assert(sizeof(CyclesBridgeVulkanInteropBuffer) == 64);
 static_assert(offsetof(CyclesBridgeVulkanInteropBuffer, allocation_byte_count) == 24);
 static_assert(offsetof(CyclesBridgeVulkanInteropBuffer, memory_handle) == 32);
 static_assert(offsetof(CyclesBridgeVulkanInteropBuffer, device_uuid) == 40);
+static_assert(sizeof(CyclesBridgeVulkanInteropState) == 64);
+static_assert(offsetof(CyclesBridgeVulkanInteropState, generation) == 24);
+static_assert(offsetof(CyclesBridgeVulkanInteropState, last_sync_micros) == 40);
 static_assert(sizeof(CyclesBridgeVertex) == 40);
 static_assert(offsetof(CyclesBridgeVertex, packed_rgba) == 32);
 static_assert(sizeof(CyclesBridgeTriangle) == 16);
@@ -524,7 +527,21 @@ std::uint32_t cycles_bridge_unbind_vulkan_interop_buffer(
     if (renderer == nullptr || renderer->engine == nullptr) {
         return CYCLES_BRIDGE_STATUS_INVALID_ARGUMENT;
     }
-    renderer->engine->unbind_vulkan_interop_buffer();
+    std::string error;
+    return renderer->engine->unbind_vulkan_interop_buffer(error)
+        ? CYCLES_BRIDGE_STATUS_OK
+        : CYCLES_BRIDGE_STATUS_RENDER_ERROR;
+}
+
+std::uint32_t cycles_bridge_query_vulkan_interop_state(
+    const CyclesBridgeRenderer* renderer,
+    CyclesBridgeVulkanInteropState* state) {
+    if (renderer == nullptr || renderer->engine == nullptr || state == nullptr
+        || state->struct_size < sizeof(CyclesBridgeVulkanInteropState)
+        || state->struct_version != kStructVersion) {
+        return CYCLES_BRIDGE_STATUS_INVALID_ARGUMENT;
+    }
+    renderer->engine->query_vulkan_interop_state(*state);
     return CYCLES_BRIDGE_STATUS_OK;
 }
 

@@ -156,6 +156,14 @@ enum CyclesBridgeVulkanInteropFlags : std::uint32_t {
     CYCLES_BRIDGE_VULKAN_INTEROP_OWNERSHIP_TRANSFER = 1U << 0U,
 };
 
+enum CyclesBridgeVulkanInteropStateFlags : std::uint32_t {
+    CYCLES_BRIDGE_VULKAN_INTEROP_BOUND = 1U << 0U,
+    CYCLES_BRIDGE_VULKAN_INTEROP_ACTIVE = 1U << 1U,
+    CYCLES_BRIDGE_VULKAN_INTEROP_FRAME_READY = 1U << 2U,
+    CYCLES_BRIDGE_VULKAN_INTEROP_FAILED = 1U << 3U,
+    CYCLES_BRIDGE_VULKAN_INTEROP_SESSION_ATTACHED = 1U << 4U,
+};
+
 struct CyclesBridgeCamera {
     std::uint32_t struct_size;
     std::uint32_t struct_version;
@@ -442,6 +450,22 @@ struct CyclesBridgeVulkanInteropBuffer {
     std::uint32_t reserved[2];
 };
 
+struct CyclesBridgeVulkanInteropState {
+    std::uint32_t struct_size;
+    std::uint32_t struct_version;
+    std::uint32_t flags;
+    std::uint32_t width;
+    std::uint32_t height;
+    std::uint32_t sample_count;
+    std::uint64_t generation;
+    std::uint64_t completed_frame_count;
+    std::uint32_t last_sync_micros;
+    std::uint32_t ema_sync_micros;
+    std::uint32_t max_sync_micros;
+    std::uint32_t reserved_0;
+    std::uint64_t reserved_1;
+};
+
 struct CyclesBridgeVertex {
     float position_x;
     float position_y;
@@ -539,6 +563,10 @@ CYCLES_BRIDGE_API std::uint32_t cycles_bridge_bind_vulkan_interop_buffer(
 
 CYCLES_BRIDGE_API std::uint32_t cycles_bridge_unbind_vulkan_interop_buffer(
     CyclesBridgeRenderer* renderer);
+
+CYCLES_BRIDGE_API std::uint32_t cycles_bridge_query_vulkan_interop_state(
+    const CyclesBridgeRenderer* renderer,
+    CyclesBridgeVulkanInteropState* state);
 
 CYCLES_BRIDGE_API void cycles_bridge_close_win32_handle(
     std::uint64_t handle);

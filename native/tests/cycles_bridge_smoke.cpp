@@ -392,7 +392,7 @@ bool verify_progressive_sampling(
 int main(int argc, char** argv) {
     const bool require_optix = argc > 1 && std::strcmp(argv[1], "--require-optix") == 0;
     std::cerr << "[smoke] ABI check\n";
-    if (cycles_bridge_abi_version() != 21U) {
+    if (cycles_bridge_abi_version() != 22U) {
         std::cerr << "unexpected native ABI " << cycles_bridge_abi_version() << '\n';
         return 1;
     }
@@ -457,7 +457,15 @@ int main(int argc, char** argv) {
     const std::uint32_t bind_status =
         cycles_bridge_bind_vulkan_interop_buffer(renderer, &interop);
     if (initial_diagnostics.device_uuid_valid != 0U) {
+        CyclesBridgeVulkanInteropState interop_state{};
+        interop_state.struct_size = sizeof(interop_state);
+        interop_state.struct_version = 1U;
         if (!require_ok(bind_status, "interop handle bind")
+            || !require_ok(
+                cycles_bridge_query_vulkan_interop_state(
+                    renderer, &interop_state),
+                "interop state query")
+            || (interop_state.flags & CYCLES_BRIDGE_VULKAN_INTEROP_BOUND) == 0U
             || !require_ok(
                 cycles_bridge_unbind_vulkan_interop_buffer(renderer),
                 "interop handle unbind")
