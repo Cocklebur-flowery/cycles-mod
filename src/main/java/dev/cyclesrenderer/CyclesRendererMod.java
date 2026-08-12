@@ -457,6 +457,16 @@ public final class CyclesRendererMod {
             y += 10;
             graphics.text(
                     minecraft.font,
+                    "camera clip config=" + settings.cameraClipNear() + "/"
+                            + (settings.cameraClipFar() == 0.0F
+                                    ? "Minecraft"
+                                    : settings.cameraClipFar())
+                            + " effective=" + diagnostics.effectiveCameraClipNear()
+                            + "/" + diagnostics.effectiveCameraClipFar(),
+                    6, y, 0xFFE0E0E0);
+            y += 10;
+            graphics.text(
+                    minecraft.font,
                     "settings=" + diagnostics.settingsRevision()
                             + " reset=" + diagnostics.resetName(),
                     6, y, 0xFFE0E0E0);

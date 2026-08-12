@@ -23,7 +23,7 @@ import static java.lang.foreign.ValueLayout.JAVA_INT;
 import static java.lang.foreign.ValueLayout.JAVA_LONG;
 
 public final class NativeBridge {
-    public static final int ABI_VERSION = 17;
+    public static final int ABI_VERSION = 18;
     public static final int PIXEL_FORMAT_RGBA16_FLOAT = 2;
     public static final int PIXEL_FORMAT_RGBA32_FLOAT = 3;
 
@@ -161,7 +161,9 @@ public final class NativeBridge {
             JAVA_INT.withName("interactive_resolution_percentage"),
             JAVA_INT.withName("pass_cache_megabytes"),
             JAVA_INT.withName("sampling_pattern"),
-            MemoryLayout.sequenceLayout(5, JAVA_INT).withName("reserved"));
+            JAVA_FLOAT.withName("camera_clip_near"),
+            JAVA_FLOAT.withName("camera_clip_far"),
+            MemoryLayout.sequenceLayout(3, JAVA_INT).withName("reserved"));
     private static final MemoryLayout PASS_DESCRIPTOR_LAYOUT = MemoryLayout.structLayout(
             JAVA_INT.withName("struct_size"),
             JAVA_INT.withName("struct_version"),
@@ -271,6 +273,8 @@ public final class NativeBridge {
             JAVA_INT.withName("denoiser_schedule_run_count"),
             JAVA_INT.withName("denoiser_schedule_skip_count"),
             JAVA_INT.withName("sampling_pattern"),
+            JAVA_FLOAT.withName("effective_camera_clip_near"),
+            JAVA_FLOAT.withName("effective_camera_clip_far"),
             JAVA_INT.withName("reserved"));
     private static final MemoryLayout VERTEX_LAYOUT = MemoryLayout.structLayout(
             JAVA_FLOAT.withName("position_x"),
@@ -319,7 +323,7 @@ public final class NativeBridge {
                 || PASS_DESCRIPTOR_LAYOUT.byteSize() != 64L
                 || CAPABILITIES_LAYOUT.byteSize() != 64L
                 || COLOR_LUT_DESCRIPTOR_LAYOUT.byteSize() != 64L
-                || DIAGNOSTICS_LAYOUT.byteSize() != 336L
+                || DIAGNOSTICS_LAYOUT.byteSize() != 344L
                 || VERTEX_LAYOUT.byteSize() != 40L
                 || TRIANGLE_LAYOUT.byteSize() != 16L
                 || MATERIAL_LAYOUT.byteSize() != 32L
@@ -889,6 +893,8 @@ public final class NativeBridge {
                     JAVA_INT, 176L, settings.interactiveResolutionPercentage());
             settingsSegment.set(JAVA_INT, 180L, settings.passCacheMegabytes());
             settingsSegment.set(JAVA_INT, 184L, settings.samplingPattern().nativeId());
+            settingsSegment.set(JAVA_FLOAT, 188L, settings.cameraClipNear());
+            settingsSegment.set(JAVA_FLOAT, 192L, settings.cameraClipFar());
             checkRendererStatus(
                     (int) applySettings.invokeExact(renderer, settingsSegment),
                     "settings update");
@@ -1070,7 +1076,9 @@ public final class NativeBridge {
                     diagnosticsSegment.get(JAVA_INT, 316L),
                     diagnosticsSegment.get(JAVA_INT, 320L),
                     diagnosticsSegment.get(JAVA_INT, 324L),
-                    diagnosticsSegment.get(JAVA_INT, 328L));
+                    diagnosticsSegment.get(JAVA_INT, 328L),
+                    diagnosticsSegment.get(JAVA_FLOAT, 332L),
+                    diagnosticsSegment.get(JAVA_FLOAT, 336L));
         }
 
         private RenderedFrame renderFrame(
@@ -1630,7 +1638,9 @@ public final class NativeBridge {
             int denoiserScheduleReason,
             int denoiserScheduleRunCount,
             int denoiserScheduleSkipCount,
-            int samplingPattern) {
+            int samplingPattern,
+            float effectiveCameraClipNear,
+            float effectiveCameraClipFar) {
         public String stateName() {
             return switch (stateCode) {
                 case 1 -> "scene-staging";

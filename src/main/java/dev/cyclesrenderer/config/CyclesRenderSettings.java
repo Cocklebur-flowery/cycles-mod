@@ -40,6 +40,8 @@ public record CyclesRenderSettings(
         float filterWidth,
         int seed,
         SamplingPattern samplingPattern,
+        float cameraClipNear,
+        float cameraClipFar,
         DenoiserMode denoiserMode,
         int denoiserStartSample,
         DenoiserInput denoiserInput,

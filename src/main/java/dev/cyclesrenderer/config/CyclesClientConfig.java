@@ -28,6 +28,8 @@ public final class CyclesClientConfig {
     private static final ModConfigSpec.IntValue INTERACTIVE_TIME_LIMIT;
     private static final ModConfigSpec.IntValue STILL_TIME_LIMIT;
     private static final ModConfigSpec.EnumValue<CyclesRenderSettings.SamplingPattern> SAMPLING_PATTERN;
+    private static final ModConfigSpec.DoubleValue CAMERA_CLIP_NEAR;
+    private static final ModConfigSpec.DoubleValue CAMERA_CLIP_FAR;
     private static final ModConfigSpec.IntValue MINIMUM_BOUNCE;
     private static final ModConfigSpec.IntValue MAXIMUM_BOUNCE;
     private static final ModConfigSpec.IntValue DIFFUSE_BOUNCES;
@@ -112,6 +114,15 @@ public final class CyclesClientConfig {
         SAMPLING_PATTERN = builder.translation("config.cyclesrenderer.sampling.pattern")
                 .comment("Native Cycles 5.2 sampling sequence; blue-noise scrambling is performed by Cycles.")
                 .defineEnum("pattern", CyclesRenderSettings.SamplingPattern.BLUE_NOISE_FIRST);
+        builder.pop();
+
+        builder.push("camera");
+        CAMERA_CLIP_NEAR = builder.translation("config.cyclesrenderer.camera.clipNear")
+                .comment("Near clipping plane in blocks/meters.")
+                .defineInRange("clipNear", 0.05D, 0.001D, 10.0D);
+        CAMERA_CLIP_FAR = builder.translation("config.cyclesrenderer.camera.clipFar")
+                .comment("Far clipping plane in blocks/meters; zero follows the Minecraft camera.")
+                .defineInRange("clipFar", 0.0D, 0.0D, 1000000.0D);
         builder.pop();
 
         builder.push("lightPaths");
@@ -205,6 +216,7 @@ public final class CyclesClientConfig {
                 REFLECTIVE_CAUSTICS.get(), REFRACTIVE_CAUSTICS.get(),
                 PIXEL_FILTER.get(), FILTER_WIDTH.get().floatValue(), SEED.get(),
                 SAMPLING_PATTERN.get(),
+                CAMERA_CLIP_NEAR.get().floatValue(), CAMERA_CLIP_FAR.get().floatValue(),
                 DENOISER_MODE.get(), DENOISER_START_SAMPLE.get(), DENOISER_INPUT.get(),
                 DENOISER_PREFILTER.get(), DENOISER_QUALITY.get(), DENOISER_USE_GPU.get(),
                 EXPOSURE_EV.get().floatValue(), GAMMA.get().floatValue(), VIEW_TRANSFORM.get(),

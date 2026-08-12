@@ -1,6 +1,6 @@
 # Cycles 采样模式与物理相机（P12）
 
-状态：P12a/P12b 已完成自动验证；P12c Native 已验证，Java/F9/F10 接入待开始
+状态：P12a-P12c 已完成自动验证；P12d 待开始
 目标平台：Blender Cycles 5.2 / Minecraft 26.2 相机 / OptiX
 
 ## 1. 目标与保持不变的默认行为
@@ -84,3 +84,10 @@ Native smoke 依次覆盖：
 - F9 可选择五种 Cycles 5.2 原生模式并显示 seed；F10 显示 `configured/native`，用于发现配置未生效或枚举映射错误。
 - 默认值为 `BLUE_NOISE_FIRST`。模式/seed 变化只触发 accumulation reset；Scene、Section、Pass ID 和 OCIO 资源契约保持不变。
 - Native smoke 遍历 ID `0..4`、拒绝 ID `5`，并在实际 OptiX 出帧后断言 Native 诊断仍为 `BLUE_NOISE_FIRST`。
+
+## 8. P12c 实施记录
+
+- ABI v18 将设置结构的两个保留槽定义为 `camera_clip_near` 与 `camera_clip_far`，总大小仍为 208 字节。`camera_clip_far=0` 明确表示跟随 Minecraft 每帧提供的 `depthFar`。
+- Near 默认 `0.05 block`，保持此前 Native 常量；显式 far override 与 Minecraft far 都会被约束为至少 `near + 0.001`，避免非法裁剪体导致崩溃。
+- Native 诊断追加最终生效的 near/far；F10 同时显示配置值和生效值，因此可以确认 `0 = Minecraft` 实际解析到了多远。
+- 裁剪变化通过现有 settings accumulation reset 生效，不触发 Scene reset 或 Section 重传。Native smoke 使用 `0.125/50` 出帧并断言最终值。
