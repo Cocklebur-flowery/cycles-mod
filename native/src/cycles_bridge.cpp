@@ -16,9 +16,9 @@ struct CyclesBridgeRenderer {
 
 namespace {
 
-constexpr std::uint32_t kAbiVersion = 17;
+constexpr std::uint32_t kAbiVersion = 18;
 constexpr std::uint32_t kStructVersion = 1;
-constexpr char kBuildInfo[] = "cyclesrenderer-native/cycles-5.2;abi=17";
+constexpr char kBuildInfo[] = "cyclesrenderer-native/cycles-5.2;abi=18";
 
 static_assert(sizeof(CyclesBridgeCamera) == 80);
 static_assert(offsetof(CyclesBridgeCamera, frame_id) == 8);
@@ -39,7 +39,7 @@ static_assert(sizeof(CyclesBridgePassDescriptor) == 64);
 static_assert(sizeof(CyclesBridgeCapabilities) == 64);
 static_assert(sizeof(CyclesBridgeColorLutDescriptor) == 64);
 static_assert(offsetof(CyclesBridgeColorLutDescriptor, pixel_byte_count) == 32);
-static_assert(sizeof(CyclesBridgeDiagnostics) == 336);
+static_assert(sizeof(CyclesBridgeDiagnostics) == 344);
 static_assert(sizeof(CyclesBridgeVertex) == 40);
 static_assert(offsetof(CyclesBridgeVertex, packed_rgba) == 32);
 static_assert(sizeof(CyclesBridgeTriangle) == 16);
@@ -191,6 +191,12 @@ bool valid_settings(const CyclesBridgeRenderSettings& settings) {
         && settings.pass_cache_megabytes <= 4096U
         && settings.sampling_pattern
             <= CYCLES_BRIDGE_SAMPLING_PATTERN_BLUE_NOISE_ROUND
+        && std::isfinite(settings.camera_clip_near)
+        && settings.camera_clip_near >= 0.001F
+        && settings.camera_clip_near <= 10.0F
+        && std::isfinite(settings.camera_clip_far)
+        && settings.camera_clip_far >= 0.0F
+        && settings.camera_clip_far <= 1000000.0F
         && settings.interactive_samples >= 1U && settings.interactive_samples <= 4096U
         && settings.still_samples >= 1U && settings.still_samples <= 4096U
         && settings.stationary_delay_millis <= 10000U

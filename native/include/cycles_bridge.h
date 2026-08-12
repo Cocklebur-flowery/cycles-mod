@@ -277,7 +277,9 @@ struct CyclesBridgeRenderSettings {
     std::uint32_t interactive_resolution_percentage;
     std::uint32_t pass_cache_megabytes;
     std::uint32_t sampling_pattern;
-    std::uint32_t reserved[5];
+    float camera_clip_near;
+    float camera_clip_far;
+    std::uint32_t reserved[3];
 };
 
 struct CyclesBridgePassDescriptor {
@@ -394,6 +396,8 @@ struct CyclesBridgeDiagnostics {
     std::uint32_t denoiser_schedule_run_count;
     std::uint32_t denoiser_schedule_skip_count;
     std::uint32_t sampling_pattern;
+    float effective_camera_clip_near;
+    float effective_camera_clip_far;
     std::uint32_t reserved;
 };
 

@@ -229,6 +229,8 @@ CyclesBridgeRenderSettings default_settings() {
     settings.interactive_resolution_percentage = 50;
     settings.pass_cache_megabytes = 256;
     settings.sampling_pattern = CYCLES_BRIDGE_SAMPLING_PATTERN_BLUE_NOISE_FIRST;
+    settings.camera_clip_near = 0.05F;
+    settings.camera_clip_far = 0.0F;
     settings.interactive_samples = 1;
     settings.still_samples = 1;
     settings.stationary_delay_millis = 150;
@@ -381,7 +383,7 @@ bool verify_progressive_sampling(
 int main(int argc, char** argv) {
     const bool require_optix = argc > 1 && std::strcmp(argv[1], "--require-optix") == 0;
     std::cerr << "[smoke] ABI check\n";
-    if (cycles_bridge_abi_version() != 17U) {
+    if (cycles_bridge_abi_version() != 18U) {
         std::cerr << "unexpected native ABI " << cycles_bridge_abi_version() << '\n';
         return 1;
     }
@@ -460,6 +462,8 @@ int main(int argc, char** argv) {
         return 1;
     }
     settings.sampling_pattern = CYCLES_BRIDGE_SAMPLING_PATTERN_BLUE_NOISE_FIRST;
+    settings.camera_clip_near = 0.125F;
+    settings.camera_clip_far = 50.0F;
     settings.revision++;
     if (!require_ok(
             cycles_bridge_apply_settings(renderer, &settings),
@@ -679,6 +683,8 @@ int main(int argc, char** argv) {
     const std::uint64_t all_passes_mask = (1ULL << CYCLES_BRIDGE_PASS_COUNT) - 1ULL;
     if (diagnostics.sampling_pattern
             != CYCLES_BRIDGE_SAMPLING_PATTERN_BLUE_NOISE_FIRST
+        || std::abs(diagnostics.effective_camera_clip_near - 0.125F) > 1.0e-6F
+        || std::abs(diagnostics.effective_camera_clip_far - 50.0F) > 1.0e-6F
         || diagnostics.cached_raw_pass_mask != all_passes_mask
         || diagnostics.cached_denoised_pass_mask != 0U
         || diagnostics.pass_cache_entry_count < CYCLES_BRIDGE_PASS_COUNT
@@ -692,6 +698,8 @@ int main(int argc, char** argv) {
         || diagnostics.active_frame_variant != CYCLES_BRIDGE_FRAME_VARIANT_RAW) {
         std::cerr << "unexpected raw pass cache state: sampling-pattern="
                   << diagnostics.sampling_pattern
+                  << ";clip=" << diagnostics.effective_camera_clip_near
+                  << '/' << diagnostics.effective_camera_clip_far
                   << ";raw=" << diagnostics.cached_raw_pass_mask
                   << ";denoised=" << diagnostics.cached_denoised_pass_mask
                   << ";entries=" << diagnostics.pass_cache_entry_count

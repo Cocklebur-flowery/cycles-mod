@@ -72,6 +72,8 @@ CyclesBridgeRenderSettings default_settings() {
     settings.interactive_resolution_percentage = 50;
     settings.pass_cache_megabytes = 256;
     settings.sampling_pattern = CYCLES_BRIDGE_SAMPLING_PATTERN_BLUE_NOISE_FIRST;
+    settings.camera_clip_near = 0.05F;
+    settings.camera_clip_far = 0.0F;
     settings.interactive_samples = 1;
     settings.still_samples = 8;
     settings.stationary_delay_millis = 150;
@@ -1371,14 +1373,19 @@ ccl::Transform camera_transform(
 ccl::BufferParams configure_camera(
     ccl::Session& session,
     const SceneRequest& scene_request,
-    const CameraRequest& camera_request) {
+    const CameraRequest& camera_request,
+    const CyclesBridgeRenderSettings& settings) {
     ccl::Camera* camera = session.scene->camera;
     camera->set_camera_type(ccl::CAMERA_PERSPECTIVE);
     camera->set_full_width(static_cast<int>(camera_request.render_width));
     camera->set_full_height(static_cast<int>(camera_request.render_height));
     camera->set_fov(camera_request.camera.vertical_fov_radians);
-    camera->set_nearclip(0.05F);
-    camera->set_farclip(std::max(1.0F, camera_request.camera.depth_far));
+    const float near_clip = settings.camera_clip_near;
+    const float requested_far_clip = settings.camera_clip_far > 0.0F
+        ? settings.camera_clip_far
+        : camera_request.camera.depth_far;
+    camera->set_nearclip(near_clip);
+    camera->set_farclip(std::max(near_clip + 0.001F, requested_far_clip));
     const CyclesBridgeSceneResources& resources = scene_request.resources->resources;
     CyclesBridgeScene scene{};
     scene.origin_x = resources.origin_x;
@@ -1913,6 +1920,8 @@ class CyclesEngine::Impl final {
             diagnostics.denoiser_schedule_run_count = denoiser_schedule_run_count_;
             diagnostics.denoiser_schedule_skip_count = denoiser_schedule_skip_count_;
             diagnostics.sampling_pattern = sampling_pattern_diagnostic_;
+            diagnostics.effective_camera_clip_near = camera_clip_near_diagnostic_;
+            diagnostics.effective_camera_clip_far = camera_clip_far_diagnostic_;
         }
         frames_.fill_diagnostics(diagnostics);
     }
@@ -2254,7 +2263,7 @@ class CyclesEngine::Impl final {
         DenoiserSchedule denoiser_schedule{};
         {
             const ccl::thread_scoped_lock scene_lock(session.scene->mutex);
-            buffer = configure_camera(session, scene_request, camera_request);
+            buffer = configure_camera(session, scene_request, camera_request, settings);
             denoiser_schedule = configure_scene_settings(
                 session.scene.get(), params.device, settings,
                 camera_request.sampling_state,
@@ -2294,6 +2303,12 @@ class CyclesEngine::Impl final {
             }
             target_sample_count_diagnostic_ =
                 static_cast<std::uint32_t>(render_params.samples);
+            camera_clip_near_diagnostic_ = settings.camera_clip_near;
+            camera_clip_far_diagnostic_ = std::max(
+                settings.camera_clip_near + 0.001F,
+                settings.camera_clip_far > 0.0F
+                    ? settings.camera_clip_far
+                    : camera_request.camera.depth_far);
             if (sampling_state_diagnostic_ != camera_request.sampling_state) {
                 sampling_transition_count_diagnostic_++;
             }
@@ -2605,6 +2620,8 @@ class CyclesEngine::Impl final {
     std::uint32_t denoiser_schedule_skip_count_ = 0;
     std::uint32_t sampling_pattern_diagnostic_ =
         CYCLES_BRIDGE_SAMPLING_PATTERN_BLUE_NOISE_FIRST;
+    float camera_clip_near_diagnostic_ = 0.05F;
+    float camera_clip_far_diagnostic_ = 0.0F;
     std::string state_;
     std::string terminal_error_;
 
