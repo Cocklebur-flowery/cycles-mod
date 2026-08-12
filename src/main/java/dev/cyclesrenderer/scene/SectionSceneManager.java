@@ -31,6 +31,7 @@ public final class SectionSceneManager {
 
     private ClientLevel level;
     private LabPbrResources.Discovery pbrDiscovery = LabPbrResources.empty();
+    private LabPbrAtlasBuilder.Atlases pbrAtlases = LabPbrAtlasBuilder.empty();
     private long resourceRevision = Long.MIN_VALUE;
     private int sceneOriginX;
     private int sceneOriginY;
@@ -142,6 +143,7 @@ public final class SectionSceneManager {
         level = null;
         resourceRevision = Long.MIN_VALUE;
         pbrDiscovery = LabPbrResources.empty();
+        pbrAtlases = LabPbrAtlasBuilder.empty();
         sections.clear();
         unloadedChunks.clear();
         lastCameraSectionX = Integer.MIN_VALUE;
@@ -344,6 +346,10 @@ public final class SectionSceneManager {
         return pbrDiscovery;
     }
 
+    public LabPbrAtlasBuilder.Atlases pbrAtlases() {
+        return pbrAtlases;
+    }
+
     private void upsertNative(SectionGeometrySnapshot snapshot) {
         long start = System.nanoTime();
         NativeBridge.upsertSection(snapshot);
@@ -451,6 +457,13 @@ public final class SectionSceneManager {
         if (atlasWidth <= 0 || atlasHeight <= 0) {
             throw new IllegalStateException("invalid Minecraft block atlas dimensions");
         }
+
+        pbrAtlases = LabPbrAtlasBuilder.build(
+                minecraft.getResourceManager(),
+                sprites,
+                pbrDiscovery,
+                atlasWidth,
+                atlasHeight);
 
         byte[] pixels = new byte[Math.multiplyExact(Math.multiplyExact(atlasWidth, atlasHeight), 4)];
         for (TextureAtlasSprite sprite : sprites.values()) {
