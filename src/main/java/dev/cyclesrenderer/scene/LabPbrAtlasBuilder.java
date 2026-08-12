@@ -24,14 +24,16 @@ public final class LabPbrAtlasBuilder {
             Map<Identifier, TextureAtlasSprite> sprites,
             LabPbrResources.Discovery discovery,
             int atlasWidth,
-            int atlasHeight) {
+            int atlasHeight,
+            float fallbackRoughness,
+            float fallbackF0) {
         if (discovery.format() != LabPbrResources.Format.LAB_PBR_1_3) {
             return empty();
         }
         int byteCount = Math.multiplyExact(Math.multiplyExact(atlasWidth, atlasHeight), 4);
         byte[] normalPixels = new byte[byteCount];
         byte[] materialPixels = new byte[byteCount];
-        fillDefaults(normalPixels, materialPixels);
+        fillDefaults(normalPixels, materialPixels, fallbackRoughness, fallbackF0);
 
         int decodedNormals = 0;
         int decodedSpeculars = 0;
@@ -65,7 +67,7 @@ public final class LabPbrAtlasBuilder {
                     width,
                     height,
                     image -> copyMaterial(image, materialPixels, atlasWidth, atlasHeight,
-                            startX, startY, width, height));
+                            startX, startY, width, height, fallbackF0));
             decodedSpeculars += specularResult.decoded() ? 1 : 0;
             sizeMismatches += specularResult.sizeMismatch() ? 1 : 0;
             decodeErrors += specularResult.error() ? 1 : 0;
@@ -86,9 +88,13 @@ public final class LabPbrAtlasBuilder {
         return new Atlases(0, 0, new byte[0], new byte[0], 0, 0, 0, 0);
     }
 
-    private static void fillDefaults(byte[] normalPixels, byte[] materialPixels) {
-        int roughness = toUnorm8(DEFAULT_ROUGHNESS);
-        int f0 = toUnorm8(DEFAULT_DIELECTRIC_F0);
+    private static void fillDefaults(
+            byte[] normalPixels,
+            byte[] materialPixels,
+            float fallbackRoughness,
+            float fallbackF0) {
+        int roughness = toUnorm8(fallbackRoughness);
+        int f0 = toUnorm8(fallbackF0);
         for (int offset = 0; offset < normalPixels.length; offset += 4) {
             normalPixels[offset] = (byte) 128;
             normalPixels[offset + 1] = (byte) 128;
@@ -180,7 +186,8 @@ public final class LabPbrAtlasBuilder {
             int startX,
             int startY,
             int width,
-            int height) {
+            int height,
+            float fallbackF0) {
         for (int y = 0; y < height; y++) {
             int targetY = startY + y;
             if (targetY < 0 || targetY >= atlasHeight) {
@@ -199,7 +206,7 @@ public final class LabPbrAtlasBuilder {
                 target[output] = (byte) (255 - smoothness);
                 target[output + 1] = (byte) (encodedF0OrMetal >= 230 ? 255 : 0);
                 target[output + 2] = (byte) (encodedF0OrMetal >= 230
-                        ? toUnorm8(DEFAULT_DIELECTRIC_F0)
+                        ? toUnorm8(fallbackF0)
                         : encodedF0OrMetal);
                 target[output + 3] = (byte) (emission == 255
                         ? 0

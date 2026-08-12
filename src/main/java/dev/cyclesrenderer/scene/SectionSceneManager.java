@@ -1,5 +1,7 @@
 package dev.cyclesrenderer.scene;
 
+import dev.cyclesrenderer.config.CyclesClientConfig;
+import dev.cyclesrenderer.config.CyclesRenderSettings;
 import dev.cyclesrenderer.nativebridge.NativeBridge;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientLevel;
@@ -33,6 +35,7 @@ public final class SectionSceneManager {
     private LabPbrResources.Discovery pbrDiscovery = LabPbrResources.empty();
     private LabPbrAtlasBuilder.Atlases pbrAtlases = LabPbrAtlasBuilder.empty();
     private long resourceRevision = Long.MIN_VALUE;
+    private int pbrResourceFingerprint;
     private int sceneOriginX;
     private int sceneOriginY;
     private int sceneOriginZ;
@@ -72,11 +75,18 @@ public final class SectionSceneManager {
         int cameraSectionY = SectionPos.blockToSectionCoord(Mth.floor(cameraPosition.y));
         int cameraSectionZ = SectionPos.blockToSectionCoord(Mth.floor(cameraPosition.z));
         int viewDistance = minecraft.options.getEffectiveRenderDistance();
+        CyclesRenderSettings settings = CyclesClientConfig.snapshot();
         boolean reset = level != currentLevel
                 || resourceRevision != currentResourceRevision
+                || pbrResourceFingerprint != settings.pbrResourceFingerprint()
                 || needsOriginRebase(cameraPosition);
         if (reset) {
-            resetScene(minecraft, currentLevel, cameraPosition, currentResourceRevision);
+            resetScene(
+                    minecraft,
+                    currentLevel,
+                    cameraPosition,
+                    currentResourceRevision,
+                    settings);
             cameraSectionX = SectionPos.blockToSectionCoord(Mth.floor(cameraPosition.x));
             cameraSectionY = SectionPos.blockToSectionCoord(Mth.floor(cameraPosition.y));
             cameraSectionZ = SectionPos.blockToSectionCoord(Mth.floor(cameraPosition.z));
@@ -142,6 +152,7 @@ public final class SectionSceneManager {
     public void reset() {
         level = null;
         resourceRevision = Long.MIN_VALUE;
+        pbrResourceFingerprint = 0;
         pbrDiscovery = LabPbrResources.empty();
         pbrAtlases = LabPbrAtlasBuilder.empty();
         sections.clear();
@@ -177,7 +188,8 @@ public final class SectionSceneManager {
             Minecraft minecraft,
             ClientLevel currentLevel,
             Vec3 cameraPosition,
-            long currentResourceRevision) {
+            long currentResourceRevision,
+            CyclesRenderSettings settings) {
         sections.clear();
         unloadedChunks.clear();
         SectionGeometryCollector.setActiveLevel(currentLevel);
@@ -185,10 +197,11 @@ public final class SectionSceneManager {
         sceneOriginY = snapOrigin(Mth.floor(cameraPosition.y));
         sceneOriginZ = snapOrigin(Mth.floor(cameraPosition.z));
         SectionGeometrySnapshot.SceneResources resources = createResources(
-                minecraft, sceneOriginX, sceneOriginY, sceneOriginZ);
+                minecraft, sceneOriginX, sceneOriginY, sceneOriginZ, settings);
         NativeBridge.resetScene(resources);
         level = currentLevel;
         resourceRevision = currentResourceRevision;
+        pbrResourceFingerprint = settings.pbrResourceFingerprint();
         lastCameraSectionX = Integer.MIN_VALUE;
         lastCameraSectionY = Integer.MIN_VALUE;
         lastCameraSectionZ = Integer.MIN_VALUE;
@@ -426,7 +439,8 @@ public final class SectionSceneManager {
             Minecraft minecraft,
             int originX,
             int originY,
-            int originZ) {
+            int originZ,
+            CyclesRenderSettings settings) {
         Object texture = minecraft.getTextureManager().getTexture(TextureAtlas.LOCATION_BLOCKS);
         if (!(texture instanceof TextureAtlas atlas)) {
             throw new IllegalStateException("Minecraft block texture is not a TextureAtlas");
@@ -435,8 +449,14 @@ public final class SectionSceneManager {
         if (sprites.isEmpty()) {
             throw new IllegalStateException("Minecraft block texture atlas has no sprites");
         }
-        pbrDiscovery = LabPbrResources.discover(
-                minecraft.getResourceManager(), sprites.values());
+        if (settings.pbrMode() == CyclesRenderSettings.PbrMode.OFF) {
+            pbrDiscovery = LabPbrResources.empty();
+        } else {
+            pbrDiscovery = LabPbrResources.discover(
+                    minecraft.getResourceManager(),
+                    sprites.values(),
+                    settings.pbrMode() == CyclesRenderSettings.PbrMode.LAB_PBR_1_3);
+        }
 
         int atlasWidth = 0;
         int atlasHeight = 0;
@@ -463,7 +483,9 @@ public final class SectionSceneManager {
                 sprites,
                 pbrDiscovery,
                 atlasWidth,
-                atlasHeight);
+                atlasHeight,
+                settings.pbrFallbackRoughness(),
+                settings.pbrFallbackF0());
 
         byte[] pixels = new byte[Math.multiplyExact(Math.multiplyExact(atlasWidth, atlasHeight), 4)];
         for (TextureAtlasSprite sprite : sprites.values()) {

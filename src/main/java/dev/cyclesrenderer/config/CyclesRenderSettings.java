@@ -60,6 +60,11 @@ public record CyclesRenderSettings(
         float atmosphereAirDensity,
         float atmosphereAerosolDensity,
         float atmosphereOzoneDensity,
+        PbrMode pbrMode,
+        float pbrNormalStrength,
+        float pbrEmissionScale,
+        float pbrFallbackRoughness,
+        float pbrFallbackF0,
         DenoiserMode denoiserMode,
         int denoiserStartSample,
         DenoiserInput denoiserInput,
@@ -71,6 +76,12 @@ public record CyclesRenderSettings(
         ViewTransform viewTransform,
         PassView activePass,
         boolean debugOverlay) {
+
+    public int pbrResourceFingerprint() {
+        int result = pbrMode.hashCode();
+        result = 31 * result + Float.floatToIntBits(pbrFallbackRoughness);
+        return 31 * result + Float.floatToIntBits(pbrFallbackF0);
+    }
 
     public interface NativeEnum {
         int nativeId();
@@ -207,6 +218,26 @@ public record CyclesRenderSettings(
         @Override
         public String translationGroup() {
             return "denoiser";
+        }
+    }
+
+    public enum PbrMode implements NativeEnum, NamedEnum {
+        AUTO(0), OFF(1), LAB_PBR_1_3(2);
+
+        private final int nativeId;
+
+        PbrMode(int nativeId) {
+            this.nativeId = nativeId;
+        }
+
+        @Override
+        public int nativeId() {
+            return nativeId;
+        }
+
+        @Override
+        public String translationGroup() {
+            return "pbr_mode";
         }
     }
 

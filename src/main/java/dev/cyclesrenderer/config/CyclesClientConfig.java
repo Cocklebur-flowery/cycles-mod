@@ -49,6 +49,11 @@ public final class CyclesClientConfig {
     private static final ModConfigSpec.DoubleValue ATMOSPHERE_AIR_DENSITY;
     private static final ModConfigSpec.DoubleValue ATMOSPHERE_AEROSOL_DENSITY;
     private static final ModConfigSpec.DoubleValue ATMOSPHERE_OZONE_DENSITY;
+    private static final ModConfigSpec.EnumValue<CyclesRenderSettings.PbrMode> PBR_MODE;
+    private static final ModConfigSpec.DoubleValue PBR_NORMAL_STRENGTH;
+    private static final ModConfigSpec.DoubleValue PBR_EMISSION_SCALE;
+    private static final ModConfigSpec.DoubleValue PBR_FALLBACK_ROUGHNESS;
+    private static final ModConfigSpec.DoubleValue PBR_FALLBACK_F0;
     private static final ModConfigSpec.IntValue MINIMUM_BOUNCE;
     private static final ModConfigSpec.IntValue MAXIMUM_BOUNCE;
     private static final ModConfigSpec.IntValue DIFFUSE_BOUNCES;
@@ -192,6 +197,22 @@ public final class CyclesClientConfig {
                 .defineInRange("ozoneDensity", 2.0D, 0.0D, 10.0D);
         builder.pop();
 
+        builder.push("materials");
+        PBR_MODE = builder.translation("config.cyclesrenderer.materials.pbrMode")
+                .comment("Auto follows optifine/texture.properties; forced LabPBR 1.3 also works without the declaration file.")
+                .defineEnum("pbrMode", CyclesRenderSettings.PbrMode.AUTO);
+        PBR_NORMAL_STRENGTH = builder.translation("config.cyclesrenderer.materials.normalStrength")
+                .defineInRange("normalStrength", 1.0D, 0.0D, 4.0D);
+        PBR_EMISSION_SCALE = builder.translation("config.cyclesrenderer.materials.emissionScale")
+                .defineInRange("emissionScale", 1.0D, 0.0D, 100.0D);
+        PBR_FALLBACK_ROUGHNESS = builder.translation("config.cyclesrenderer.materials.fallbackRoughness")
+                .comment("Principled roughness used by sprites without a LabPBR specular companion.")
+                .defineInRange("fallbackRoughness", 0.8D, 0.0D, 1.0D);
+        PBR_FALLBACK_F0 = builder.translation("config.cyclesrenderer.materials.fallbackF0")
+                .comment("Linear dielectric F0 used by sprites without a LabPBR specular companion.")
+                .defineInRange("fallbackF0", 0.04D, 0.0D, 0.08D);
+        builder.pop();
+
         builder.push("lightPaths");
         MINIMUM_BOUNCE = builder.translation("config.cyclesrenderer.lightPaths.minimumBounce")
                 .defineInRange("minimumBounce", 0, 0, 64);
@@ -298,6 +319,10 @@ public final class CyclesClientConfig {
                 ATMOSPHERE_AIR_DENSITY.get().floatValue(),
                 ATMOSPHERE_AEROSOL_DENSITY.get().floatValue(),
                 ATMOSPHERE_OZONE_DENSITY.get().floatValue(),
+                PBR_MODE.get(), PBR_NORMAL_STRENGTH.get().floatValue(),
+                PBR_EMISSION_SCALE.get().floatValue(),
+                PBR_FALLBACK_ROUGHNESS.get().floatValue(),
+                PBR_FALLBACK_F0.get().floatValue(),
                 DENOISER_MODE.get(), DENOISER_START_SAMPLE.get(), DENOISER_INPUT.get(),
                 DENOISER_PREFILTER.get(), DENOISER_QUALITY.get(), DENOISER_USE_GPU.get(),
                 EXPOSURE_EV.get().floatValue(), GAMMA.get().floatValue(), VIEW_TRANSFORM.get(),

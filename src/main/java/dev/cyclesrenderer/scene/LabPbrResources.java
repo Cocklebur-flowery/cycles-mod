@@ -23,8 +23,12 @@ public final class LabPbrResources {
 
     public static Discovery discover(
             ResourceManager resourceManager,
-            Collection<TextureAtlasSprite> atlasSprites) {
+            Collection<TextureAtlasSprite> atlasSprites,
+            boolean forceLabPbr13) {
         FormatDeclaration declaration = readFormatDeclaration(resourceManager);
+        Format effectiveFormat = forceLabPbr13
+                ? Format.LAB_PBR_1_3
+                : declaration.format();
         Map<Identifier, CompanionSet> companions = new LinkedHashMap<>();
         int discoveryErrors = declaration.error().isEmpty() ? 0 : 1;
         int normalCount = 0;
@@ -37,7 +41,7 @@ public final class LabPbrResources {
             }
             CompanionResource normal = null;
             CompanionResource specular = null;
-            if (declaration.format() == Format.LAB_PBR_1_3) {
+            if (effectiveFormat == Format.LAB_PBR_1_3) {
                 try {
                     normal = findCompanion(resourceManager, spriteId, "_n").orElse(null);
                     specular = findCompanion(resourceManager, spriteId, "_s").orElse(null);
@@ -55,7 +59,7 @@ public final class LabPbrResources {
         }
 
         return new Discovery(
-                declaration.format(),
+                effectiveFormat,
                 declaration.rawFormat(),
                 declaration.sourcePackId(),
                 declaration.error(),
