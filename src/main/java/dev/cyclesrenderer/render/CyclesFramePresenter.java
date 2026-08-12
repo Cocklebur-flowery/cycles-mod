@@ -99,6 +99,27 @@ public final class CyclesFramePresenter {
         if (!ready || nativeFrameTarget == null) {
             return;
         }
+        presentTexture(
+                output,
+                settings,
+                depthFar,
+                Objects.requireNonNull(nativeFrameTarget.getColorTextureView()));
+    }
+
+    public void presentExternal(
+            RenderTarget output,
+            CyclesRenderSettings settings,
+            float depthFar,
+            GpuTextureView source) {
+        RenderSystem.assertOnRenderThread();
+        presentTexture(output, settings, depthFar, Objects.requireNonNull(source));
+    }
+
+    private void presentTexture(
+            RenderTarget output,
+            CyclesRenderSettings settings,
+            float depthFar,
+            GpuTextureView source) {
         GpuTextureView activeColorLut = updateColorLut(settings.viewTransform());
         updateDisplayUniforms(settings, depthFar);
         try (RenderPass renderPass = RenderSystem.getDevice()
@@ -111,7 +132,7 @@ public final class CyclesFramePresenter {
             RenderSystem.bindDefaultUniforms(renderPass);
             renderPass.bindTexture(
                     "InSampler",
-                    Objects.requireNonNull(nativeFrameTarget.getColorTextureView()),
+                    source,
                     RenderSystem.getSamplerCache().getClampToEdge(FilterMode.NEAREST));
             renderPass.bindTexture(
                     CyclesRenderPipelines.COLOR_LUT_SAMPLER,

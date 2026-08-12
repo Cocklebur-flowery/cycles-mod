@@ -216,7 +216,8 @@ public final class CyclesRendererMod {
     }
 
     public static boolean shouldReplaceVanillaWorld() {
-        return testFrameEnabled && FRAME_PRESENTER.hasFrame();
+        return testFrameEnabled
+                && (INTEROP_BUFFER.hasFrame() || FRAME_PRESENTER.hasFrame());
     }
 
     private static void onRenderLevelAfterLevel(RenderLevelStageEvent.AfterLevel event) {
@@ -247,6 +248,16 @@ public final class CyclesRendererMod {
                     frameId,
                     cameraInput);
             recordCameraCall(System.nanoTime() - cameraStart);
+
+            INTEROP_BUFFER.pollCompletedFrame();
+            if (INTEROP_BUFFER.hasFrame()) {
+                FRAME_PRESENTER.presentExternal(
+                        mainTarget,
+                        CyclesClientConfig.snapshot(),
+                        cameraInput.depthFar(),
+                        INTEROP_BUFFER.frameTextureView());
+                return;
+            }
 
             long now = System.nanoTime();
             int deliveredWidth = 0;
@@ -347,6 +358,7 @@ public final class CyclesRendererMod {
         SectionGeometryCollector.setEnabled(false);
         SCENE_MANAGER.reset();
         FRAME_PRESENTER.reset();
+        INTEROP_BUFFER.drainPendingCopy();
         boolean interopAttached = INTEROP_BUFFER.telemetry().nativeBound()
                 && NativeBridge.isReady()
                 && NativeBridge.vulkanInteropState().sessionAttached();
@@ -367,6 +379,7 @@ public final class CyclesRendererMod {
     }
 
     private static void onGameShuttingDown(GameShuttingDownEvent event) {
+        INTEROP_BUFFER.drainPendingCopy();
         if (INTEROP_BUFFER.telemetry().nativeBound() && NativeBridge.isReady()) {
             NativeBridge.close();
             nativeBridgeReady = false;
@@ -383,7 +396,7 @@ public final class CyclesRendererMod {
 
         GuiGraphicsExtractor graphics = event.getGuiGraphics();
         if (testFrameEnabled) {
-            Component status = FRAME_PRESENTER.hasFrame()
+            Component status = INTEROP_BUFFER.hasFrame() || FRAME_PRESENTER.hasFrame()
                     ? Component.translatable("message.cyclesrenderer.test_frame")
                     : Component.translatable("message.cyclesrenderer.building_scene");
             graphics.centeredText(
@@ -488,6 +501,8 @@ public final class CyclesRendererMod {
                 y += 10;
                 VulkanExternalBufferPrototype.Telemetry interopBuffer =
                         INTEROP_BUFFER.telemetry();
+                VulkanExternalBufferPrototype.CopyTelemetry interopCopy =
+                        INTEROP_BUFFER.copyTelemetry();
                 graphics.text(
                         minecraft.font,
                         "interop buffer=" + interopBuffer.state()
@@ -500,6 +515,33 @@ public final class CyclesRendererMod {
                                 + "/" + oneDecimalMebibytes(
                                         interopBuffer.allocationBytes()),
                         6, y, interopBuffer.allocated() ? 0xFFE0E0E0 : 0xFFFFDD88);
+                y += 10;
+                NativeBridge.VulkanInteropState interopState =
+                        NativeBridge.vulkanInteropState();
+                graphics.text(
+                        minecraft.font,
+                        "interop state active/ready/acquired="
+                                + interopState.active() + "/"
+                                + interopState.frameReady() + "/"
+                                + interopState.frameAcquired()
+                                + " gen=" + interopState.generation()
+                                + " sample=" + interopState.sampleCount()
+                                + " sync us=" + interopState.lastSyncMicros()
+                                + "/" + interopState.emaSyncMicros()
+                                + "/" + interopState.maxSyncMicros(),
+                        6, y, interopState.active() ? 0xFFE0E0E0 : 0xFFFFDD88);
+                y += 10;
+                graphics.text(
+                        minecraft.font,
+                        "interop vk copy pending/display=" + interopCopy.pending()
+                                + "/" + interopCopy.displayedGeneration()
+                                + " count=" + interopCopy.copyCount()
+                                + " gaps=" + interopCopy.generationGaps()
+                                + " enqueue us=" + interopCopy.lastCopyMicros()
+                                + "/" + interopCopy.emaCopyMicros()
+                                + "/" + interopCopy.maxCopyMicros(),
+                        6, y, interopCopy.copyCount() > 0L
+                                ? 0xFFE0E0E0 : 0xFFFFDD88);
                 y += 10;
                 graphics.text(
                         minecraft.font,
@@ -522,8 +564,8 @@ public final class CyclesRendererMod {
                         "interop available=" + vulkan.interopExtensionsAvailable()
                                 + " enabled=" + vulkan.interopExtensionsEnabled()
                                 + " prerequisites=" + interopPrerequisites
-                                + " active=false",
-                        6, y, 0xFFFFDD88);
+                                + " active=" + interopState.active(),
+                        6, y, interopState.active() ? 0xFFE0E0E0 : 0xFFFFDD88);
                 y += 10;
                 graphics.text(
                         minecraft.font,
