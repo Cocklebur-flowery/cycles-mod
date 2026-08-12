@@ -28,6 +28,8 @@ import java.util.Locale;
 import java.util.Set;
 
 public final class VulkanCapabilityProbe {
+    private static final int MAX_EXTENSION_COUNT = 4_096;
+    private static final int MAX_SURFACE_FORMAT_COUNT = 256;
     private static final String SWAPCHAIN_COLORSPACE = "VK_EXT_swapchain_colorspace";
     private static final String EXTERNAL_MEMORY_WIN32 = "VK_KHR_external_memory_win32";
     private static final String EXTERNAL_SEMAPHORE_WIN32 = "VK_KHR_external_semaphore_win32";
@@ -100,12 +102,15 @@ public final class VulkanCapabilityProbe {
             IntBuffer count = stack.callocInt(1);
             check(VK10.vkEnumerateInstanceExtensionProperties((ByteBuffer) null, count, null),
                     "enumerate instance extensions");
-            VkExtensionProperties.Buffer properties =
-                    VkExtensionProperties.calloc(count.get(0), stack);
-            check(VK10.vkEnumerateInstanceExtensionProperties(
-                            (ByteBuffer) null, count, properties),
-                    "read instance extensions");
-            return extensionNames(properties);
+            int extensionCount = checkedCount(
+                    count.get(0), MAX_EXTENSION_COUNT, "instance extensions");
+            try (VkExtensionProperties.Buffer properties =
+                         VkExtensionProperties.calloc(extensionCount)) {
+                check(VK10.vkEnumerateInstanceExtensionProperties(
+                                (ByteBuffer) null, count, properties),
+                        "read instance extensions");
+                return extensionNames(properties, count.get(0));
+            }
         }
     }
 
@@ -115,12 +120,15 @@ public final class VulkanCapabilityProbe {
             check(VK10.vkEnumerateDeviceExtensionProperties(
                             physicalDevice, (ByteBuffer) null, count, null),
                     "enumerate device extensions");
-            VkExtensionProperties.Buffer properties =
-                    VkExtensionProperties.calloc(count.get(0), stack);
-            check(VK10.vkEnumerateDeviceExtensionProperties(
-                            physicalDevice, (ByteBuffer) null, count, properties),
-                    "read device extensions");
-            return extensionNames(properties);
+            int extensionCount = checkedCount(
+                    count.get(0), MAX_EXTENSION_COUNT, "device extensions");
+            try (VkExtensionProperties.Buffer properties =
+                         VkExtensionProperties.calloc(extensionCount)) {
+                check(VK10.vkEnumerateDeviceExtensionProperties(
+                                physicalDevice, (ByteBuffer) null, count, properties),
+                        "read device extensions");
+                return extensionNames(properties, count.get(0));
+            }
         }
     }
 
@@ -134,9 +142,12 @@ public final class VulkanCapabilityProbe {
         return Set.copyOf(enabled);
     }
 
-    private static Set<String> extensionNames(VkExtensionProperties.Buffer properties) {
+    private static Set<String> extensionNames(
+            VkExtensionProperties.Buffer properties,
+            int count) {
         Set<String> result = new HashSet<>();
-        for (int index = 0; index < properties.capacity(); index++) {
+        int limit = Math.min(count, properties.capacity());
+        for (int index = 0; index < limit; index++) {
             result.add(properties.get(index).extensionNameString());
         }
         return Set.copyOf(result);
@@ -167,18 +178,30 @@ public final class VulkanCapabilityProbe {
             check(KHRSurface.vkGetPhysicalDeviceSurfaceFormatsKHR(
                             physicalDevice, surface, count, null),
                     "enumerate surface formats");
-            VkSurfaceFormatKHR.Buffer formats =
-                    VkSurfaceFormatKHR.calloc(count.get(0), stack);
-            check(KHRSurface.vkGetPhysicalDeviceSurfaceFormatsKHR(
-                            physicalDevice, surface, count, formats),
-                    "read surface formats");
-            List<SurfaceFormat> result = new ArrayList<>(count.get(0));
-            for (int index = 0; index < count.get(0); index++) {
-                VkSurfaceFormatKHR format = formats.get(index);
-                result.add(new SurfaceFormat(format.format(), format.colorSpace()));
+            int formatCount = checkedCount(
+                    count.get(0), MAX_SURFACE_FORMAT_COUNT, "surface formats");
+            try (VkSurfaceFormatKHR.Buffer formats =
+                         VkSurfaceFormatKHR.calloc(formatCount)) {
+                check(KHRSurface.vkGetPhysicalDeviceSurfaceFormatsKHR(
+                                physicalDevice, surface, count, formats),
+                        "read surface formats");
+                int limit = Math.min(count.get(0), formats.capacity());
+                List<SurfaceFormat> result = new ArrayList<>(limit);
+                for (int index = 0; index < limit; index++) {
+                    VkSurfaceFormatKHR format = formats.get(index);
+                    result.add(new SurfaceFormat(format.format(), format.colorSpace()));
+                }
+                return result;
             }
-            return result;
         }
+    }
+
+    private static int checkedCount(int count, int maximum, String description) {
+        if (count < 0 || count > maximum) {
+            throw new IllegalStateException(
+                    "invalid " + description + " count: " + count);
+        }
+        return count;
     }
 
     private static ExtensionState state(
