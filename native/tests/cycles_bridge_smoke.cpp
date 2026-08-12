@@ -231,6 +231,15 @@ CyclesBridgeRenderSettings default_settings() {
     settings.sampling_pattern = CYCLES_BRIDGE_SAMPLING_PATTERN_BLUE_NOISE_FIRST;
     settings.camera_clip_near = 0.05F;
     settings.camera_clip_far = 0.0F;
+    settings.projection_mode = CYCLES_BRIDGE_PROJECTION_PHYSICAL_LENS;
+    settings.focal_length_mm = 18.0F;
+    settings.sensor_width_mm = 36.0F;
+    settings.depth_of_field = 1U;
+    settings.focus_distance = 8.0F;
+    settings.f_stop = 4.0F;
+    settings.aperture_blades = 6U;
+    settings.aperture_rotation_degrees = 15.0F;
+    settings.aperture_ratio = 1.2F;
     settings.interactive_samples = 1;
     settings.still_samples = 1;
     settings.stationary_delay_millis = 150;
@@ -383,7 +392,7 @@ bool verify_progressive_sampling(
 int main(int argc, char** argv) {
     const bool require_optix = argc > 1 && std::strcmp(argv[1], "--require-optix") == 0;
     std::cerr << "[smoke] ABI check\n";
-    if (cycles_bridge_abi_version() != 18U) {
+    if (cycles_bridge_abi_version() != 19U) {
         std::cerr << "unexpected native ABI " << cycles_bridge_abi_version() << '\n';
         return 1;
     }
@@ -681,10 +690,21 @@ int main(int argc, char** argv) {
         return 1;
     }
     const std::uint64_t all_passes_mask = (1ULL << CYCLES_BRIDGE_PASS_COUNT) - 1ULL;
+    const float expected_physical_fov = 2.0F * std::atan(
+        36.0F / (2.0F * 18.0F * (static_cast<float>(kWidth) / kHeight)));
     if (diagnostics.sampling_pattern
             != CYCLES_BRIDGE_SAMPLING_PATTERN_BLUE_NOISE_FIRST
         || std::abs(diagnostics.effective_camera_clip_near - 0.125F) > 1.0e-6F
         || std::abs(diagnostics.effective_camera_clip_far - 50.0F) > 1.0e-6F
+        || diagnostics.projection_mode != CYCLES_BRIDGE_PROJECTION_PHYSICAL_LENS
+        || std::abs(diagnostics.vertical_fov_radians - expected_physical_fov) > 1.0e-5F
+        || diagnostics.depth_of_field != 1U
+        || std::abs(diagnostics.focus_distance - 8.0F) > 1.0e-6F
+        || std::abs(diagnostics.f_stop - 4.0F) > 1.0e-6F
+        || std::abs(diagnostics.aperture_size - 0.00225F) > 1.0e-6F
+        || diagnostics.aperture_blades != 6U
+        || std::abs(diagnostics.aperture_rotation_radians - 0.2617994F) > 1.0e-5F
+        || std::abs(diagnostics.aperture_ratio - 1.2F) > 1.0e-6F
         || diagnostics.cached_raw_pass_mask != all_passes_mask
         || diagnostics.cached_denoised_pass_mask != 0U
         || diagnostics.pass_cache_entry_count < CYCLES_BRIDGE_PASS_COUNT
@@ -700,6 +720,12 @@ int main(int argc, char** argv) {
                   << diagnostics.sampling_pattern
                   << ";clip=" << diagnostics.effective_camera_clip_near
                   << '/' << diagnostics.effective_camera_clip_far
+                  << ";projection/fov=" << diagnostics.projection_mode
+                  << '/' << diagnostics.vertical_fov_radians
+                  << ";dof/focus/fstop/aperture=" << diagnostics.depth_of_field
+                  << '/' << diagnostics.focus_distance
+                  << '/' << diagnostics.f_stop
+                  << '/' << diagnostics.aperture_size
                   << ";raw=" << diagnostics.cached_raw_pass_mask
                   << ";denoised=" << diagnostics.cached_denoised_pass_mask
                   << ";entries=" << diagnostics.pass_cache_entry_count

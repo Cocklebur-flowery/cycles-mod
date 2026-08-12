@@ -74,6 +74,15 @@ CyclesBridgeRenderSettings default_settings() {
     settings.sampling_pattern = CYCLES_BRIDGE_SAMPLING_PATTERN_BLUE_NOISE_FIRST;
     settings.camera_clip_near = 0.05F;
     settings.camera_clip_far = 0.0F;
+    settings.projection_mode = CYCLES_BRIDGE_PROJECTION_MINECRAFT_FOV;
+    settings.focal_length_mm = 50.0F;
+    settings.sensor_width_mm = 36.0F;
+    settings.depth_of_field = 0U;
+    settings.focus_distance = 10.0F;
+    settings.f_stop = 2.8F;
+    settings.aperture_blades = 0U;
+    settings.aperture_rotation_degrees = 0.0F;
+    settings.aperture_ratio = 1.0F;
     settings.interactive_samples = 1;
     settings.still_samples = 8;
     settings.stationary_delay_millis = 150;
@@ -101,8 +110,6 @@ bool same_render_settings(
     second.revision = 0;
     first.debug_overlay = 0;
     second.debug_overlay = 0;
-    std::fill(std::begin(first.reserved), std::end(first.reserved), 0U);
-    std::fill(std::begin(second.reserved), std::end(second.reserved), 0U);
     return std::memcmp(&first, &second, sizeof(first)) == 0;
 }
 
@@ -342,7 +349,11 @@ bool nearly_equal(double first, double second, double tolerance) {
     return std::abs(first - second) <= tolerance;
 }
 
-bool same_camera(const CameraRequest& current, const CameraRequest& requested) {
+bool same_camera(
+    const CameraRequest& current,
+    const CameraRequest& requested,
+    bool compare_minecraft_fov,
+    bool compare_minecraft_far) {
     const CyclesBridgeCamera& first = current.camera;
     const CyclesBridgeCamera& second = requested.camera;
     return current.render_width == requested.render_width
@@ -354,8 +365,10 @@ bool same_camera(const CameraRequest& current, const CameraRequest& requested) {
         && nearly_equal(first.rotation_y, second.rotation_y, 1.0e-6)
         && nearly_equal(first.rotation_z, second.rotation_z, 1.0e-6)
         && nearly_equal(first.rotation_w, second.rotation_w, 1.0e-6)
-        && nearly_equal(first.vertical_fov_radians, second.vertical_fov_radians, 1.0e-6)
-        && nearly_equal(first.depth_far, second.depth_far, 1.0e-3);
+        && (!compare_minecraft_fov
+            || nearly_equal(first.vertical_fov_radians, second.vertical_fov_radians, 1.0e-6))
+        && (!compare_minecraft_far
+            || nearly_equal(first.depth_far, second.depth_far, 1.0e-3));
 }
 
 float linear_to_srgb(float value) {
@@ -1379,13 +1392,29 @@ ccl::BufferParams configure_camera(
     camera->set_camera_type(ccl::CAMERA_PERSPECTIVE);
     camera->set_full_width(static_cast<int>(camera_request.render_width));
     camera->set_full_height(static_cast<int>(camera_request.render_height));
-    camera->set_fov(camera_request.camera.vertical_fov_radians);
+    const float aspect = static_cast<float>(camera_request.render_width)
+        / static_cast<float>(std::max(1U, camera_request.render_height));
+    const float vertical_fov = settings.projection_mode
+            == CYCLES_BRIDGE_PROJECTION_PHYSICAL_LENS
+        ? 2.0F * std::atan(
+            settings.sensor_width_mm / (2.0F * settings.focal_length_mm * aspect))
+        : camera_request.camera.vertical_fov_radians;
+    camera->set_fov(vertical_fov);
     const float near_clip = settings.camera_clip_near;
     const float requested_far_clip = settings.camera_clip_far > 0.0F
         ? settings.camera_clip_far
         : camera_request.camera.depth_far;
     camera->set_nearclip(near_clip);
     camera->set_farclip(std::max(near_clip + 0.001F, requested_far_clip));
+    const float aperture_size = settings.depth_of_field != 0U
+        ? (settings.focal_length_mm / 1000.0F) / (2.0F * settings.f_stop)
+        : 0.0F;
+    camera->set_focaldistance(settings.focus_distance);
+    camera->set_aperturesize(aperture_size);
+    camera->set_blades(settings.aperture_blades);
+    camera->set_bladesrotation(
+        settings.aperture_rotation_degrees * 3.14159265358979323846F / 180.0F);
+    camera->set_aperture_ratio(settings.aperture_ratio);
     const CyclesBridgeSceneResources& resources = scene_request.resources->resources;
     CyclesBridgeScene scene{};
     scene.origin_x = resources.origin_x;
@@ -1922,6 +1951,15 @@ class CyclesEngine::Impl final {
             diagnostics.sampling_pattern = sampling_pattern_diagnostic_;
             diagnostics.effective_camera_clip_near = camera_clip_near_diagnostic_;
             diagnostics.effective_camera_clip_far = camera_clip_far_diagnostic_;
+            diagnostics.projection_mode = projection_mode_diagnostic_;
+            diagnostics.vertical_fov_radians = vertical_fov_diagnostic_;
+            diagnostics.depth_of_field = depth_of_field_diagnostic_;
+            diagnostics.focus_distance = focus_distance_diagnostic_;
+            diagnostics.f_stop = f_stop_diagnostic_;
+            diagnostics.aperture_size = aperture_size_diagnostic_;
+            diagnostics.aperture_blades = aperture_blades_diagnostic_;
+            diagnostics.aperture_rotation_radians = aperture_rotation_diagnostic_;
+            diagnostics.aperture_ratio = aperture_ratio_diagnostic_;
         }
         frames_.fill_diagnostics(diagnostics);
     }
@@ -2045,7 +2083,13 @@ class CyclesEngine::Impl final {
                 camera.viewport_height,
                 requested_settings_,
                 current_sampling_state);
-            if (!requested_camera_ || !same_camera(*requested_camera_, request)) {
+            if (!requested_camera_
+                || !same_camera(
+                    *requested_camera_,
+                    request,
+                    requested_settings_.projection_mode
+                        == CYCLES_BRIDGE_PROJECTION_MINECRAFT_FOV,
+                    requested_settings_.camera_clip_far == 0.0F)) {
                 std::tie(request.render_width, request.render_height) = render_dimensions(
                     camera.viewport_width,
                     camera.viewport_height,
@@ -2309,6 +2353,25 @@ class CyclesEngine::Impl final {
                 settings.camera_clip_far > 0.0F
                     ? settings.camera_clip_far
                     : camera_request.camera.depth_far);
+            projection_mode_diagnostic_ = settings.projection_mode;
+            const float aspect = static_cast<float>(camera_request.render_width)
+                / static_cast<float>(std::max(1U, camera_request.render_height));
+            vertical_fov_diagnostic_ = settings.projection_mode
+                    == CYCLES_BRIDGE_PROJECTION_PHYSICAL_LENS
+                ? 2.0F * std::atan(
+                    settings.sensor_width_mm
+                    / (2.0F * settings.focal_length_mm * aspect))
+                : camera_request.camera.vertical_fov_radians;
+            depth_of_field_diagnostic_ = settings.depth_of_field;
+            focus_distance_diagnostic_ = settings.focus_distance;
+            f_stop_diagnostic_ = settings.f_stop;
+            aperture_size_diagnostic_ = settings.depth_of_field != 0U
+                ? (settings.focal_length_mm / 1000.0F) / (2.0F * settings.f_stop)
+                : 0.0F;
+            aperture_blades_diagnostic_ = settings.aperture_blades;
+            aperture_rotation_diagnostic_ =
+                settings.aperture_rotation_degrees * 3.14159265358979323846F / 180.0F;
+            aperture_ratio_diagnostic_ = settings.aperture_ratio;
             if (sampling_state_diagnostic_ != camera_request.sampling_state) {
                 sampling_transition_count_diagnostic_++;
             }
@@ -2622,6 +2685,15 @@ class CyclesEngine::Impl final {
         CYCLES_BRIDGE_SAMPLING_PATTERN_BLUE_NOISE_FIRST;
     float camera_clip_near_diagnostic_ = 0.05F;
     float camera_clip_far_diagnostic_ = 0.0F;
+    std::uint32_t projection_mode_diagnostic_ = CYCLES_BRIDGE_PROJECTION_MINECRAFT_FOV;
+    float vertical_fov_diagnostic_ = 0.0F;
+    std::uint32_t depth_of_field_diagnostic_ = 0U;
+    float focus_distance_diagnostic_ = 10.0F;
+    float f_stop_diagnostic_ = 2.8F;
+    float aperture_size_diagnostic_ = 0.0F;
+    std::uint32_t aperture_blades_diagnostic_ = 0U;
+    float aperture_rotation_diagnostic_ = 0.0F;
+    float aperture_ratio_diagnostic_ = 1.0F;
     std::string state_;
     std::string terminal_error_;
 

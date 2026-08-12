@@ -147,6 +147,11 @@ enum CyclesBridgeSamplingPattern : std::uint32_t {
     CYCLES_BRIDGE_SAMPLING_PATTERN_BLUE_NOISE_ROUND = 4,
 };
 
+enum CyclesBridgeProjectionMode : std::uint32_t {
+    CYCLES_BRIDGE_PROJECTION_MINECRAFT_FOV = 0,
+    CYCLES_BRIDGE_PROJECTION_PHYSICAL_LENS = 1,
+};
+
 struct CyclesBridgeCamera {
     std::uint32_t struct_size;
     std::uint32_t struct_version;
@@ -279,7 +284,15 @@ struct CyclesBridgeRenderSettings {
     std::uint32_t sampling_pattern;
     float camera_clip_near;
     float camera_clip_far;
-    std::uint32_t reserved[3];
+    std::uint32_t projection_mode;
+    float focal_length_mm;
+    float sensor_width_mm;
+    std::uint32_t depth_of_field;
+    float focus_distance;
+    float f_stop;
+    std::uint32_t aperture_blades;
+    float aperture_rotation_degrees;
+    float aperture_ratio;
 };
 
 struct CyclesBridgePassDescriptor {
@@ -398,7 +411,15 @@ struct CyclesBridgeDiagnostics {
     std::uint32_t sampling_pattern;
     float effective_camera_clip_near;
     float effective_camera_clip_far;
-    std::uint32_t reserved;
+    std::uint32_t projection_mode;
+    float vertical_fov_radians;
+    std::uint32_t depth_of_field;
+    float focus_distance;
+    float f_stop;
+    float aperture_size;
+    std::uint32_t aperture_blades;
+    float aperture_rotation_radians;
+    float aperture_ratio;
 };
 
 struct CyclesBridgeVertex {

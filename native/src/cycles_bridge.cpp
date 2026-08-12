@@ -16,9 +16,9 @@ struct CyclesBridgeRenderer {
 
 namespace {
 
-constexpr std::uint32_t kAbiVersion = 18;
+constexpr std::uint32_t kAbiVersion = 19;
 constexpr std::uint32_t kStructVersion = 1;
-constexpr char kBuildInfo[] = "cyclesrenderer-native/cycles-5.2;abi=18";
+constexpr char kBuildInfo[] = "cyclesrenderer-native/cycles-5.2;abi=19";
 
 static_assert(sizeof(CyclesBridgeCamera) == 80);
 static_assert(offsetof(CyclesBridgeCamera, frame_id) == 8);
@@ -34,12 +34,12 @@ static_assert(sizeof(CyclesBridgeFrame) == 40);
 static_assert(sizeof(CyclesBridgeFrameView) == 72);
 static_assert(offsetof(CyclesBridgeFrameView, generation) == 16);
 static_assert(offsetof(CyclesBridgeFrameView, pixels) == 48);
-static_assert(sizeof(CyclesBridgeRenderSettings) == 208);
+static_assert(sizeof(CyclesBridgeRenderSettings) == 232);
 static_assert(sizeof(CyclesBridgePassDescriptor) == 64);
 static_assert(sizeof(CyclesBridgeCapabilities) == 64);
 static_assert(sizeof(CyclesBridgeColorLutDescriptor) == 64);
 static_assert(offsetof(CyclesBridgeColorLutDescriptor, pixel_byte_count) == 32);
-static_assert(sizeof(CyclesBridgeDiagnostics) == 344);
+static_assert(sizeof(CyclesBridgeDiagnostics) == 376);
 static_assert(sizeof(CyclesBridgeVertex) == 40);
 static_assert(offsetof(CyclesBridgeVertex, packed_rgba) == 32);
 static_assert(sizeof(CyclesBridgeTriangle) == 16);
@@ -197,6 +197,23 @@ bool valid_settings(const CyclesBridgeRenderSettings& settings) {
         && std::isfinite(settings.camera_clip_far)
         && settings.camera_clip_far >= 0.0F
         && settings.camera_clip_far <= 1000000.0F
+        && settings.projection_mode <= CYCLES_BRIDGE_PROJECTION_PHYSICAL_LENS
+        && std::isfinite(settings.focal_length_mm)
+        && settings.focal_length_mm >= 1.0F && settings.focal_length_mm <= 300.0F
+        && std::isfinite(settings.sensor_width_mm)
+        && settings.sensor_width_mm >= 1.0F && settings.sensor_width_mm <= 100.0F
+        && valid_bool(settings.depth_of_field)
+        && std::isfinite(settings.focus_distance)
+        && settings.focus_distance >= 0.01F && settings.focus_distance <= 1000000.0F
+        && std::isfinite(settings.f_stop)
+        && settings.f_stop >= 0.1F && settings.f_stop <= 128.0F
+        && (settings.aperture_blades == 0U
+            || (settings.aperture_blades >= 3U && settings.aperture_blades <= 16U))
+        && std::isfinite(settings.aperture_rotation_degrees)
+        && settings.aperture_rotation_degrees >= -360.0F
+        && settings.aperture_rotation_degrees <= 360.0F
+        && std::isfinite(settings.aperture_ratio)
+        && settings.aperture_ratio >= 0.1F && settings.aperture_ratio <= 10.0F
         && settings.interactive_samples >= 1U && settings.interactive_samples <= 4096U
         && settings.still_samples >= 1U && settings.still_samples <= 4096U
         && settings.stationary_delay_millis <= 10000U
