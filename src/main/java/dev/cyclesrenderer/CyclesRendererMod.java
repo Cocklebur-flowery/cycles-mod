@@ -217,7 +217,7 @@ public final class CyclesRendererMod {
 
     public static boolean shouldReplaceVanillaWorld() {
         return testFrameEnabled
-                && (INTEROP_BUFFER.hasFrame() || FRAME_PRESENTER.hasFrame());
+                && (INTEROP_BUFFER.hasActiveFrame() || FRAME_PRESENTER.hasFrame());
     }
 
     private static void onRenderLevelAfterLevel(RenderLevelStageEvent.AfterLevel event) {
@@ -250,7 +250,7 @@ public final class CyclesRendererMod {
             recordCameraCall(System.nanoTime() - cameraStart);
 
             INTEROP_BUFFER.pollCompletedFrame();
-            if (INTEROP_BUFFER.hasFrame()) {
+            if (INTEROP_BUFFER.hasActiveFrame()) {
                 FRAME_PRESENTER.presentExternal(
                         mainTarget,
                         CyclesClientConfig.snapshot(),
@@ -396,7 +396,7 @@ public final class CyclesRendererMod {
 
         GuiGraphicsExtractor graphics = event.getGuiGraphics();
         if (testFrameEnabled) {
-            Component status = INTEROP_BUFFER.hasFrame() || FRAME_PRESENTER.hasFrame()
+            Component status = INTEROP_BUFFER.hasActiveFrame() || FRAME_PRESENTER.hasFrame()
                     ? Component.translatable("message.cyclesrenderer.test_frame")
                     : Component.translatable("message.cyclesrenderer.building_scene");
             graphics.centeredText(

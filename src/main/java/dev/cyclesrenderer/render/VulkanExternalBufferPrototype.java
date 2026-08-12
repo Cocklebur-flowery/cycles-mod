@@ -66,6 +66,7 @@ public final class VulkanExternalBufferPrototype implements AutoCloseable {
     private long lastCopyMicros;
     private long emaCopyMicros;
     private long maxCopyMicros;
+    private boolean nativeActive;
     private Telemetry telemetry = Telemetry.inactive("not initialized");
 
     public void initialize(Minecraft minecraft) {
@@ -137,6 +138,7 @@ public final class VulkanExternalBufferPrototype implements AutoCloseable {
         }
         NativeBridge.VulkanInteropState state =
                 NativeBridge.acquireVulkanInteropFrame(displayedGeneration);
+        nativeActive = state.active();
         if (!state.frameAcquired() || state.generation() <= displayedGeneration) {
             return;
         }
@@ -159,6 +161,10 @@ public final class VulkanExternalBufferPrototype implements AutoCloseable {
 
     public boolean hasFrame() {
         return frameTarget != null && displayedGeneration != 0L;
+    }
+
+    public boolean hasActiveFrame() {
+        return nativeActive && hasFrame();
     }
 
     public GpuTextureView frameTextureView() {
@@ -456,6 +462,7 @@ public final class VulkanExternalBufferPrototype implements AutoCloseable {
         }
         releaseHandles();
         displayedGeneration = 0L;
+        nativeActive = false;
         copyCount = 0L;
         generationGaps = 0L;
         lastCopyMicros = 0L;

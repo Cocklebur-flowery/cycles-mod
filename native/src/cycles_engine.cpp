@@ -1121,10 +1121,13 @@ class VulkanInteropDisplayDriver final : public ccl::DisplayDriver {
           produced_camera_revision_(produced_camera_revision) {}
 
     ~VulkanInteropDisplayDriver() override {
-        std::lock_guard lock(state_mutex_);
-        state_.flags &= ~(CYCLES_BRIDGE_VULKAN_INTEROP_BOUND
-                          | CYCLES_BRIDGE_VULKAN_INTEROP_ACTIVE
-                          | CYCLES_BRIDGE_VULKAN_INTEROP_SESSION_ATTACHED);
+        std::unique_lock lock(state_mutex_);
+        state_changed_.wait(lock, [this] {
+            return stopping_
+                || (state_.flags
+                    & CYCLES_BRIDGE_VULKAN_INTEROP_FRAME_ACQUIRED) == 0U;
+        });
+        state_.flags = 0U;
     }
 
     void next_tile_begin() override {}
