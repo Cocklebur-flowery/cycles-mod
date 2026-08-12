@@ -1,6 +1,6 @@
 # Cycles 采样模式与物理相机（P12）
 
-状态：P12a-P12c 已完成；P12d Native 已验证，Java/F9/F10 待接入
+状态：P12a-P12d 已完成自动验证；待游戏内人工验收
 目标平台：Blender Cycles 5.2 / Minecraft 26.2 相机 / OptiX
 
 ## 1. 目标与保持不变的默认行为
@@ -92,9 +92,11 @@ Native smoke 依次覆盖：
 - Native 诊断追加最终生效的 near/far；F10 同时显示配置值和生效值，因此可以确认 `0 = Minecraft` 实际解析到了多远。
 - 裁剪变化通过现有 settings accumulation reset 生效，不触发 Scene reset 或 Section 重传。Native smoke 使用 `0.125/50` 出帧并断言最终值。
 
-## 9. P12d Native 实施记录
+## 9. P12d 实施记录
 
 - ABI v19 将物理投影、焦距、传感器宽度、景深、焦点距离、f-stop、光圈叶片/旋转/比例写入 232 字节设置结构；376 字节诊断结构返回 Native 最终使用的垂直 FOV 与光圈参数。
 - `PHYSICAL_LENS` 按当前宽高比由横向传感器换算垂直 FOV；`MINECRAFT_FOV` 保持原版投影。固定物理投影和固定 far override 时，Minecraft FOV/depthFar 的无关变化不会误触发累计重置。
 - 景深关闭时光圈半径为零；开启时使用 `focalLengthMeters / (2 * fStop)`，并将 UI 角度转换为 Cycles 弧度。
-- Native smoke 在实际 OptiX 出帧中验证 18 mm / 36 mm 物理投影、8 block 焦距、f/4、六叶片、15 度与 1.2 光圈比例；Java 配置和界面将在下一独立提交中接入。
+- Native smoke 在实际 OptiX 出帧中验证 18 mm / 36 mm 物理投影、8 block 焦距、f/4、六叶片、15 度与 1.2 光圈比例。
+- NeoForge 客户端配置公开投影来源、焦距、传感器、景深、焦距平面、f-stop、圆形/多叶片光圈、旋转和比例。圆形光圈写入 Native 值 `0`，多边形光圈只允许 `3..16`，因此配置文件不会产生非法的 1/2 叶片状态。
+- F9 显示投影、焦距/传感器和景深摘要；F10 显示 configured/native 投影、最终垂直 FOV、有效景深、焦点距离与光圈半径，便于区分 UI 目标值和 Cycles 实际值。
