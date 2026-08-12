@@ -141,7 +141,7 @@ Cycles/OptiX
 P15a 设备扩展开关：
 
 - 设备创建早于 NeoForge 客户端配置加载，因此该开关不能在 F9 中热切换。
-- 启动前设置 JVM 属性 `-Dcyclesrenderer.experimentalVulkanInterop=true`，或环境变量 `CYCLESRENDERER_VULKAN_INTEROP=1`。默认关闭。
+- P16a 起在驱动支持时默认请求互操作扩展；可用 JVM 属性 `-Dcyclesrenderer.experimentalVulkanInterop=false`，或环境变量 `CYCLESRENDERER_VULKAN_INTEROP=false` 显式关闭。
 - Mixin 在 Minecraft 已选定物理设备、尚未创建逻辑设备的边界检查两个 Win32 扩展。仅两者都可用时才把它们加入设备扩展集。
 - F10 `interop bootstrap` 报告开关请求、注入是否执行及未启用原因；现有 `available/enabled` 行仍从实际 Vulkan 设备诊断读取。
 - P15a 只启用后续创建可导出 buffer 的前置扩展，尚未创建共享资源，`active` 仍必须为 `false`。
@@ -179,7 +179,7 @@ P15c2/c3 保守同步复制与 Native ABI v23：
 
 P15 游戏内验收：
 
-1. **必须重新启动客户端**并在启动命令中加入 `-Dcyclesrenderer.experimentalVulkanInterop=true`，或启动前设置 `CYCLESRENDERER_VULKAN_INTEROP=1`；F9 不能热启用设备扩展。
+1. **必须重新启动客户端**；P16a 默认请求所需设备扩展，F9 不能热启用或关闭设备扩展。若显式设置过关闭开关，应先移除或改为 `true`。
 2. 进入世界后按 F8。F10 应显示 `allocated/bound=true/true`、`active=true`，随后 `copy count` 与 displayed generation 持续推进；画面仍经现有显示 shader 输出。
 3. 观察 CPU 回退指标：interop 活动后 Presenter `upload count/MiB` 不应继续增长，`interop vk copy count` 应增长。若 UUID、扩展或 CUDA import 不满足，原有 FrameStore/FFM 路径仍应出图。
 4. 再按 F8：允许为排空当前 Vulkan copy 发生一次短暂同步，但必须恢复原版、不卡死、不黑屏、不触发 device lost。重新按 F8 应能重新建立资源。

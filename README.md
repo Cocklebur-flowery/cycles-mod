@@ -25,7 +25,7 @@
 
 当前 Native DisplayDriver、类型化 Pass cache 与 Minecraft 上传纹理均保持 scene-linear RGBA16F。`Standard` 和调试用 `Raw` 已生效，EV/Gamma 在 GPU 显示 shader 中应用；`AgX` 与 `Khronos PBR Neutral` 的配置 ID 已预留，但在 Blender OCIO 配置/LUT 正式部署前按 `Standard` 显示，不能视为 Blender 色彩管理已经完成。暂未实现正确的玻璃/水折射材质、方块实体、实体、天空系统、动态光源、LabPBR 和跨平台打包。
 
-P15 互操作默认关闭。启动前加入 JVM 参数 `-Dcyclesrenderer.experimentalVulkanInterop=true`，或设置环境变量 `CYCLESRENDERER_VULKAN_INTEROP=1`，重启后才会为 Minecraft Vulkan 设备请求 Win32 外部内存扩展。当前固定为 `480×270 RGBA16F` 单缓冲保守同步原型；1080p、动态分辨率、三槽并行和跨 API external semaphore 属于 P16。
+P16 开始会在驱动支持时默认为 Minecraft Vulkan 设备请求 Win32 外部内存与 semaphore 扩展。故障排查时可在启动前加入 JVM 参数 `-Dcyclesrenderer.experimentalVulkanInterop=false`，或设置环境变量 `CYCLESRENDERER_VULKAN_INTEROP=false` 来显式关闭；该选择必须在创建 Vulkan 设备前确定，因此修改后需要重启客户端。当前显示数据面仍是 P15 的固定 `480×270 RGBA16F` 单缓冲原型；真实分辨率、三槽并行和跨 API external semaphore 属于后续 P16 子阶段。
 
 普通 Section 修改已经下沉到现有 Cycles Scene；但几何规模变化以及 Section 增删仍会让 Cycles 更新设备几何和加速结构，不能视为零成本局部 BVH 更新。共享图集、场景原点或设备变化仍会重建 Session。
 

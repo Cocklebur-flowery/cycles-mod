@@ -39,12 +39,20 @@ public final class VulkanCapabilityProbe {
             "cyclesrenderer.experimentalVulkanInterop";
     private static final String INTEROP_ENVIRONMENT =
             "CYCLESRENDERER_VULKAN_INTEROP";
-    private static final boolean INTEROP_REQUESTED = interopRequested();
+    private static final InteropRequest INTEROP_REQUEST = interopRequest();
 
     private static volatile Snapshot cached;
     private static volatile InteropBootstrap interopBootstrap =
-            new InteropBootstrap(INTEROP_REQUESTED, false, false, false, false,
-                    INTEROP_REQUESTED ? "awaiting device creation" : "disabled");
+            new InteropBootstrap(
+                    INTEROP_REQUEST.requested(),
+                    INTEROP_REQUEST.source(),
+                    false,
+                    false,
+                    false,
+                    false,
+                    INTEROP_REQUEST.requested()
+                            ? "awaiting device creation"
+                            : "disabled");
 
     private VulkanCapabilityProbe() {
     }
@@ -55,9 +63,15 @@ public final class VulkanCapabilityProbe {
         boolean memoryAvailable = physicalDevice.hasDeviceExtension(EXTERNAL_MEMORY_WIN32);
         boolean semaphoreAvailable =
                 physicalDevice.hasDeviceExtension(EXTERNAL_SEMAPHORE_WIN32);
-        if (!INTEROP_REQUESTED) {
+        if (!INTEROP_REQUEST.requested()) {
             interopBootstrap = new InteropBootstrap(
-                    false, true, memoryAvailable, semaphoreAvailable, false, "disabled");
+                    false,
+                    INTEROP_REQUEST.source(),
+                    true,
+                    memoryAvailable,
+                    semaphoreAvailable,
+                    false,
+                    "disabled");
             return requestedExtensions;
         }
         if (!memoryAvailable || !semaphoreAvailable) {
@@ -67,7 +81,13 @@ public final class VulkanCapabilityProbe {
                             ? "memory extension unavailable"
                             : "semaphore extension unavailable";
             interopBootstrap = new InteropBootstrap(
-                    true, true, memoryAvailable, semaphoreAvailable, false, reason);
+                    true,
+                    INTEROP_REQUEST.source(),
+                    true,
+                    memoryAvailable,
+                    semaphoreAvailable,
+                    false,
+                    reason);
             return requestedExtensions;
         }
 
@@ -75,7 +95,13 @@ public final class VulkanCapabilityProbe {
         extensions.add(EXTERNAL_MEMORY_WIN32);
         extensions.add(EXTERNAL_SEMAPHORE_WIN32);
         interopBootstrap = new InteropBootstrap(
-                true, true, true, true, true, "extensions requested");
+                true,
+                INTEROP_REQUEST.source(),
+                true,
+                true,
+                true,
+                true,
+                "extensions requested");
         return extensions;
     }
 
@@ -140,13 +166,18 @@ public final class VulkanCapabilityProbe {
         }
     }
 
-    private static boolean interopRequested() {
+    private static InteropRequest interopRequest() {
         String property = System.getProperty(INTEROP_PROPERTY);
         if (property != null) {
-            return Boolean.parseBoolean(property);
+            return new InteropRequest(Boolean.parseBoolean(property), "jvm-property");
         }
         String environment = System.getenv(INTEROP_ENVIRONMENT);
-        return "1".equals(environment) || Boolean.parseBoolean(environment);
+        if (environment != null) {
+            return new InteropRequest(
+                    "1".equals(environment) || Boolean.parseBoolean(environment),
+                    "environment");
+        }
+        return new InteropRequest(true, "default-enabled");
     }
 
     private static Set<String> supportedInstanceExtensions() {
@@ -276,8 +307,12 @@ public final class VulkanCapabilityProbe {
         }
     }
 
+    private record InteropRequest(boolean requested, String source) {
+    }
+
     public record InteropBootstrap(
             boolean requested,
+            String requestSource,
             boolean attempted,
             boolean memoryAvailable,
             boolean semaphoreAvailable,
@@ -285,6 +320,7 @@ public final class VulkanCapabilityProbe {
             String reason) {
         public String summary() {
             return "request=" + requested
+                    + " source=" + requestSource
                     + " attempted=" + attempted
                     + " injected=" + extensionsRequested
                     + " reason=" + reason;
