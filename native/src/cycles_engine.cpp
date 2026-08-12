@@ -1155,10 +1155,13 @@ class VulkanInteropDisplayDriver final : public ccl::DisplayDriver {
         if (!frames_.display_update_begin(params, texture_width, texture_height)) {
             return false;
         }
-        compatible_ = static_cast<std::uint32_t>(params.full_size.x)
-                == snapshot_.descriptor.width
-            && static_cast<std::uint32_t>(params.full_size.y)
-                == snapshot_.descriptor.height;
+        const std::uint64_t width = static_cast<std::uint32_t>(params.full_size.x);
+        const std::uint64_t height = static_cast<std::uint32_t>(params.full_size.y);
+        compatible_ = width <= std::numeric_limits<std::uint64_t>::max() / height
+            && width * height
+                <= snapshot_.descriptor.allocation_byte_count / sizeof(ccl::half4);
+        current_width_ = static_cast<std::uint32_t>(width);
+        current_height_ = static_cast<std::uint32_t>(height);
         used_interop_ = false;
         update_started_ = std::chrono::steady_clock::now();
         return true;
@@ -1177,8 +1180,8 @@ class VulkanInteropDisplayDriver final : public ccl::DisplayDriver {
         state_.flags |= CYCLES_BRIDGE_VULKAN_INTEROP_FRAME_READY;
         state_.generation++;
         state_.completed_frame_count++;
-        state_.width = snapshot_.descriptor.width;
-        state_.height = snapshot_.descriptor.height;
+        state_.width = current_width_;
+        state_.height = current_height_;
         state_.last_sync_micros = elapsed;
         state_.ema_sync_micros = update_ema(state_.ema_sync_micros, elapsed);
         state_.max_sync_micros = std::max(state_.max_sync_micros, elapsed);
@@ -1239,6 +1242,8 @@ class VulkanInteropDisplayDriver final : public ccl::DisplayDriver {
     std::chrono::steady_clock::time_point update_started_{};
     bool compatible_ = false;
     bool used_interop_ = false;
+    std::uint32_t current_width_ = 0U;
+    std::uint32_t current_height_ = 0U;
 };
 
 class MemoryImageLoader final : public ccl::ImageLoader {
@@ -2131,9 +2136,6 @@ class CyclesEngine::Impl final {
                             requested_camera_->camera.viewport_height,
                             requested_settings_,
                             CYCLES_BRIDGE_SAMPLING_INTERACTIVE);
-                    apply_vulkan_interop_dimensions(
-                        requested_camera_->render_width,
-                        requested_camera_->render_height);
                     requested_camera_->sample_count =
                         static_cast<int>(requested_settings_.interactive_samples);
                     requested_camera_->sampling_state =
@@ -2410,8 +2412,6 @@ class CyclesEngine::Impl final {
                 camera.viewport_height,
                 requested_settings_,
                 current_sampling_state);
-            apply_vulkan_interop_dimensions(
-                request.render_width, request.render_height);
             if (!requested_camera_
                 || !same_camera(
                     *requested_camera_,
@@ -2424,8 +2424,6 @@ class CyclesEngine::Impl final {
                     camera.viewport_height,
                     requested_settings_,
                     CYCLES_BRIDGE_SAMPLING_INTERACTIVE);
-                apply_vulkan_interop_dimensions(
-                    request.render_width, request.render_height);
                 request.sample_count =
                     static_cast<int>(requested_settings_.interactive_samples);
                 request.sampling_state = CYCLES_BRIDGE_SAMPLING_INTERACTIVE;
@@ -2451,8 +2449,6 @@ class CyclesEngine::Impl final {
                         camera.viewport_height,
                         requested_settings_,
                         CYCLES_BRIDGE_SAMPLING_STILL);
-                    apply_vulkan_interop_dimensions(
-                        request.render_width, request.render_height);
                     request.sample_count = static_cast<int>(requested_settings_.still_samples);
                     request.sampling_state = CYCLES_BRIDGE_SAMPLING_STILL;
                     request.preserve_pass_cache = true;
@@ -2497,18 +2493,6 @@ class CyclesEngine::Impl final {
             && effective_denoiser_ == 0U
             && active_pass_diagnostic_ == CYCLES_BRIDGE_PASS_COMBINED) {
             denoiser_schedule_reason_ = CYCLES_BRIDGE_DENOISER_SCHEDULE_SETTLING;
-        }
-    }
-
-    void apply_vulkan_interop_dimensions(
-        std::uint32_t& width,
-        std::uint32_t& height) const {
-        std::lock_guard lock(interop_mutex_);
-        if ((interop_state_.flags
-             & (CYCLES_BRIDGE_VULKAN_INTEROP_BOUND
-                | CYCLES_BRIDGE_VULKAN_INTEROP_SESSION_ATTACHED)) != 0U) {
-            width = interop_descriptor_.width;
-            height = interop_descriptor_.height;
         }
     }
 

@@ -441,6 +441,8 @@ struct CyclesBridgeDiagnostics {
 struct CyclesBridgeVulkanInteropBuffer {
     std::uint32_t struct_size;
     std::uint32_t struct_version;
+    // Capacity dimensions used for diagnostics. allocation_byte_count is the
+    // authoritative limit; active frames may use any dimensions that fit.
     std::uint32_t width;
     std::uint32_t height;
     std::uint32_t pixel_format;
