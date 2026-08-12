@@ -1,16 +1,26 @@
 package dev.cyclesrenderer.render;
 
 import com.mojang.blaze3d.systems.GpuDeviceBackend;
+import com.mojang.blaze3d.buffers.GpuFence;
+import com.mojang.blaze3d.GpuFormat;
+import com.mojang.blaze3d.pipeline.TextureTarget;
 import com.mojang.blaze3d.systems.RenderSystem;
+import com.mojang.blaze3d.textures.GpuTextureView;
+import com.mojang.blaze3d.vulkan.VulkanCommandEncoder;
 import com.mojang.blaze3d.vulkan.VulkanDevice;
+import com.mojang.blaze3d.vulkan.VulkanGpuTexture;
 import dev.cyclesrenderer.mixin.GpuDeviceAccessor;
 import dev.cyclesrenderer.nativebridge.NativeBridge;
 import net.minecraft.client.Minecraft;
 import org.lwjgl.PointerBuffer;
 import org.lwjgl.system.MemoryStack;
 import org.lwjgl.vulkan.KHRExternalMemoryWin32;
+import org.lwjgl.vulkan.KHRSynchronization2;
 import org.lwjgl.vulkan.VK10;
 import org.lwjgl.vulkan.VK11;
+import org.lwjgl.vulkan.VK12;
+import org.lwjgl.vulkan.VK13;
+import org.lwjgl.vulkan.VkBufferImageCopy;
 import org.lwjgl.vulkan.VkBufferCreateInfo;
 import org.lwjgl.vulkan.VkDevice;
 import org.lwjgl.vulkan.VkExportMemoryAllocateInfo;
@@ -20,6 +30,10 @@ import org.lwjgl.vulkan.VkMemoryAllocateInfo;
 import org.lwjgl.vulkan.VkMemoryDedicatedAllocateInfo;
 import org.lwjgl.vulkan.VkMemoryGetWin32HandleInfoKHR;
 import org.lwjgl.vulkan.VkMemoryRequirements;
+import org.lwjgl.vulkan.VkCommandBuffer;
+import org.lwjgl.vulkan.VkDependencyInfo;
+import org.lwjgl.vulkan.VkImageSubresourceLayers;
+import org.lwjgl.vulkan.VkMemoryBarrier2;
 import org.lwjgl.vulkan.VkPhysicalDevice;
 import org.lwjgl.vulkan.VkPhysicalDeviceExternalBufferInfo;
 import org.lwjgl.vulkan.VkPhysicalDeviceMemoryProperties;
@@ -38,10 +52,20 @@ public final class VulkanExternalBufferPrototype implements AutoCloseable {
             | VK10.VK_BUFFER_USAGE_TRANSFER_DST_BIT;
 
     private VkDevice device;
+    private VulkanDevice vulkanDevice;
     private long buffer;
     private long memory;
     private long allocationBytes;
     private boolean nativeBound;
+    private TextureTarget frameTarget;
+    private GpuFence pendingCopyFence;
+    private long pendingGeneration;
+    private long displayedGeneration;
+    private long copyCount;
+    private long generationGaps;
+    private long lastCopyMicros;
+    private long emaCopyMicros;
+    private long maxCopyMicros;
     private Telemetry telemetry = Telemetry.inactive("not initialized");
 
     public void initialize(Minecraft minecraft) {
@@ -103,6 +127,177 @@ public final class VulkanExternalBufferPrototype implements AutoCloseable {
 
     public long allocationBytes() {
         return allocationBytes;
+    }
+
+    public void pollCompletedFrame() {
+        RenderSystem.assertOnRenderThread();
+        finishPendingCopy(false);
+        if (pendingCopyFence != null || !nativeBound || !NativeBridge.isReady()) {
+            return;
+        }
+        NativeBridge.VulkanInteropState state =
+                NativeBridge.acquireVulkanInteropFrame(displayedGeneration);
+        if (!state.frameAcquired() || state.generation() <= displayedGeneration) {
+            return;
+        }
+        pendingGeneration = state.generation();
+        try {
+            ensureFrameTarget();
+            long start = System.nanoTime();
+            encodeCopy();
+            lastCopyMicros = nanosToMicros(System.nanoTime() - start);
+            emaCopyMicros = emaCopyMicros == 0L
+                    ? lastCopyMicros
+                    : (emaCopyMicros * 7L + lastCopyMicros) / 8L;
+            maxCopyMicros = Math.max(maxCopyMicros, lastCopyMicros);
+        } catch (RuntimeException | LinkageError error) {
+            NativeBridge.releaseVulkanInteropFrame(pendingGeneration);
+            pendingGeneration = 0L;
+            throw error;
+        }
+    }
+
+    public boolean hasFrame() {
+        return frameTarget != null && displayedGeneration != 0L;
+    }
+
+    public GpuTextureView frameTextureView() {
+        if (!hasFrame()) {
+            throw new IllegalStateException("Vulkan interop frame is not ready");
+        }
+        return java.util.Objects.requireNonNull(frameTarget.getColorTextureView());
+    }
+
+    public long generation() {
+        return displayedGeneration;
+    }
+
+    public CopyTelemetry copyTelemetry() {
+        return new CopyTelemetry(
+                pendingCopyFence != null,
+                pendingGeneration,
+                displayedGeneration,
+                copyCount,
+                generationGaps,
+                lastCopyMicros,
+                emaCopyMicros,
+                maxCopyMicros);
+    }
+
+    public void drainPendingCopy() {
+        RenderSystem.assertOnRenderThread();
+        finishPendingCopy(true);
+    }
+
+    private void ensureFrameTarget() {
+        if (frameTarget == null) {
+            frameTarget = new TextureTarget(
+                    "Cycles Vulkan interop frame",
+                    WIDTH,
+                    HEIGHT,
+                    false,
+                    GpuFormat.RGBA16_FLOAT);
+        }
+    }
+
+    private void encodeCopy() {
+        if (vulkanDevice == null || frameTarget == null) {
+            throw new IllegalStateException("Vulkan interop copy target is not initialized");
+        }
+        if (!(frameTarget.getColorTexture() instanceof VulkanGpuTexture destination)) {
+            throw new IllegalStateException("interop copy target is not a Vulkan texture");
+        }
+        VulkanCommandEncoder encoder = vulkanDevice.createCommandEncoder();
+        VkCommandBuffer commandBuffer = encoder.allocateAndBeginTransientCommandBuffer();
+        try (MemoryStack stack = MemoryStack.stackPush()) {
+            pipelineBarrier(
+                    commandBuffer,
+                    stack,
+                    VK13.VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
+                    VK13.VK_ACCESS_2_MEMORY_WRITE_BIT,
+                    VK13.VK_PIPELINE_STAGE_2_COPY_BIT,
+                    VK13.VK_ACCESS_2_TRANSFER_READ_BIT);
+            VkBufferImageCopy.Buffer region = VkBufferImageCopy.calloc(1, stack);
+            region.bufferOffset(0L);
+            region.bufferRowLength(WIDTH);
+            region.bufferImageHeight(HEIGHT);
+            VkImageSubresourceLayers subresource = region.imageSubresource();
+            subresource.aspectMask(VK10.VK_IMAGE_ASPECT_COLOR_BIT);
+            subresource.mipLevel(0);
+            subresource.baseArrayLayer(0);
+            subresource.layerCount(1);
+            region.imageOffset().set(0, 0, 0);
+            region.imageExtent().set(WIDTH, HEIGHT, 1);
+            VK12.vkCmdCopyBufferToImage(
+                    commandBuffer,
+                    buffer,
+                    destination.vkImage(),
+                    VK10.VK_IMAGE_LAYOUT_GENERAL,
+                    region);
+            pipelineBarrier(
+                    commandBuffer,
+                    stack,
+                    VK13.VK_PIPELINE_STAGE_2_COPY_BIT,
+                    VK13.VK_ACCESS_2_TRANSFER_WRITE_BIT,
+                    VK13.VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
+                    VK13.VK_ACCESS_2_SHADER_SAMPLED_READ_BIT);
+            check(VK10.vkEndCommandBuffer(commandBuffer), "end interop copy command");
+        }
+        encoder.execute(commandBuffer);
+        GpuFence nextFence = encoder.createFence();
+        try {
+            encoder.submit();
+            pendingCopyFence = nextFence;
+        } catch (RuntimeException | LinkageError error) {
+            vulkanDevice.graphicsQueue().waitIdle();
+            nextFence.close();
+            throw error;
+        }
+    }
+
+    private static void pipelineBarrier(
+            VkCommandBuffer commandBuffer,
+            MemoryStack stack,
+            long sourceStage,
+            long sourceAccess,
+            long destinationStage,
+            long destinationAccess) {
+        VkMemoryBarrier2.Buffer barrier = VkMemoryBarrier2.calloc(1, stack)
+                .sType$Default()
+                .srcStageMask(sourceStage)
+                .srcAccessMask(sourceAccess)
+                .dstStageMask(destinationStage)
+                .dstAccessMask(destinationAccess);
+        VkDependencyInfo dependency = VkDependencyInfo.calloc(stack)
+                .sType$Default()
+                .pMemoryBarriers(barrier);
+        KHRSynchronization2.vkCmdPipelineBarrier2KHR(commandBuffer, dependency);
+    }
+
+    private void finishPendingCopy(boolean wait) {
+        if (pendingCopyFence == null) {
+            return;
+        }
+        if (wait) {
+            java.util.Objects.requireNonNull(vulkanDevice).graphicsQueue().waitIdle();
+        } else if (!pendingCopyFence.awaitCompletion(0L)) {
+            return;
+        }
+        pendingCopyFence.close();
+        pendingCopyFence = null;
+        if (NativeBridge.isReady()) {
+            NativeBridge.releaseVulkanInteropFrame(pendingGeneration);
+        }
+        if (displayedGeneration != 0L && pendingGeneration > displayedGeneration + 1L) {
+            generationGaps += pendingGeneration - displayedGeneration - 1L;
+        }
+        displayedGeneration = pendingGeneration;
+        pendingGeneration = 0L;
+        copyCount++;
+    }
+
+    private static long nanosToMicros(long nanos) {
+        return Math.max(0L, nanos / 1_000L);
     }
 
     private long exportMemoryHandle() {
@@ -175,6 +370,7 @@ public final class VulkanExternalBufferPrototype implements AutoCloseable {
                     "bind exportable buffer memory");
 
             device = nextDevice;
+            this.vulkanDevice = vulkanDevice;
             buffer = nextBuffer;
             memory = nextMemory;
             allocationBytes = requirements.size();
@@ -243,6 +439,7 @@ public final class VulkanExternalBufferPrototype implements AutoCloseable {
         if (device != null) {
             RenderSystem.assertOnRenderThread();
         }
+        drainPendingCopy();
         if (nativeBound && NativeBridge.isReady()) {
             NativeBridge.VulkanInteropState state = NativeBridge.vulkanInteropState();
             if (state.sessionAttached()) {
@@ -252,7 +449,17 @@ public final class VulkanExternalBufferPrototype implements AutoCloseable {
             NativeBridge.unbindVulkanInteropBuffer();
         }
         nativeBound = false;
+        if (frameTarget != null) {
+            frameTarget.destroyBuffers();
+            frameTarget = null;
+        }
         releaseHandles();
+        displayedGeneration = 0L;
+        copyCount = 0L;
+        generationGaps = 0L;
+        lastCopyMicros = 0L;
+        emaCopyMicros = 0L;
+        maxCopyMicros = 0L;
         telemetry = Telemetry.inactive("released");
     }
 
@@ -264,6 +471,7 @@ public final class VulkanExternalBufferPrototype implements AutoCloseable {
             VK10.vkFreeMemory(device, memory, null);
         }
         device = null;
+        vulkanDevice = null;
         buffer = VK10.VK_NULL_HANDLE;
         memory = VK10.VK_NULL_HANDLE;
         allocationBytes = 0L;
@@ -280,4 +488,14 @@ public final class VulkanExternalBufferPrototype implements AutoCloseable {
             return new Telemetry(false, false, false, 0L, 0L, state);
         }
     }
+
+    public record CopyTelemetry(
+            boolean pending,
+            long pendingGeneration,
+            long displayedGeneration,
+            long copyCount,
+            long generationGaps,
+            long lastCopyMicros,
+            long emaCopyMicros,
+            long maxCopyMicros) {}
 }
