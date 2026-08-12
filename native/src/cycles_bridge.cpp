@@ -18,7 +18,7 @@ struct CyclesBridgeRenderer {
 
 namespace {
 
-constexpr std::uint32_t kAbiVersion = 22;
+constexpr std::uint32_t kAbiVersion = 23;
 constexpr std::uint32_t kStructVersion = 1;
 constexpr char kBuildInfo[] = "cyclesrenderer-native/cycles-5.2;abi=22";
 
@@ -543,6 +543,31 @@ std::uint32_t cycles_bridge_query_vulkan_interop_state(
     }
     renderer->engine->query_vulkan_interop_state(*state);
     return CYCLES_BRIDGE_STATUS_OK;
+}
+
+std::uint32_t cycles_bridge_acquire_vulkan_interop_frame(
+    CyclesBridgeRenderer* renderer,
+    std::uint64_t previous_generation,
+    CyclesBridgeVulkanInteropState* state) {
+    if (renderer == nullptr || renderer->engine == nullptr || state == nullptr
+        || state->struct_size < sizeof(CyclesBridgeVulkanInteropState)
+        || state->struct_version != kStructVersion) {
+        return CYCLES_BRIDGE_STATUS_INVALID_ARGUMENT;
+    }
+    renderer->engine->acquire_vulkan_interop_frame(previous_generation, *state);
+    return CYCLES_BRIDGE_STATUS_OK;
+}
+
+std::uint32_t cycles_bridge_release_vulkan_interop_frame(
+    CyclesBridgeRenderer* renderer,
+    std::uint64_t generation) {
+    if (renderer == nullptr || renderer->engine == nullptr || generation == 0U) {
+        return CYCLES_BRIDGE_STATUS_INVALID_ARGUMENT;
+    }
+    std::string error;
+    return renderer->engine->release_vulkan_interop_frame(generation, error)
+        ? CYCLES_BRIDGE_STATUS_OK
+        : CYCLES_BRIDGE_STATUS_RENDER_ERROR;
 }
 
 void cycles_bridge_close_win32_handle(std::uint64_t handle) {

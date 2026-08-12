@@ -24,7 +24,7 @@ import static java.lang.foreign.ValueLayout.JAVA_INT;
 import static java.lang.foreign.ValueLayout.JAVA_LONG;
 
 public final class NativeBridge {
-    public static final int ABI_VERSION = 22;
+    public static final int ABI_VERSION = 23;
     public static final int PIXEL_FORMAT_RGBA16_FLOAT = 2;
     public static final int PIXEL_FORMAT_RGBA32_FLOAT = 3;
 
@@ -554,6 +554,31 @@ public final class NativeBridge {
         }
     }
 
+    public static VulkanInteropState acquireVulkanInteropFrame(
+            long previousGeneration) {
+        BridgeState state = requireState();
+        try {
+            return state.acquireVulkanInteropFrame(previousGeneration);
+        } catch (Throwable error) {
+            rethrowFatalError(error);
+            throw new IllegalStateException(
+                    "native Vulkan interop frame acquire failed: "
+                            + describe(error), error);
+        }
+    }
+
+    public static void releaseVulkanInteropFrame(long generation) {
+        BridgeState state = requireState();
+        try {
+            state.releaseVulkanInteropFrame(generation);
+        } catch (Throwable error) {
+            rethrowFatalError(error);
+            throw new IllegalStateException(
+                    "native Vulkan interop frame release failed: "
+                            + describe(error), error);
+        }
+    }
+
     public static PassDescriptor passDescriptor(int passId) {
         BridgeState state = requireState();
         try {
@@ -650,6 +675,8 @@ public final class NativeBridge {
         private final MethodHandle bindVulkanInteropBuffer;
         private final MethodHandle unbindVulkanInteropBuffer;
         private final MethodHandle queryVulkanInteropState;
+        private final MethodHandle acquireVulkanInteropFrame;
+        private final MethodHandle releaseVulkanInteropFrame;
         private final MethodHandle closeWin32Handle;
         private final MethodHandle resetScene;
         private final MethodHandle upsertSection;
@@ -690,6 +717,8 @@ public final class NativeBridge {
                 MethodHandle bindVulkanInteropBuffer,
                 MethodHandle unbindVulkanInteropBuffer,
                 MethodHandle queryVulkanInteropState,
+                MethodHandle acquireVulkanInteropFrame,
+                MethodHandle releaseVulkanInteropFrame,
                 MethodHandle closeWin32Handle,
                 MethodHandle resetScene,
                 MethodHandle upsertSection,
@@ -714,6 +743,8 @@ public final class NativeBridge {
             this.bindVulkanInteropBuffer = bindVulkanInteropBuffer;
             this.unbindVulkanInteropBuffer = unbindVulkanInteropBuffer;
             this.queryVulkanInteropState = queryVulkanInteropState;
+            this.acquireVulkanInteropFrame = acquireVulkanInteropFrame;
+            this.releaseVulkanInteropFrame = releaseVulkanInteropFrame;
             this.closeWin32Handle = closeWin32Handle;
             this.resetScene = resetScene;
             this.upsertSection = upsertSection;
@@ -796,6 +827,17 @@ public final class NativeBridge {
                         symbols,
                         "cycles_bridge_query_vulkan_interop_state",
                         FunctionDescriptor.of(JAVA_INT, ADDRESS, ADDRESS));
+                MethodHandle acquireVulkanInteropFrame = downcall(
+                        linker,
+                        symbols,
+                        "cycles_bridge_acquire_vulkan_interop_frame",
+                        FunctionDescriptor.of(
+                                JAVA_INT, ADDRESS, JAVA_LONG, ADDRESS));
+                MethodHandle releaseVulkanInteropFrame = downcall(
+                        linker,
+                        symbols,
+                        "cycles_bridge_release_vulkan_interop_frame",
+                        FunctionDescriptor.of(JAVA_INT, ADDRESS, JAVA_LONG));
                 MethodHandle closeWin32Handle = downcall(
                         linker,
                         symbols,
@@ -867,6 +909,8 @@ public final class NativeBridge {
                         bindVulkanInteropBuffer,
                         unbindVulkanInteropBuffer,
                         queryVulkanInteropState,
+                        acquireVulkanInteropFrame,
+                        releaseVulkanInteropFrame,
                         closeWin32Handle,
                         resetScene,
                         upsertSection,
@@ -969,14 +1013,34 @@ public final class NativeBridge {
         }
 
         private VulkanInteropState vulkanInteropState() throws Throwable {
+            return queryVulkanInteropState((renderer, state) ->
+                    (int) queryVulkanInteropState.invokeExact(renderer, state));
+        }
+
+        private VulkanInteropState acquireVulkanInteropFrame(
+                long previousGeneration) throws Throwable {
+            return queryVulkanInteropState((renderer, state) ->
+                    (int) acquireVulkanInteropFrame.invokeExact(
+                            renderer, previousGeneration, state));
+        }
+
+        private void releaseVulkanInteropFrame(long frameGeneration)
+                throws Throwable {
+            checkRendererStatus(
+                    (int) releaseVulkanInteropFrame.invokeExact(
+                            renderer, frameGeneration),
+                    "Vulkan interop frame release");
+        }
+
+        private VulkanInteropState queryVulkanInteropState(
+                VulkanInteropStateCall call) throws Throwable {
             vulkanInteropStateSegment.fill((byte) 0);
             vulkanInteropStateSegment.set(
                     JAVA_INT, 0L,
                     Math.toIntExact(VULKAN_INTEROP_STATE_LAYOUT.byteSize()));
             vulkanInteropStateSegment.set(JAVA_INT, 4L, STRUCT_VERSION);
             checkRendererStatus(
-                    (int) queryVulkanInteropState.invokeExact(
-                            renderer, vulkanInteropStateSegment),
+                    call.invoke(renderer, vulkanInteropStateSegment),
                     "Vulkan interop state query");
             return new VulkanInteropState(
                     vulkanInteropStateSegment.get(JAVA_INT, 8L),
@@ -988,6 +1052,11 @@ public final class NativeBridge {
                     vulkanInteropStateSegment.get(JAVA_INT, 40L),
                     vulkanInteropStateSegment.get(JAVA_INT, 44L),
                     vulkanInteropStateSegment.get(JAVA_INT, 48L));
+        }
+
+        @FunctionalInterface
+        private interface VulkanInteropStateCall {
+            int invoke(MemorySegment renderer, MemorySegment state) throws Throwable;
         }
 
         private static byte[] parseDeviceUuid(String value) {
@@ -1839,6 +1908,10 @@ public final class NativeBridge {
 
         public boolean sessionAttached() {
             return (flags & 16) != 0;
+        }
+
+        public boolean frameAcquired() {
+            return (flags & 32) != 0;
         }
     }
 

@@ -162,6 +162,7 @@ enum CyclesBridgeVulkanInteropStateFlags : std::uint32_t {
     CYCLES_BRIDGE_VULKAN_INTEROP_FRAME_READY = 1U << 2U,
     CYCLES_BRIDGE_VULKAN_INTEROP_FAILED = 1U << 3U,
     CYCLES_BRIDGE_VULKAN_INTEROP_SESSION_ATTACHED = 1U << 4U,
+    CYCLES_BRIDGE_VULKAN_INTEROP_FRAME_ACQUIRED = 1U << 5U,
 };
 
 struct CyclesBridgeCamera {
@@ -567,6 +568,15 @@ CYCLES_BRIDGE_API std::uint32_t cycles_bridge_unbind_vulkan_interop_buffer(
 CYCLES_BRIDGE_API std::uint32_t cycles_bridge_query_vulkan_interop_state(
     const CyclesBridgeRenderer* renderer,
     CyclesBridgeVulkanInteropState* state);
+
+CYCLES_BRIDGE_API std::uint32_t cycles_bridge_acquire_vulkan_interop_frame(
+    CyclesBridgeRenderer* renderer,
+    std::uint64_t previous_generation,
+    CyclesBridgeVulkanInteropState* state);
+
+CYCLES_BRIDGE_API std::uint32_t cycles_bridge_release_vulkan_interop_frame(
+    CyclesBridgeRenderer* renderer,
+    std::uint64_t generation);
 
 CYCLES_BRIDGE_API void cycles_bridge_close_win32_handle(
     std::uint64_t handle);

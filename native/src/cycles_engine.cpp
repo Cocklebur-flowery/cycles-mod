@@ -1107,12 +1107,16 @@ class VulkanInteropDisplayDriver final : public ccl::DisplayDriver {
         FrameStore& frames,
         CyclesBridgeVulkanInteropState& state,
         std::mutex& state_mutex,
+        std::condition_variable& state_changed,
+        bool& stopping,
         std::uint64_t& configured_camera_revision,
         std::uint64_t& produced_camera_revision)
         : snapshot_(std::move(snapshot)),
           frames_(frames),
           state_(state),
           state_mutex_(state_mutex),
+          state_changed_(state_changed),
+          stopping_(stopping),
           configured_camera_revision_(configured_camera_revision),
           produced_camera_revision_(produced_camera_revision) {}
 
@@ -1132,6 +1136,18 @@ class VulkanInteropDisplayDriver final : public ccl::DisplayDriver {
         if (params.full_size.x <= 0 || params.full_size.y <= 0
             || texture_width <= 0 || texture_height <= 0) {
             return false;
+        }
+        {
+            std::unique_lock lock(state_mutex_);
+            state_changed_.wait(lock, [this] {
+                return stopping_
+                    || (state_.flags
+                        & (CYCLES_BRIDGE_VULKAN_INTEROP_FRAME_READY
+                           | CYCLES_BRIDGE_VULKAN_INTEROP_FRAME_ACQUIRED)) == 0U;
+            });
+            if (stopping_) {
+                return false;
+            }
         }
         if (!frames_.display_update_begin(params, texture_width, texture_height)) {
             return false;
@@ -1213,6 +1229,8 @@ class VulkanInteropDisplayDriver final : public ccl::DisplayDriver {
     FrameStore& frames_;
     CyclesBridgeVulkanInteropState& state_;
     std::mutex& state_mutex_;
+    std::condition_variable& state_changed_;
+    bool& stopping_;
     std::uint64_t& configured_camera_revision_;
     std::uint64_t& produced_camera_revision_;
     std::chrono::steady_clock::time_point update_started_{};
@@ -1752,6 +1770,11 @@ class CyclesEngine::Impl final {
 
     ~Impl() {
         {
+            std::lock_guard lock(interop_mutex_);
+            interop_stopping_ = true;
+        }
+        interop_changed_.notify_all();
+        {
             std::lock_guard lock(request_mutex_);
             stopping_ = true;
         }
@@ -1831,6 +1854,39 @@ class CyclesEngine::Impl final {
         state = interop_state_;
         state.struct_size = struct_size;
         state.struct_version = struct_version;
+    }
+
+    void acquire_vulkan_interop_frame(
+        std::uint64_t previous_generation,
+        CyclesBridgeVulkanInteropState& state) {
+        std::lock_guard lock(interop_mutex_);
+        if ((interop_state_.flags & CYCLES_BRIDGE_VULKAN_INTEROP_FRAME_READY) != 0U
+            && interop_state_.generation > previous_generation) {
+            interop_state_.flags &= ~CYCLES_BRIDGE_VULKAN_INTEROP_FRAME_READY;
+            interop_state_.flags |= CYCLES_BRIDGE_VULKAN_INTEROP_FRAME_ACQUIRED;
+        }
+        const std::uint32_t struct_size = state.struct_size;
+        const std::uint32_t struct_version = state.struct_version;
+        state = interop_state_;
+        state.struct_size = struct_size;
+        state.struct_version = struct_version;
+    }
+
+    bool release_vulkan_interop_frame(
+        std::uint64_t generation,
+        std::string& error) {
+        {
+            std::lock_guard lock(interop_mutex_);
+            if ((interop_state_.flags
+                 & CYCLES_BRIDGE_VULKAN_INTEROP_FRAME_ACQUIRED) == 0U
+                || interop_state_.generation != generation) {
+                error = "Vulkan interop frame token is not acquired";
+                return false;
+            }
+            interop_state_.flags &= ~CYCLES_BRIDGE_VULKAN_INTEROP_FRAME_ACQUIRED;
+        }
+        interop_changed_.notify_all();
+        return true;
     }
 
     bool upload(
@@ -2537,6 +2593,8 @@ class CyclesEngine::Impl final {
                     frames_,
                     interop_state_,
                     interop_mutex_,
+                    interop_changed_,
+                    interop_stopping_,
                     interop_configured_camera_revision_,
                     interop_produced_camera_revision_));
             {
@@ -3049,6 +3107,8 @@ class CyclesEngine::Impl final {
     FrameStore frames_;
     std::thread worker_;
     mutable std::mutex interop_mutex_;
+    std::condition_variable interop_changed_;
+    bool interop_stopping_ = false;
     HANDLE interop_memory_handle_ = nullptr;
     CyclesBridgeVulkanInteropBuffer interop_descriptor_{};
     CyclesBridgeVulkanInteropState interop_state_{};
@@ -3139,6 +3199,18 @@ bool CyclesEngine::unbind_vulkan_interop_buffer(std::string& error) {
 void CyclesEngine::query_vulkan_interop_state(
     CyclesBridgeVulkanInteropState& state) const {
     impl_->query_vulkan_interop_state(state);
+}
+
+void CyclesEngine::acquire_vulkan_interop_frame(
+    std::uint64_t previous_generation,
+    CyclesBridgeVulkanInteropState& state) {
+    impl_->acquire_vulkan_interop_frame(previous_generation, state);
+}
+
+bool CyclesEngine::release_vulkan_interop_frame(
+    std::uint64_t generation,
+    std::string& error) {
+    return impl_->release_vulkan_interop_frame(generation, error);
 }
 
 bool CyclesEngine::render(

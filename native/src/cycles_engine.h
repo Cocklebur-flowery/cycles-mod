@@ -67,6 +67,14 @@ class CyclesEngine final {
     void query_vulkan_interop_state(
         CyclesBridgeVulkanInteropState& state) const;
 
+    void acquire_vulkan_interop_frame(
+        std::uint64_t previous_generation,
+        CyclesBridgeVulkanInteropState& state);
+
+    bool release_vulkan_interop_frame(
+        std::uint64_t generation,
+        std::string& error);
+
     bool render(
         const CyclesBridgeCamera& camera,
         std::uint8_t* rgba,
