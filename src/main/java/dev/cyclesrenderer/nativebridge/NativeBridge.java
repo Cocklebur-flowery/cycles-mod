@@ -17,13 +17,14 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 
 import static java.lang.foreign.ValueLayout.ADDRESS;
+import static java.lang.foreign.ValueLayout.JAVA_BYTE;
 import static java.lang.foreign.ValueLayout.JAVA_DOUBLE;
 import static java.lang.foreign.ValueLayout.JAVA_FLOAT;
 import static java.lang.foreign.ValueLayout.JAVA_INT;
 import static java.lang.foreign.ValueLayout.JAVA_LONG;
 
 public final class NativeBridge {
-    public static final int ABI_VERSION = 19;
+    public static final int ABI_VERSION = 20;
     public static final int PIXEL_FORMAT_RGBA16_FLOAT = 2;
     public static final int PIXEL_FORMAT_RGBA32_FLOAT = 3;
 
@@ -291,7 +292,10 @@ public final class NativeBridge {
             JAVA_FLOAT.withName("aperture_size"),
             JAVA_INT.withName("aperture_blades"),
             JAVA_FLOAT.withName("aperture_rotation_radians"),
-            JAVA_FLOAT.withName("aperture_ratio"));
+            JAVA_FLOAT.withName("aperture_ratio"),
+            JAVA_INT.withName("device_uuid_valid"),
+            MemoryLayout.sequenceLayout(16, JAVA_BYTE).withName("device_uuid"),
+            JAVA_INT.withName("reserved"));
     private static final MemoryLayout VERTEX_LAYOUT = MemoryLayout.structLayout(
             JAVA_FLOAT.withName("position_x"),
             JAVA_FLOAT.withName("position_y"),
@@ -339,7 +343,7 @@ public final class NativeBridge {
                 || PASS_DESCRIPTOR_LAYOUT.byteSize() != 64L
                 || CAPABILITIES_LAYOUT.byteSize() != 64L
                 || COLOR_LUT_DESCRIPTOR_LAYOUT.byteSize() != 64L
-                || DIAGNOSTICS_LAYOUT.byteSize() != 376L
+                || DIAGNOSTICS_LAYOUT.byteSize() != 400L
                 || VERTEX_LAYOUT.byteSize() != 40L
                 || TRIANGLE_LAYOUT.byteSize() != 16L
                 || MATERIAL_LAYOUT.byteSize() != 32L
@@ -1112,7 +1116,21 @@ public final class NativeBridge {
                     diagnosticsSegment.get(JAVA_FLOAT, 360L),
                     diagnosticsSegment.get(JAVA_INT, 364L),
                     diagnosticsSegment.get(JAVA_FLOAT, 368L),
-                    diagnosticsSegment.get(JAVA_FLOAT, 372L));
+                    diagnosticsSegment.get(JAVA_FLOAT, 372L),
+                    diagnosticsSegment.get(JAVA_INT, 376L) != 0
+                            ? uuidString(diagnosticsSegment.asSlice(380L, 16L))
+                            : "unavailable");
+        }
+
+        private static String uuidString(MemorySegment bytes) {
+            StringBuilder result = new StringBuilder(32);
+            for (long index = 0; index < bytes.byteSize(); index++) {
+                result.append(String.format(
+                        java.util.Locale.ROOT,
+                        "%02x",
+                        bytes.get(JAVA_BYTE, index) & 0xff));
+            }
+            return result.toString();
         }
 
         private RenderedFrame renderFrame(
@@ -1683,7 +1701,8 @@ public final class NativeBridge {
             float apertureSize,
             int apertureBlades,
             float apertureRotationRadians,
-            float apertureRatio) {
+            float apertureRatio,
+            String deviceUuid) {
         public String stateName() {
             return switch (stateCode) {
                 case 1 -> "scene-staging";

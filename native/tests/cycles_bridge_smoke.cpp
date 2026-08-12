@@ -392,7 +392,7 @@ bool verify_progressive_sampling(
 int main(int argc, char** argv) {
     const bool require_optix = argc > 1 && std::strcmp(argv[1], "--require-optix") == 0;
     std::cerr << "[smoke] ABI check\n";
-    if (cycles_bridge_abi_version() != 19U) {
+    if (cycles_bridge_abi_version() != 20U) {
         std::cerr << "unexpected native ABI " << cycles_bridge_abi_version() << '\n';
         return 1;
     }
@@ -715,7 +715,10 @@ int main(int argc, char** argv) {
         || diagnostics.pass_registry_rebuild_count
             < CYCLES_BRIDGE_PASS_COUNT - 1U
         || diagnostics.pass_registry_hit_count == 0U
-        || diagnostics.active_frame_variant != CYCLES_BRIDGE_FRAME_VARIANT_RAW) {
+        || diagnostics.active_frame_variant != CYCLES_BRIDGE_FRAME_VARIANT_RAW
+        || ((diagnostics.device_type == 1U || diagnostics.device_type == 2U)
+            && diagnostics.device_uuid_valid == 0U)
+        || (diagnostics.device_type == 3U && diagnostics.device_uuid_valid != 0U)) {
         std::cerr << "unexpected raw pass cache state: sampling-pattern="
                   << diagnostics.sampling_pattern
                   << ";clip=" << diagnostics.effective_camera_clip_near

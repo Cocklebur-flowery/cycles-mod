@@ -420,6 +420,9 @@ struct CyclesBridgeDiagnostics {
     std::uint32_t aperture_blades;
     float aperture_rotation_radians;
     float aperture_ratio;
+    std::uint32_t device_uuid_valid;
+    std::uint8_t device_uuid[16];
+    std::uint32_t reserved;
 };
 
 struct CyclesBridgeVertex {

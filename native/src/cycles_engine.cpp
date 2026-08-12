@@ -25,6 +25,10 @@
 #include <vector>
 
 #include "device/device.h"
+#include "device/cuda/device.h"
+#if defined(WITH_CUDA)
+#include "cuew.h"
+#endif
 #include "scene/attribute.h"
 #include "scene/camera.h"
 #include "scene/film.h"
@@ -297,6 +301,31 @@ std::uint32_t device_diagnostic_id(const ccl::DeviceInfo& device) {
         case ccl::DEVICE_CPU: return 3U;
         default: return 0U;
     }
+}
+
+std::optional<std::array<std::uint8_t, 16>> query_cuda_device_uuid(
+    const ccl::DeviceInfo& device) {
+#if defined(WITH_CUDA)
+    if (device.type != ccl::DEVICE_OPTIX && device.type != ccl::DEVICE_CUDA) {
+        return std::nullopt;
+    }
+    if (!ccl::device_cuda_init()) {
+        return std::nullopt;
+    }
+    CUdevice cuda_device = 0;
+    CUuuid cuda_uuid{};
+    if (cuDeviceGet(&cuda_device, device.num) != CUDA_SUCCESS
+        || cuDeviceGetUuid(&cuda_uuid, cuda_device) != CUDA_SUCCESS) {
+        return std::nullopt;
+    }
+    std::array<std::uint8_t, 16> result{};
+    static_assert(sizeof(cuda_uuid.bytes) == sizeof(result));
+    std::memcpy(result.data(), cuda_uuid.bytes, result.size());
+    return result;
+#else
+    (void) device;
+    return std::nullopt;
+#endif
 }
 
 bool finite_camera(const CyclesBridgeCamera& camera) {
@@ -1560,6 +1589,7 @@ class CyclesEngine::Impl final {
         }
         requested_settings_ = default_settings();
         selected_device_ = devices_.front();
+        selected_device_uuid_ = query_cuda_device_uuid(selected_device_);
         state_ = "waiting-scene";
         worker_ = std::thread([this] { worker_main(); });
     }
@@ -1960,6 +1990,13 @@ class CyclesEngine::Impl final {
             diagnostics.aperture_blades = aperture_blades_diagnostic_;
             diagnostics.aperture_rotation_radians = aperture_rotation_diagnostic_;
             diagnostics.aperture_ratio = aperture_ratio_diagnostic_;
+            if (selected_device_uuid_.has_value()) {
+                diagnostics.device_uuid_valid = 1U;
+                std::memcpy(
+                    diagnostics.device_uuid,
+                    selected_device_uuid_->data(),
+                    selected_device_uuid_->size());
+            }
         }
         frames_.fill_diagnostics(diagnostics);
     }
@@ -2187,6 +2224,11 @@ class CyclesEngine::Impl final {
         std::string state,
         std::string terminal_error = {}) {
         std::lock_guard lock(state_mutex_);
+        if (selected_device_.type != device.type
+            || selected_device_.num != device.num
+            || selected_device_.id != device.id) {
+            selected_device_uuid_ = query_cuda_device_uuid(device);
+        }
         selected_device_ = device;
         state_code_ = state == "failed" ? 7U
             : state == "fallback" ? 6U
@@ -2649,6 +2691,7 @@ class CyclesEngine::Impl final {
 
     mutable std::mutex state_mutex_;
     ccl::DeviceInfo selected_device_;
+    std::optional<std::array<std::uint8_t, 16>> selected_device_uuid_;
     std::uint32_t state_code_ = 0;
     std::uint32_t effective_denoiser_ = 0;
     std::uint32_t last_reset_level_ = CYCLES_BRIDGE_RESET_NONE;
