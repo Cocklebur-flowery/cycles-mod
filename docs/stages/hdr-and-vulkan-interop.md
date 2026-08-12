@@ -146,6 +146,14 @@ P15a 设备扩展开关：
 - F10 `interop bootstrap` 报告开关请求、注入是否执行及未启用原因；现有 `available/enabled` 行仍从实际 Vulkan 设备诊断读取。
 - P15a 只启用后续创建可导出 buffer 的前置扩展，尚未创建共享资源，`active` 仍必须为 `false`。
 
+P15b1 Vulkan 资源所有者：
+
+- 只在 F8 启用实验后端且 P15a 已实际启用两个设备扩展时，创建固定 `480×270 RGBA16F` buffer。F8 关闭时立即释放。
+- 资源使用原生 `vkCreateBuffer` 与 dedicated `vkAllocateMemory`，创建和分配链都声明 `OPAQUE_WIN32`外部内存。普通 Minecraft VMA buffer 不能事后转换为可导出资源。
+- 分配前验证 external-buffer exportable/compatible 标志，并选择兼容的 device-local memory type。
+- 本子阶段尚未调用 `vkGetMemoryWin32HandleKHR`，因此没有未交付 HANDLE 的泄漏或双重关闭风险。Cycles 仍只使用 FrameStore。
+- F10 报告固定逻辑字节数、Vulkan 实际 allocation 字节数和失败原因。
+
 ### P16：互操作环与正式同步
 
 - 建立至少三槽 external buffer 生命周期与 resize 规则。

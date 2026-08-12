@@ -8,6 +8,7 @@ import dev.cyclesrenderer.nativebridge.NativeBridge;
 import dev.cyclesrenderer.render.CyclesFramePresenter;
 import dev.cyclesrenderer.render.CyclesRenderPipelines;
 import dev.cyclesrenderer.render.VulkanCapabilityProbe;
+import dev.cyclesrenderer.render.VulkanExternalBufferPrototype;
 import dev.cyclesrenderer.scene.DistantHorizonsSceneProvider;
 import dev.cyclesrenderer.scene.SectionGeometryCollector;
 import dev.cyclesrenderer.scene.SectionSceneManager;
@@ -32,6 +33,7 @@ import net.neoforged.neoforge.client.event.RegisterKeyMappingsEvent;
 import net.neoforged.neoforge.client.event.RenderGuiEvent;
 import net.neoforged.neoforge.client.event.RenderLevelStageEvent;
 import net.neoforged.neoforge.common.NeoForge;
+import net.neoforged.neoforge.event.GameShuttingDownEvent;
 import net.neoforged.neoforge.event.level.ChunkEvent;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -79,6 +81,8 @@ public final class CyclesRendererMod {
     private static ModContainer modContainer;
     private static final SectionSceneManager SCENE_MANAGER = new SectionSceneManager();
     private static final CyclesFramePresenter FRAME_PRESENTER = new CyclesFramePresenter();
+    private static final VulkanExternalBufferPrototype INTEROP_BUFFER =
+            new VulkanExternalBufferPrototype();
 
     public CyclesRendererMod(IEventBus modEventBus, ModContainer container) {
         modContainer = container;
@@ -96,6 +100,7 @@ public final class CyclesRendererMod {
         NeoForge.EVENT_BUS.addListener(CyclesRendererMod::onRenderLevelAfterLevel);
         NeoForge.EVENT_BUS.addListener(CyclesRendererMod::onRenderGui);
         NeoForge.EVENT_BUS.addListener(CyclesRendererMod::onChunkUnload);
+        NeoForge.EVENT_BUS.addListener(CyclesRendererMod::onGameShuttingDown);
     }
 
     private static void registerKeyMappings(RegisterKeyMappingsEvent event) {
@@ -148,6 +153,7 @@ public final class CyclesRendererMod {
             lastFrameDeliveryNanos = 0L;
             SCENE_MANAGER.reset();
             FRAME_PRESENTER.reset();
+            INTEROP_BUFFER.initialize(Minecraft.getInstance());
             SectionGeometryCollector.setEnabled(true);
             testFrameEnabled = true;
             LOGGER.info("Experimental renderer enabled; building the streamed Cycles scene");
@@ -341,6 +347,7 @@ public final class CyclesRendererMod {
         SectionGeometryCollector.setEnabled(false);
         SCENE_MANAGER.reset();
         FRAME_PRESENTER.reset();
+        INTEROP_BUFFER.close();
         DistantHorizonsSceneProvider.reset();
         LOGGER.info("Experimental renderer suspended; native bridge kept warm");
     }
@@ -349,6 +356,10 @@ public final class CyclesRendererMod {
         if (testFrameEnabled && event.getLevel() instanceof ClientLevel level) {
             SCENE_MANAGER.onChunkUnload(level, event.getChunk().getPos());
         }
+    }
+
+    private static void onGameShuttingDown(GameShuttingDownEvent event) {
+        INTEROP_BUFFER.close();
     }
 
     private static void onRenderGui(RenderGuiEvent.Pre event) {
@@ -461,6 +472,19 @@ public final class CyclesRendererMod {
                         6, y, VulkanCapabilityProbe.interopBootstrap().extensionsRequested()
                                 ? 0xFFE0E0E0
                                 : 0xFFFFDD88);
+                y += 10;
+                VulkanExternalBufferPrototype.Telemetry interopBuffer =
+                        INTEROP_BUFFER.telemetry();
+                graphics.text(
+                        minecraft.font,
+                        "interop buffer=" + interopBuffer.state()
+                                + " size=" + VulkanExternalBufferPrototype.WIDTH
+                                + "x" + VulkanExternalBufferPrototype.HEIGHT
+                                + " logical/alloc MiB="
+                                + oneDecimalMebibytes(interopBuffer.logicalBytes())
+                                + "/" + oneDecimalMebibytes(
+                                        interopBuffer.allocationBytes()),
+                        6, y, interopBuffer.allocated() ? 0xFFE0E0E0 : 0xFFFFDD88);
                 y += 10;
                 graphics.text(
                         minecraft.font,
