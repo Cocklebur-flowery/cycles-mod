@@ -75,6 +75,7 @@ public record CyclesRenderSettings(
         float gamma,
         ViewTransform viewTransform,
         ColorLook colorLook,
+        WorkingSpace workingSpace,
         boolean whiteBalance,
         float whiteBalanceTemperature,
         float whiteBalanceTint,
@@ -355,6 +356,26 @@ public record CyclesRenderSettings(
 
         public int effectiveNativeId(ViewTransform viewTransform) {
             return viewTransform == ViewTransform.AGX ? nativeId : NONE.nativeId;
+        }
+    }
+
+    public enum WorkingSpace implements NativeEnum, NamedEnum {
+        LINEAR_REC709(0), LINEAR_REC2020(1), ACESCG(2);
+
+        private final int nativeId;
+
+        WorkingSpace(int nativeId) {
+            this.nativeId = nativeId;
+        }
+
+        @Override
+        public int nativeId() {
+            return nativeId;
+        }
+
+        @Override
+        public String translationGroup() {
+            return "working_space";
         }
     }
 

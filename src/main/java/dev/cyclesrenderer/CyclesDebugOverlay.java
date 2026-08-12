@@ -331,7 +331,8 @@ final class CyclesDebugOverlay {
                             + " supported="
                             + capabilities.supportsViewTransform(settings.viewTransform())
                             + "  OCIO=" + capabilities.colorConfigStateName()
-                            + "  working=Linear Rec.709  output=sRGB SDR",
+                            + "  working=" + settings.workingSpace().name()
+                            + "  output=sRGB SDR",
                     COLOR_STATIC);
             out.line(
                     "white balance=" + (settings.whiteBalance() ? "on" : "off")

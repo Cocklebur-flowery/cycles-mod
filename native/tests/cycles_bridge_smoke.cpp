@@ -262,6 +262,7 @@ CyclesBridgeRenderSettings default_settings() {
     settings.atmosphere_ozone_density = 2.0F;
     settings.pbr_normal_strength = 1.0F;
     settings.pbr_emission_scale = 1.0F;
+    settings.working_space = CYCLES_BRIDGE_WORKING_SPACE_LINEAR_REC709;
     settings.interactive_samples = 1;
     settings.still_samples = 1;
     settings.stationary_delay_millis = 150;
@@ -414,7 +415,7 @@ bool verify_progressive_sampling(
 int main(int argc, char** argv) {
     const bool require_optix = argc > 1 && std::strcmp(argv[1], "--require-optix") == 0;
     std::cerr << "[smoke] ABI check\n";
-    if (cycles_bridge_abi_version() != 30U) {
+    if (cycles_bridge_abi_version() != 31U) {
         std::cerr << "unexpected native ABI " << cycles_bridge_abi_version() << '\n';
         return 1;
     }
@@ -652,6 +653,7 @@ int main(int argc, char** argv) {
                 renderer,
                 CYCLES_BRIDGE_VIEW_TRANSFORM_AGX,
                 CYCLES_BRIDGE_COLOR_LOOK_AGX_PUNCHY,
+                CYCLES_BRIDGE_WORKING_SPACE_LINEAR_REC709,
                 &color_lut,
                 nullptr,
                 0U),
@@ -661,6 +663,7 @@ int main(int argc, char** argv) {
         || color_lut.height != color_lut.edge_length
         || color_lut.pixel_format != CYCLES_BRIDGE_PIXEL_FORMAT_RGBA32_FLOAT
         || color_lut.color_look != CYCLES_BRIDGE_COLOR_LOOK_AGX_PUNCHY
+        || color_lut.working_space != CYCLES_BRIDGE_WORKING_SPACE_LINEAR_REC709
         || color_lut.pixel_byte_count
             != static_cast<std::uint64_t>(color_lut.width) * color_lut.height
                 * 4U * sizeof(float)) {
@@ -675,6 +678,7 @@ int main(int argc, char** argv) {
             renderer,
             CYCLES_BRIDGE_VIEW_TRANSFORM_AGX,
             CYCLES_BRIDGE_COLOR_LOOK_AGX_PUNCHY,
+            CYCLES_BRIDGE_WORKING_SPACE_LINEAR_REC709,
             &color_lut,
             color_lut_pixels.data(),
             sizeof(float)) != CYCLES_BRIDGE_STATUS_BUFFER_TOO_SMALL
@@ -683,6 +687,7 @@ int main(int argc, char** argv) {
                 renderer,
                 CYCLES_BRIDGE_VIEW_TRANSFORM_AGX,
                 CYCLES_BRIDGE_COLOR_LOOK_AGX_PUNCHY,
+                CYCLES_BRIDGE_WORKING_SPACE_LINEAR_REC709,
                 &color_lut,
                 color_lut_pixels.data(),
                 color_lut.pixel_byte_count),
@@ -699,6 +704,46 @@ int main(int argc, char** argv) {
         || std::abs(color_lut_pixels[neutral_midpoint + 3U] - 1.0F) > 0.0001F) {
         std::cerr << "unexpected AgX LUT midpoint "
                   << color_lut_pixels[neutral_midpoint] << '\n';
+        cycles_bridge_destroy_renderer(renderer);
+        return 1;
+    }
+    for (const std::uint32_t working_space : {
+             CYCLES_BRIDGE_WORKING_SPACE_LINEAR_REC2020,
+             CYCLES_BRIDGE_WORKING_SPACE_ACESCG}) {
+        CyclesBridgeColorLutDescriptor working_lut{};
+        working_lut.struct_size = sizeof(working_lut);
+        working_lut.struct_version = 1;
+        if (!require_ok(
+                cycles_bridge_query_color_lut(
+                    renderer,
+                    CYCLES_BRIDGE_VIEW_TRANSFORM_AGX,
+                    CYCLES_BRIDGE_COLOR_LOOK_AGX_PUNCHY,
+                    working_space,
+                    &working_lut,
+                    nullptr,
+                    0U),
+                "wide-gamut AgX LUT descriptor")
+            || working_lut.working_space != working_space
+            || working_lut.pixel_byte_count != color_lut.pixel_byte_count) {
+            cycles_bridge_destroy_renderer(renderer);
+            return 1;
+        }
+    }
+    CyclesBridgeColorLutDescriptor standard_lut{};
+    standard_lut.struct_size = sizeof(standard_lut);
+    standard_lut.struct_version = 1;
+    if (!require_ok(
+            cycles_bridge_query_color_lut(
+                renderer,
+                CYCLES_BRIDGE_VIEW_TRANSFORM_STANDARD,
+                CYCLES_BRIDGE_COLOR_LOOK_NONE,
+                CYCLES_BRIDGE_WORKING_SPACE_ACESCG,
+                &standard_lut,
+                nullptr,
+                0U),
+            "ACEScg Standard LUT descriptor")
+        || standard_lut.view_transform != CYCLES_BRIDGE_VIEW_TRANSFORM_STANDARD
+        || standard_lut.working_space != CYCLES_BRIDGE_WORKING_SPACE_ACESCG) {
         cycles_bridge_destroy_renderer(renderer);
         return 1;
     }

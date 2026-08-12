@@ -69,9 +69,7 @@ void main() {
             dot(WhiteBalanceRow1.xyz, display),
             dot(WhiteBalanceRow2.xyz, display));
         display *= DisplayParams.x;
-        if (DisplayModes.y == 0) {
-            display = linearToSrgb(display);
-        } else if (DisplayModes.y >= 2) {
+        if (DisplayModes.y != 1) {
             display = applyColorLut(display);
         }
         if (DisplayModes.y != 1) {

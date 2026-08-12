@@ -5,6 +5,7 @@
 #include <OpenColorIO/OpenColorIO.h>
 
 #include <array>
+#include <atomic>
 #include <cmath>
 #include <cstring>
 #include <filesystem>
@@ -35,7 +36,13 @@ struct LookDefinition final {
     const char* name;
 };
 
-constexpr std::array<ViewDefinition, 3> kOcioViews = {{
+struct WorkingSpaceDefinition final {
+    std::uint32_t id;
+    const char* name;
+};
+
+constexpr std::array<ViewDefinition, 4> kOcioViews = {{
+    {CYCLES_BRIDGE_VIEW_TRANSFORM_STANDARD, "Standard"},
     {CYCLES_BRIDGE_VIEW_TRANSFORM_AGX, "AgX"},
     {CYCLES_BRIDGE_VIEW_TRANSFORM_KHRONOS_PBR_NEUTRAL, "Khronos PBR Neutral"},
     {CYCLES_BRIDGE_VIEW_TRANSFORM_ACES_2, "ACES 2.0"},
@@ -51,6 +58,12 @@ constexpr std::array<LookDefinition, 9> kAgxLooks = {{
     {CYCLES_BRIDGE_COLOR_LOOK_AGX_LOW_CONTRAST, "AgX - Low Contrast"},
     {CYCLES_BRIDGE_COLOR_LOOK_AGX_VERY_LOW_CONTRAST, "AgX - Very Low Contrast"},
     {CYCLES_BRIDGE_COLOR_LOOK_AGX_GREYSCALE, "AgX - Greyscale"},
+}};
+
+constexpr std::array<WorkingSpaceDefinition, 3> kWorkingSpaces = {{
+    {CYCLES_BRIDGE_WORKING_SPACE_LINEAR_REC709, "Linear Rec.709"},
+    {CYCLES_BRIDGE_WORKING_SPACE_LINEAR_REC2020, "Linear Rec.2020"},
+    {CYCLES_BRIDGE_WORKING_SPACE_ACESCG, "ACEScg"},
 }};
 
 std::string wide_to_utf8(const std::wstring& value) {
@@ -116,8 +129,22 @@ const char* look_name(std::uint32_t color_look) {
     return nullptr;
 }
 
-std::uint64_t pipeline_key(std::uint32_t view_transform, std::uint32_t color_look) {
-    return (static_cast<std::uint64_t>(view_transform) << 32U) | color_look;
+const char* working_space_name(std::uint32_t working_space) {
+    for (const WorkingSpaceDefinition& definition : kWorkingSpaces) {
+        if (definition.id == working_space) {
+            return definition.name;
+        }
+    }
+    return nullptr;
+}
+
+std::uint64_t pipeline_key(
+    std::uint32_t working_space,
+    std::uint32_t view_transform,
+    std::uint32_t color_look) {
+    return (static_cast<std::uint64_t>(working_space) << 48U)
+        | (static_cast<std::uint64_t>(view_transform) << 32U)
+        | color_look;
 }
 
 float unshape(std::uint32_t index) {
@@ -136,12 +163,26 @@ class ColorManagement::Impl final {
         try {
             config_path_ = color_config_path();
             config_ = OCIO::Config::CreateFromFile(wide_to_utf8(config_path_.wstring()).c_str());
-            for (const ViewDefinition& view : kOcioViews) {
-                build_processor(view.id, CYCLES_BRIDGE_COLOR_LOOK_NONE);
-                transform_mask_ |= 1U << view.id;
+            for (const WorkingSpaceDefinition& working_space : kWorkingSpaces) {
+                for (const ViewDefinition& view : kOcioViews) {
+                    build_processor(
+                        working_space.id,
+                        view.id,
+                        CYCLES_BRIDGE_COLOR_LOOK_NONE);
+                    transform_mask_ |= 1U << view.id;
+                }
+                for (const LookDefinition& look : kAgxLooks) {
+                    build_processor(
+                        working_space.id,
+                        CYCLES_BRIDGE_VIEW_TRANSFORM_AGX,
+                        look.id);
+                }
             }
-            for (const LookDefinition& look : kAgxLooks) {
-                build_processor(CYCLES_BRIDGE_VIEW_TRANSFORM_AGX, look.id);
+            std::string activation_error;
+            if (!activate_working_space(
+                    CYCLES_BRIDGE_WORKING_SPACE_LINEAR_REC709,
+                    activation_error)) {
+                throw std::runtime_error(activation_error);
             }
             state_ = CYCLES_BRIDGE_COLOR_CONFIG_READY;
         } catch (const std::exception& exception) {
@@ -173,6 +214,7 @@ class ColorManagement::Impl final {
         }
         output << ";config=" << wide_to_utf8(config_path_.wstring())
                << ";display=sRGB;edge=" << kLutEdgeLength
+               << ";working=" << working_space_name(active_working_space_.load())
                << ";mask=0x" << std::hex << transform_mask_;
         if (!error_.empty()) {
             output << ";error=" << error_;
@@ -180,9 +222,35 @@ class ColorManagement::Impl final {
         return output.str();
     }
 
+    bool activate_working_space(
+        std::uint32_t working_space,
+        std::string& error) {
+        const char* name = working_space_name(working_space);
+        if (name == nullptr) {
+            error = "unknown scene-linear working space";
+            return false;
+        }
+        try {
+            std::lock_guard lock(activation_mutex_);
+            OCIO::ConfigRcPtr activated = config_->createEditableCopy();
+            activated->setRole(OCIO::ROLE_SCENE_LINEAR, name);
+            activated->validate();
+            OCIO::SetCurrentConfig(activated);
+            active_working_space_.store(working_space);
+            return true;
+        } catch (const std::exception& exception) {
+            error = exception.what();
+            return false;
+        } catch (...) {
+            error = "unknown OpenColorIO working-space activation failure";
+            return false;
+        }
+    }
+
     bool query_lut(
         std::uint32_t view_transform,
         std::uint32_t color_look,
+        std::uint32_t working_space,
         CyclesBridgeColorLutDescriptor& descriptor,
         float* rgba,
         std::uint64_t rgba_capacity,
@@ -190,11 +258,14 @@ class ColorManagement::Impl final {
         if (view_transform != CYCLES_BRIDGE_VIEW_TRANSFORM_AGX) {
             color_look = CYCLES_BRIDGE_COLOR_LOOK_NONE;
         }
-        const std::uint64_t key = pipeline_key(view_transform, color_look);
+        const std::uint64_t key = pipeline_key(
+            working_space, view_transform, color_look);
         const auto processor = processors_.find(key);
         if (processor == processors_.end()) {
             error = view_name(view_transform) == nullptr
                 ? "the requested view transform does not use an OCIO LUT"
+                : working_space_name(working_space) == nullptr
+                    ? "the requested working space is unavailable"
                 : (color_look != CYCLES_BRIDGE_COLOR_LOOK_NONE
                         && look_name(color_look) == nullptr)
                     ? "the requested OCIO look is unavailable"
@@ -220,6 +291,7 @@ class ColorManagement::Impl final {
         descriptor.shaper_epsilon = kShaperEpsilon;
         descriptor.interpolation = CYCLES_BRIDGE_COLOR_LUT_INTERPOLATION_TRILINEAR;
         descriptor.color_look = color_look;
+        descriptor.working_space = working_space;
 
         if (rgba == nullptr) {
             return rgba_capacity == 0U;
@@ -236,13 +308,16 @@ class ColorManagement::Impl final {
     }
 
  private:
-    void build_processor(std::uint32_t view_transform, std::uint32_t color_look) {
+    void build_processor(
+        std::uint32_t working_space,
+        std::uint32_t view_transform,
+        std::uint32_t color_look) {
         const char* view = view_name(view_transform);
-        if (view == nullptr) {
-            throw std::runtime_error("unknown OCIO view transform");
+        const char* source_color_space = working_space_name(working_space);
+        if (view == nullptr || source_color_space == nullptr) {
+            throw std::runtime_error("unknown OCIO color pipeline");
         }
         OCIO::GroupTransformRcPtr transforms = OCIO::GroupTransform::Create();
-        const char* source_color_space = OCIO::ROLE_SCENE_LINEAR;
         bool bypass_display_look = false;
         if (color_look != CYCLES_BRIDGE_COLOR_LOOK_NONE) {
             const char* look = look_name(color_look);
@@ -269,7 +344,7 @@ class ColorManagement::Impl final {
         display->setLooksBypass(bypass_display_look);
         transforms->appendTransform(display);
         processors_.emplace(
-            pipeline_key(view_transform, color_look),
+            pipeline_key(working_space, view_transform, color_look),
             config_->getProcessor(transforms)->getDefaultCPUProcessor());
     }
 
@@ -314,6 +389,9 @@ class ColorManagement::Impl final {
     std::uint32_t state_ = CYCLES_BRIDGE_COLOR_CONFIG_UNAVAILABLE;
     std::uint32_t transform_mask_ = 0;
     std::string error_;
+    std::mutex activation_mutex_;
+    std::atomic<std::uint32_t> active_working_space_{
+        CYCLES_BRIDGE_WORKING_SPACE_LINEAR_REC709};
     mutable std::mutex cache_mutex_;
     mutable std::unordered_map<std::uint64_t, std::vector<float>> lut_cache_;
 };
@@ -338,13 +416,21 @@ std::string ColorManagement::info() const {
     return impl_->info();
 }
 
+bool ColorManagement::activate_working_space(
+    std::uint32_t working_space,
+    std::string& error) {
+    return impl_->activate_working_space(working_space, error);
+}
+
 bool ColorManagement::query_lut(
     std::uint32_t view_transform,
     std::uint32_t color_look,
+    std::uint32_t working_space,
     CyclesBridgeColorLutDescriptor& descriptor,
     float* rgba,
     std::uint64_t rgba_capacity,
     std::string& error) const {
     return impl_->query_lut(
-        view_transform, color_look, descriptor, rgba, rgba_capacity, error);
+        view_transform, color_look, working_space,
+        descriptor, rgba, rgba_capacity, error);
 }

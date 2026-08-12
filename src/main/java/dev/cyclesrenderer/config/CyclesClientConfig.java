@@ -79,6 +79,7 @@ public final class CyclesClientConfig {
     private static final ModConfigSpec.DoubleValue GAMMA;
     private static final ModConfigSpec.EnumValue<CyclesRenderSettings.ViewTransform> VIEW_TRANSFORM;
     private static final ModConfigSpec.EnumValue<CyclesRenderSettings.ColorLook> COLOR_LOOK;
+    private static final ModConfigSpec.EnumValue<CyclesRenderSettings.WorkingSpace> WORKING_SPACE;
     private static final ModConfigSpec.BooleanValue WHITE_BALANCE;
     private static final ModConfigSpec.DoubleValue WHITE_BALANCE_TEMPERATURE;
     private static final ModConfigSpec.DoubleValue WHITE_BALANCE_TINT;
@@ -279,6 +280,9 @@ public final class CyclesClientConfig {
         COLOR_LOOK = builder.translation("config.cyclesrenderer.color.look")
                 .comment("AgX looks come directly from Blender's packaged OCIO configuration.")
                 .defineEnum("look", CyclesRenderSettings.ColorLook.AGX_PUNCHY);
+        WORKING_SPACE = builder.translation("config.cyclesrenderer.color.workingSpace")
+                .comment("Scene-linear render space used by Cycles and the OCIO display pipeline.")
+                .defineEnum("workingSpace", CyclesRenderSettings.WorkingSpace.LINEAR_REC709);
         WHITE_BALANCE = builder.translation("config.cyclesrenderer.color.whiteBalance")
                 .define("whiteBalance", false);
         WHITE_BALANCE_TEMPERATURE = builder.translation("config.cyclesrenderer.color.temperature")
@@ -340,6 +344,7 @@ public final class CyclesClientConfig {
                 DENOISER_PREFILTER.get(), DENOISER_QUALITY.get(), DENOISER_USE_GPU.get(),
                 EXPOSURE_EV.get().floatValue(), GAMMA.get().floatValue(), VIEW_TRANSFORM.get(),
                 COLOR_LOOK.get(),
+                WORKING_SPACE.get(),
                 WHITE_BALANCE.get(), WHITE_BALANCE_TEMPERATURE.get().floatValue(),
                 WHITE_BALANCE_TINT.get().floatValue(),
                 ACTIVE_PASS.get(), DEBUG_OVERLAY.get());

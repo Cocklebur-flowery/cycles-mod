@@ -34,6 +34,7 @@ public final class CyclesFramePresenter {
     private NativeBridge.ColorLutDescriptor colorLutDescriptor;
     private int colorLutViewTransform = -1;
     private int colorLutLook = -1;
+    private int colorLutWorkingSpace = -1;
     private long colorLutUploadCount;
     private long colorLutUploadedBytes;
     private long lastColorLutUploadMicros;
@@ -122,7 +123,7 @@ public final class CyclesFramePresenter {
             float depthFar,
             GpuTextureView source) {
         GpuTextureView activeColorLut = updateColorLut(
-                settings.viewTransform(), settings.colorLook());
+                settings.viewTransform(), settings.colorLook(), settings.workingSpace());
         updateDisplayUniforms(settings, depthFar);
         try (RenderPass renderPass = RenderSystem.getDevice()
                 .createCommandEncoder()
@@ -188,6 +189,7 @@ public final class CyclesFramePresenter {
         maxColorLutUploadMicros = 0L;
         colorLutViewTransform = -1;
         colorLutLook = -1;
+        colorLutWorkingSpace = -1;
         colorLutDescriptor = null;
         displaySettingsRevision = Long.MIN_VALUE;
         displayDepthFarBits = 0;
@@ -212,15 +214,17 @@ public final class CyclesFramePresenter {
 
     private GpuTextureView updateColorLut(
             CyclesRenderSettings.ViewTransform viewTransform,
-            CyclesRenderSettings.ColorLook colorLook) {
+            CyclesRenderSettings.ColorLook colorLook,
+            CyclesRenderSettings.WorkingSpace workingSpace) {
         ensureFallbackColorLut();
-        if (viewTransform.nativeId() < 2) {
+        if (viewTransform == CyclesRenderSettings.ViewTransform.RAW) {
             return Objects.requireNonNull(fallbackColorLutView);
         }
         int effectiveLook = colorLook.effectiveNativeId(viewTransform);
         if (colorLutView != null
                 && colorLutViewTransform == viewTransform.nativeId()
-                && colorLutLook == effectiveLook) {
+                && colorLutLook == effectiveLook
+                && colorLutWorkingSpace == workingSpace.nativeId()) {
             return colorLutView;
         }
         NativeBridge.Capabilities capabilities = NativeBridge.capabilities();
@@ -230,7 +234,8 @@ public final class CyclesFramePresenter {
         }
 
         long uploadStart = System.nanoTime();
-        NativeBridge.ColorLut colorLut = NativeBridge.colorLut(viewTransform, colorLook);
+        NativeBridge.ColorLut colorLut = NativeBridge.colorLut(
+                viewTransform, colorLook, workingSpace);
         NativeBridge.ColorLutDescriptor descriptor = colorLut.descriptor();
         validateColorLut(descriptor);
         if (descriptor.viewTransform() != viewTransform.nativeId()) {
@@ -242,6 +247,11 @@ public final class CyclesFramePresenter {
             throw new IllegalStateException(
                     "native color LUT look mismatch: " + descriptor.colorLook()
                             + " != " + effectiveLook);
+        }
+        if (descriptor.workingSpace() != workingSpace.nativeId()) {
+            throw new IllegalStateException(
+                    "native color LUT working-space mismatch: " + descriptor.workingSpace()
+                            + " != " + workingSpace.nativeId());
         }
         GpuTexture nextTexture = RenderSystem.getDevice().createTexture(
                 "Cycles " + viewTransform + " color LUT",
@@ -276,6 +286,7 @@ public final class CyclesFramePresenter {
         colorLutDescriptor = descriptor;
         colorLutViewTransform = viewTransform.nativeId();
         colorLutLook = effectiveLook;
+        colorLutWorkingSpace = workingSpace.nativeId();
         lastColorLutUploadMicros = nanosToMicros(System.nanoTime() - uploadStart);
         emaColorLutUploadMicros = updateEma(
                 emaColorLutUploadMicros, lastColorLutUploadMicros);
@@ -366,7 +377,8 @@ public final class CyclesFramePresenter {
         displayUniformData.putInt(0);
         displayUniformData.putInt(0);
         NativeBridge.ColorLutDescriptor descriptor = colorLutDescriptor;
-        if (settings.viewTransform().nativeId() >= 2 && descriptor != null) {
+        if (settings.viewTransform() != CyclesRenderSettings.ViewTransform.RAW
+                && descriptor != null) {
             displayUniformData.putFloat(descriptor.edgeLength());
             displayUniformData.putFloat(descriptor.shaperLog2Min());
             displayUniformData.putFloat(
@@ -379,6 +391,7 @@ public final class CyclesFramePresenter {
             displayUniformData.putFloat(1.0F);
         }
         float[] whiteBalance = WhiteBalanceTransform.matrix(
+                settings.workingSpace(),
                 settings.whiteBalance(),
                 settings.whiteBalanceTemperature(),
                 settings.whiteBalanceTint());

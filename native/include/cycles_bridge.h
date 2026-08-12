@@ -75,6 +75,12 @@ enum CyclesBridgeColorLook : std::uint32_t {
     CYCLES_BRIDGE_COLOR_LOOK_AGX_GREYSCALE = 9,
 };
 
+enum CyclesBridgeWorkingSpace : std::uint32_t {
+    CYCLES_BRIDGE_WORKING_SPACE_LINEAR_REC709 = 0,
+    CYCLES_BRIDGE_WORKING_SPACE_LINEAR_REC2020 = 1,
+    CYCLES_BRIDGE_WORKING_SPACE_ACESCG = 2,
+};
+
 enum CyclesBridgeColorConfigState : std::uint32_t {
     CYCLES_BRIDGE_COLOR_CONFIG_UNAVAILABLE = 0,
     CYCLES_BRIDGE_COLOR_CONFIG_READY = 1,
@@ -345,7 +351,7 @@ struct CyclesBridgeRenderSettings {
     float atmosphere_ozone_density;
     float pbr_normal_strength;
     float pbr_emission_scale;
-    std::uint32_t pbr_reserved;
+    std::uint32_t working_space;
 };
 
 struct CyclesBridgePassDescriptor {
@@ -392,7 +398,7 @@ struct CyclesBridgeColorLutDescriptor {
     float shaper_epsilon;
     std::uint32_t interpolation;
     std::uint32_t color_look;
-    std::uint32_t reserved;
+    std::uint32_t working_space;
 };
 
 struct CyclesBridgeDiagnostics {
@@ -615,6 +621,7 @@ CYCLES_BRIDGE_API std::uint32_t cycles_bridge_query_color_lut(
     const CyclesBridgeRenderer* renderer,
     std::uint32_t view_transform,
     std::uint32_t color_look,
+    std::uint32_t working_space,
     CyclesBridgeColorLutDescriptor* descriptor,
     float* rgba,
     std::uint64_t rgba_capacity);

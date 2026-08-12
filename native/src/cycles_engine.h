@@ -51,6 +51,7 @@ class CyclesEngine final {
     bool query_color_lut(
         std::uint32_t view_transform,
         std::uint32_t color_look,
+        std::uint32_t working_space,
         CyclesBridgeColorLutDescriptor& descriptor,
         float* rgba,
         std::uint64_t rgba_capacity,

@@ -49,6 +49,7 @@
 #include "session/buffers.h"
 #include "session/display_driver.h"
 #include "session/session.h"
+#include "util/colorspace.h"
 #include "util/log.h"
 #include "util/image_metadata.h"
 #include "util/path.h"
@@ -102,6 +103,7 @@ CyclesBridgeRenderSettings default_settings() {
     settings.atmosphere_ozone_density = 2.0F;
     settings.pbr_normal_strength = 1.0F;
     settings.pbr_emission_scale = 1.0F;
+    settings.working_space = CYCLES_BRIDGE_WORKING_SPACE_LINEAR_REC709;
     settings.interactive_samples = 1;
     settings.still_samples = 8;
     settings.stationary_delay_millis = 150;
@@ -169,6 +171,17 @@ bool same_material_shader_settings(
         && first.pbr_emission_scale == second.pbr_emission_scale;
 }
 
+ccl::Transform rec709_to_working_space(std::uint32_t working_space) {
+    const ccl::Transform xyz_to_target = working_space
+            == CYCLES_BRIDGE_WORKING_SPACE_LINEAR_REC2020
+        ? ccl::ColorSpaceManager::get_xyz_to_rec2020()
+        : working_space == CYCLES_BRIDGE_WORKING_SPACE_ACESCG
+            ? ccl::ColorSpaceManager::get_xyz_to_acescg()
+            : ccl::ColorSpaceManager::get_xyz_to_rec709();
+    return xyz_to_target
+        * ccl::transform_inverse(ccl::ColorSpaceManager::get_xyz_to_rec709());
+}
+
 const char* pass_name(std::uint32_t pass) {
     switch (pass) {
         case CYCLES_BRIDGE_PASS_DEPTH: return "depth";
@@ -210,6 +223,7 @@ struct SceneRuntime {
     std::unordered_map<std::int64_t, SectionSceneNodes> sections;
     ccl::BackgroundLight* background_light = nullptr;
     ccl::Object* background_light_object = nullptr;
+    ccl::Transform rec709_to_working = ccl::transform_identity();
 
     void clear() {
         resources.reset();
@@ -217,6 +231,7 @@ struct SceneRuntime {
         sections.clear();
         background_light = nullptr;
         background_light_object = nullptr;
+        rec709_to_working = ccl::transform_identity();
     }
 };
 
@@ -1682,7 +1697,10 @@ void configure_background(
     runtime.background_light_object->tag_update(scene);
 }
 
-void populate_section_mesh(ccl::Mesh* mesh, const SectionRequest& section) {
+void populate_section_mesh(
+    ccl::Mesh* mesh,
+    const SectionRequest& section,
+    const ccl::Transform& rec709_to_working) {
     mesh->resize_mesh(
         static_cast<int>(section.vertices.size()),
         static_cast<int>(section.triangles.size()));
@@ -1720,10 +1738,16 @@ void populate_section_mesh(ccl::Mesh* mesh, const SectionRequest& section) {
             triangles[output_index] = static_cast<int>(indices[corner]);
             uvs[output_index] = ccl::make_float2(vertex.texture_u, vertex.texture_v);
             const std::uint32_t rgba = vertex.packed_rgba;
+            const ccl::float3 linear_rec709 = ccl::make_float3(
+                srgb_to_linear(rgba & 0xFFU),
+                srgb_to_linear((rgba >> 8U) & 0xFFU),
+                srgb_to_linear((rgba >> 16U) & 0xFFU));
+            const ccl::float3 working = ccl::transform_direction(
+                &rec709_to_working, linear_rec709);
             colors[output_index] = ccl::make_uchar4(
-                to_unorm(srgb_to_linear(rgba & 0xFFU)),
-                to_unorm(srgb_to_linear((rgba >> 8U) & 0xFFU)),
-                to_unorm(srgb_to_linear((rgba >> 16U) & 0xFFU)),
+                to_unorm(working.x),
+                to_unorm(working.y),
+                to_unorm(working.z),
                 static_cast<std::uint8_t>((rgba >> 24U) & 0xFFU));
         }
         triangle_shaders[index] = static_cast<int>(triangle.material_index);
@@ -1740,14 +1764,15 @@ SectionSceneNodes create_section_nodes(
     ccl::Scene* scene,
     const SceneRequest& request,
     const std::shared_ptr<const SectionRequest>& section,
-    const std::vector<ccl::Shader*>& shaders) {
+    const std::vector<ccl::Shader*>& shaders,
+    const ccl::Transform& rec709_to_working) {
     ccl::Mesh* mesh = scene->create_node<ccl::Mesh>();
     ccl::array<ccl::Node*> used_shaders;
     for (ccl::Shader* shader : shaders) {
         used_shaders.push_back_slow(shader);
     }
     mesh->set_used_shaders(used_shaders);
-    populate_section_mesh(mesh, *section);
+    populate_section_mesh(mesh, *section, rec709_to_working);
 
     ccl::Object* object = scene->create_node<ccl::Object>();
     object->set_geometry(mesh);
@@ -1765,6 +1790,7 @@ void build_scene(
     SceneRuntime& runtime) {
     runtime.clear();
     runtime.resources = request.resources;
+    runtime.rec709_to_working = rec709_to_working_space(settings.working_space);
     configure_background(scene, settings, runtime);
     scene->integrator->set_max_bounce(3);
     scene->integrator->set_max_diffuse_bounce(2);
@@ -1785,7 +1811,12 @@ void build_scene(
     for (const auto& entry : request.sections) {
         runtime.sections.emplace(
             entry.first,
-            create_section_nodes(scene, request, entry.second, runtime.shaders));
+            create_section_nodes(
+                scene,
+                request,
+                entry.second,
+                runtime.shaders,
+                runtime.rec709_to_working));
     }
 }
 
@@ -1823,7 +1854,11 @@ void apply_scene_delta(
         if (current == runtime.sections.end()) {
             runtime.sections.emplace(
                 entry.first, create_section_nodes(
-                    scene, request, entry.second.section, runtime.shaders));
+                    scene,
+                    request,
+                    entry.second.section,
+                    runtime.shaders,
+                    runtime.rec709_to_working));
             continue;
         }
         if (current->second.source == entry.second.section) {
@@ -1832,7 +1867,8 @@ void apply_scene_delta(
 
         ccl::Mesh* mesh = current->second.mesh;
         mesh->clear(true);
-        populate_section_mesh(mesh, *entry.second.section);
+        populate_section_mesh(
+            mesh, *entry.second.section, runtime.rec709_to_working);
         mesh->tag_update(scene, true);
         current->second.source = entry.second.section;
     }
@@ -2462,7 +2498,8 @@ class CyclesEngine::Impl final {
                 if (settings.device_policy != requested_settings_.device_policy
                     || denoiser_topology_changed
                     || atmosphere_changed
-                    || material_shader_changed) {
+                    || material_shader_changed
+                    || settings.working_space != requested_settings_.working_space) {
                     reset_level = CYCLES_BRIDGE_RESET_SESSION;
                 } else if (settings.resolution_mode != requested_settings_.resolution_mode
                            || settings.render_width != requested_settings_.render_width
@@ -2573,12 +2610,14 @@ class CyclesEngine::Impl final {
     bool query_color_lut(
         std::uint32_t view_transform,
         std::uint32_t color_look,
+        std::uint32_t working_space,
         CyclesBridgeColorLutDescriptor& descriptor,
         float* rgba,
         std::uint64_t rgba_capacity,
         std::string& error) const {
         return color_management_->query_lut(
-            view_transform, color_look, descriptor, rgba, rgba_capacity, error);
+            view_transform, color_look, working_space,
+            descriptor, rgba, rgba_capacity, error);
     }
 
     void query_diagnostics(CyclesBridgeDiagnostics& diagnostics) const {
@@ -2914,6 +2953,12 @@ class CyclesEngine::Impl final {
         std::uint64_t registered_pass_mask,
         ccl::SessionParams& session_params,
         SceneRuntime& runtime) {
+        std::string color_error;
+        if (!color_management_->activate_working_space(
+                settings.working_space, color_error)) {
+            throw std::runtime_error(
+                "failed to activate Cycles working space: " + color_error);
+        }
         VulkanInteropSnapshot interop_snapshot;
         {
             std::lock_guard lock(interop_mutex_);
@@ -3647,12 +3692,14 @@ std::string CyclesEngine::color_management_info() const {
 bool CyclesEngine::query_color_lut(
     std::uint32_t view_transform,
     std::uint32_t color_look,
+    std::uint32_t working_space,
     CyclesBridgeColorLutDescriptor& descriptor,
     float* rgba,
     std::uint64_t rgba_capacity,
     std::string& error) const {
     return impl_->query_color_lut(
-        view_transform, color_look, descriptor, rgba, rgba_capacity, error);
+        view_transform, color_look, working_space,
+        descriptor, rgba, rgba_capacity, error);
 }
 
 void CyclesEngine::query_diagnostics(CyclesBridgeDiagnostics& diagnostics) const {

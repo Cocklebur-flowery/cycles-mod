@@ -1,6 +1,8 @@
 package dev.cyclesrenderer.render;
 
-/** Blender-compatible temperature/tint adaptation for the Linear Rec.709 working space. */
+import dev.cyclesrenderer.config.CyclesRenderSettings;
+
+/** Blender-compatible temperature/tint adaptation in the active scene-linear space. */
 final class WhiteBalanceTransform {
     private static final double[] MIRED = {
             0, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100, 125, 150, 175, 200, 225,
@@ -35,32 +37,58 @@ final class WhiteBalanceTransform {
             {-.9692436363, 1.8759675015, .0415550574},
             {.0556300797, -.2039769589, 1.0569715142}
     };
+    private static final double[][] REC2020_TO_XYZ = {
+            {.6369580483, .1446169036, .1688809752},
+            {.2627002120, .6779980715, .0593017165},
+            {0.0, .0280726930, 1.0609850577}
+    };
+    private static final double[][] XYZ_TO_REC2020 = invert(REC2020_TO_XYZ);
+    private static final double[][] ACESCG_TO_XYZ = {
+            {.6522381760, .1282367020, .1699822530},
+            {.2676721870, .6743399940, .0579878190},
+            {-.0053818160, .0013690610, 1.0930705070}
+    };
+    private static final double[][] XYZ_TO_ACESCG = invert(ACESCG_TO_XYZ);
     private static final double[][] BRADFORD = {
             {.8951, .2664, -.1614},
             {-.7502, 1.7135, .0367},
             {.0389, -.0685, 1.0296}
     };
     private static final double[][] BRADFORD_INVERSE = invert(BRADFORD);
-    private static final double[] REC709_WHITE = multiply(REC709_TO_XYZ, new double[]{1, 1, 1});
     private static final float[] IDENTITY = {1, 0, 0, 0, 1, 0, 0, 0, 1};
 
     private WhiteBalanceTransform() {
     }
 
-    static float[] matrix(boolean enabled, float temperature, float tint) {
+    static float[] matrix(
+            CyclesRenderSettings.WorkingSpace workingSpace,
+            boolean enabled,
+            float temperature,
+            float tint) {
         if (!enabled) {
             return IDENTITY.clone();
         }
+        double[][] rgbToXyz = switch (workingSpace) {
+            case LINEAR_REC2020 -> REC2020_TO_XYZ;
+            case ACESCG -> ACESCG_TO_XYZ;
+            default -> REC709_TO_XYZ;
+        };
+        double[][] xyzToRgb = switch (workingSpace) {
+            case LINEAR_REC2020 -> XYZ_TO_REC2020;
+            case ACESCG -> XYZ_TO_ACESCG;
+            default -> XYZ_TO_REC709;
+        };
         double[] sourceWhite = whitePoint(temperature, tint);
         double[] sourceLms = multiply(BRADFORD, sourceWhite);
-        double[] targetLms = multiply(BRADFORD, REC709_WHITE);
+        double[] targetLms = multiply(
+                BRADFORD, multiply(rgbToXyz, new double[]{1, 1, 1}));
         double[][] scale = {
                 {targetLms[0] / sourceLms[0], 0, 0},
                 {0, targetLms[1] / sourceLms[1], 0},
                 {0, 0, targetLms[2] / sourceLms[2]}
         };
         double[][] adaptation = multiply(BRADFORD_INVERSE, multiply(scale, BRADFORD));
-        double[][] sceneMatrix = multiply(XYZ_TO_REC709, multiply(adaptation, REC709_TO_XYZ));
+        double[][] sceneMatrix = multiply(xyzToRgb, multiply(adaptation, rgbToXyz));
         float[] result = new float[9];
         for (int row = 0; row < 3; row++) {
             for (int column = 0; column < 3; column++) {

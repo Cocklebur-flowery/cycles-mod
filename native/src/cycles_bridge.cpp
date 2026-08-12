@@ -18,9 +18,9 @@ struct CyclesBridgeRenderer {
 
 namespace {
 
-constexpr std::uint32_t kAbiVersion = 30;
+constexpr std::uint32_t kAbiVersion = 31;
 constexpr std::uint32_t kStructVersion = 1;
-constexpr char kBuildInfo[] = "cyclesrenderer-native/cycles-5.2;abi=29";
+constexpr char kBuildInfo[] = "cyclesrenderer-native/cycles-5.2;abi=31";
 
 static_assert(sizeof(CyclesBridgeCamera) == 80);
 static_assert(offsetof(CyclesBridgeCamera, frame_id) == 8);
@@ -291,7 +291,7 @@ bool valid_settings(const CyclesBridgeRenderSettings& settings) {
         && std::isfinite(settings.pbr_emission_scale)
         && settings.pbr_emission_scale >= 0.0F
         && settings.pbr_emission_scale <= 100.0F
-        && settings.pbr_reserved == 0U
+        && settings.working_space <= CYCLES_BRIDGE_WORKING_SPACE_ACESCG
         && settings.interactive_samples >= 1U && settings.interactive_samples <= 4096U
         && settings.still_samples >= 1U && settings.still_samples <= 4096U
         && settings.stationary_delay_millis <= 10000U
@@ -456,6 +456,7 @@ std::uint32_t cycles_bridge_query_color_lut(
     const CyclesBridgeRenderer* renderer,
     std::uint32_t view_transform,
     std::uint32_t color_look,
+    std::uint32_t working_space,
     CyclesBridgeColorLutDescriptor* descriptor,
     float* rgba,
     std::uint64_t rgba_capacity) {
@@ -469,7 +470,8 @@ std::uint32_t cycles_bridge_query_color_lut(
         CyclesBridgeColorLutDescriptor result{};
         std::string error;
         if (!renderer->engine->query_color_lut(
-                view_transform, color_look, result, nullptr, 0U, error)) {
+                view_transform, color_look, working_space,
+                result, nullptr, 0U, error)) {
             return CYCLES_BRIDGE_STATUS_RENDER_ERROR;
         }
         *descriptor = result;
@@ -480,7 +482,8 @@ std::uint32_t cycles_bridge_query_color_lut(
             return CYCLES_BRIDGE_STATUS_BUFFER_TOO_SMALL;
         }
         return renderer->engine->query_color_lut(
-                   view_transform, color_look, result, rgba, rgba_capacity, error)
+                   view_transform, color_look, working_space,
+                   result, rgba, rgba_capacity, error)
             ? CYCLES_BRIDGE_STATUS_OK
             : CYCLES_BRIDGE_STATUS_RENDER_ERROR;
     } catch (const std::bad_alloc&) {

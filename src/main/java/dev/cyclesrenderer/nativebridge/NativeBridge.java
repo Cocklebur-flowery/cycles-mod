@@ -24,7 +24,7 @@ import static java.lang.foreign.ValueLayout.JAVA_INT;
 import static java.lang.foreign.ValueLayout.JAVA_LONG;
 
 public final class NativeBridge {
-    public static final int ABI_VERSION = 30;
+    public static final int ABI_VERSION = 31;
     public static final int PIXEL_FORMAT_RGBA16_FLOAT = 2;
     public static final int PIXEL_FORMAT_RGBA32_FLOAT = 3;
 
@@ -184,7 +184,7 @@ public final class NativeBridge {
             JAVA_FLOAT.withName("atmosphere_ozone_density"),
             JAVA_FLOAT.withName("pbr_normal_strength"),
             JAVA_FLOAT.withName("pbr_emission_scale"),
-            JAVA_INT.withName("pbr_reserved"));
+            JAVA_INT.withName("working_space"));
     private static final MemoryLayout PASS_DESCRIPTOR_LAYOUT = MemoryLayout.structLayout(
             JAVA_INT.withName("struct_size"),
             JAVA_INT.withName("struct_version"),
@@ -225,7 +225,7 @@ public final class NativeBridge {
             JAVA_FLOAT.withName("shaper_epsilon"),
             JAVA_INT.withName("interpolation"),
             JAVA_INT.withName("color_look"),
-            JAVA_INT.withName("reserved"));
+            JAVA_INT.withName("working_space"));
     private static final MemoryLayout DIAGNOSTICS_LAYOUT = MemoryLayout.structLayout(
             JAVA_INT.withName("struct_size"),
             JAVA_INT.withName("struct_version"),
@@ -543,10 +543,11 @@ public final class NativeBridge {
 
     public static ColorLut colorLut(
             CyclesRenderSettings.ViewTransform viewTransform,
-            CyclesRenderSettings.ColorLook colorLook) {
+            CyclesRenderSettings.ColorLook colorLook,
+            CyclesRenderSettings.WorkingSpace workingSpace) {
         BridgeState state = requireState();
         try {
-            return state.colorLut(viewTransform, colorLook);
+            return state.colorLut(viewTransform, colorLook, workingSpace);
         } catch (Throwable error) {
             rethrowFatalError(error);
             throw new IllegalStateException("native color LUT query failed: "
@@ -864,7 +865,7 @@ public final class NativeBridge {
                 MethodHandle queryColorLut = downcall(linker, symbols,
                         "cycles_bridge_query_color_lut",
                         FunctionDescriptor.of(
-                                JAVA_INT, ADDRESS, JAVA_INT, JAVA_INT,
+                                JAVA_INT, ADDRESS, JAVA_INT, JAVA_INT, JAVA_INT,
                                 ADDRESS, ADDRESS, JAVA_LONG));
                 MethodHandle queryPassDescriptor = downcall(linker, symbols,
                         "cycles_bridge_query_pass_descriptor",
@@ -1269,6 +1270,7 @@ public final class NativeBridge {
             settingsSegment.set(JAVA_FLOAT, 264L, settings.atmosphereOzoneDensity());
             settingsSegment.set(JAVA_FLOAT, 268L, settings.pbrNormalStrength());
             settingsSegment.set(JAVA_FLOAT, 272L, settings.pbrEmissionScale());
+            settingsSegment.set(JAVA_INT, 276L, settings.workingSpace().nativeId());
             checkRendererStatus(
                     (int) applySettings.invokeExact(renderer, settingsSegment),
                     "settings update");
@@ -1306,9 +1308,10 @@ public final class NativeBridge {
 
         private ColorLut colorLut(
                 CyclesRenderSettings.ViewTransform viewTransform,
-                CyclesRenderSettings.ColorLook colorLook)
+                CyclesRenderSettings.ColorLook colorLook,
+                CyclesRenderSettings.WorkingSpace workingSpace)
                 throws Throwable {
-            if (viewTransform.nativeId() < 2) {
+            if (viewTransform == CyclesRenderSettings.ViewTransform.RAW) {
                 throw new IllegalArgumentException(
                         viewTransform + " does not require an OCIO LUT");
             }
@@ -1323,6 +1326,7 @@ public final class NativeBridge {
                                 renderer,
                                 viewTransform.nativeId(),
                                 effectiveLook,
+                                workingSpace.nativeId(),
                                 descriptor,
                                 MemorySegment.NULL,
                                 0L),
@@ -1340,6 +1344,7 @@ public final class NativeBridge {
                                 renderer,
                                 viewTransform.nativeId(),
                                 effectiveLook,
+                                workingSpace.nativeId(),
                                 descriptor,
                                 MemorySegment.ofBuffer(pixels),
                                 byteCount),
@@ -1358,7 +1363,8 @@ public final class NativeBridge {
                                 descriptor.get(JAVA_FLOAT, 44L),
                                 descriptor.get(JAVA_FLOAT, 48L),
                                 descriptor.get(JAVA_INT, 52L),
-                                descriptor.get(JAVA_INT, 56L)),
+                                descriptor.get(JAVA_INT, 56L),
+                                descriptor.get(JAVA_INT, 60L)),
                         pixels.asReadOnlyBuffer().order(ByteOrder.nativeOrder()));
             }
         }
@@ -2002,7 +2008,8 @@ public final class NativeBridge {
             float shaperLog2Max,
             float shaperEpsilon,
             int interpolation,
-            int colorLook) {
+            int colorLook,
+            int workingSpace) {
     }
 
     public record ColorLut(ColorLutDescriptor descriptor, ByteBuffer pixels) {

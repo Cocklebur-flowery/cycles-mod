@@ -525,7 +525,8 @@ public final class CyclesRendererMod {
             y += 10;
             graphics.text(
                     minecraft.font,
-                    "working=Linear Rec.709  output=sRGB SDR  HDR swapchain=false",
+                    "working=" + settings.workingSpace().name()
+                            + "  output=sRGB SDR  HDR swapchain=false",
                     6, y, 0xFFE0E0E0);
             y += 10;
             graphics.text(
