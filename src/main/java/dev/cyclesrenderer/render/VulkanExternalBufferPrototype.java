@@ -16,6 +16,7 @@ import net.minecraft.client.Minecraft;
 import org.lwjgl.PointerBuffer;
 import org.lwjgl.system.MemoryStack;
 import org.lwjgl.vulkan.KHRExternalMemoryWin32;
+import org.lwjgl.vulkan.KHRExternalSemaphoreWin32;
 import org.lwjgl.vulkan.KHRSynchronization2;
 import org.lwjgl.vulkan.VK10;
 import org.lwjgl.vulkan.VK11;
@@ -27,10 +28,16 @@ import org.lwjgl.vulkan.VkDevice;
 import org.lwjgl.vulkan.VkExportMemoryAllocateInfo;
 import org.lwjgl.vulkan.VkExternalBufferProperties;
 import org.lwjgl.vulkan.VkExternalMemoryBufferCreateInfo;
+import org.lwjgl.vulkan.VkExportSemaphoreCreateInfo;
+import org.lwjgl.vulkan.VkExternalSemaphoreProperties;
 import org.lwjgl.vulkan.VkMemoryAllocateInfo;
 import org.lwjgl.vulkan.VkMemoryDedicatedAllocateInfo;
 import org.lwjgl.vulkan.VkMemoryGetWin32HandleInfoKHR;
 import org.lwjgl.vulkan.VkMemoryRequirements;
+import org.lwjgl.vulkan.VkPhysicalDeviceExternalSemaphoreInfo;
+import org.lwjgl.vulkan.VkSemaphoreCreateInfo;
+import org.lwjgl.vulkan.VkSemaphoreGetWin32HandleInfoKHR;
+import org.lwjgl.vulkan.VkSemaphoreTypeCreateInfo;
 import org.lwjgl.vulkan.VkCommandBuffer;
 import org.lwjgl.vulkan.VkDependencyInfo;
 import org.lwjgl.vulkan.VkImageSubresourceLayers;
@@ -47,6 +54,8 @@ public final class VulkanExternalBufferPrototype implements AutoCloseable {
 
     private static final int HANDLE_TYPE =
             VK11.VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_WIN32_BIT;
+    private static final int SEMAPHORE_HANDLE_TYPE =
+            VK11.VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_OPAQUE_WIN32_BIT;
     private static final int USAGE = VK10.VK_BUFFER_USAGE_TRANSFER_SRC_BIT
             | VK10.VK_BUFFER_USAGE_TRANSFER_DST_BIT;
 
@@ -54,6 +63,8 @@ public final class VulkanExternalBufferPrototype implements AutoCloseable {
     private VulkanDevice vulkanDevice;
     private long buffer;
     private long memory;
+    private long readySemaphore;
+    private long releaseSemaphore;
     private long allocationBytes;
     private int slotStrideBytes;
     private int capacityWidth;
@@ -106,6 +117,9 @@ public final class VulkanExternalBufferPrototype implements AutoCloseable {
             return;
         }
 
+        long exportedHandle = 0L;
+        long readyHandle = 0L;
+        long releaseHandle = 0L;
         try {
             GpuDeviceBackend backend =
                     ((GpuDeviceAccessor) (Object) RenderSystem.getDevice())
@@ -118,15 +132,26 @@ public final class VulkanExternalBufferPrototype implements AutoCloseable {
             }
             long ringBytes = Math.multiplyExact(logicalBytes, SLOT_COUNT);
             allocate(vulkanDevice, ringBytes);
-            long exportedHandle = exportMemoryHandle();
-            NativeBridge.bindVulkanInteropBuffer(
-                    capacityWidth,
-                    capacityHeight,
-                    allocationBytes,
-                    exportedHandle,
-                    capabilities.physicalDeviceUuid(),
-                    SLOT_COUNT,
-                    slotStrideBytes);
+            exportedHandle = exportMemoryHandle();
+            readyHandle = exportSemaphoreHandle(readySemaphore);
+            releaseHandle = exportSemaphoreHandle(releaseSemaphore);
+            try {
+                NativeBridge.bindVulkanInteropBuffer(
+                        capacityWidth,
+                        capacityHeight,
+                        allocationBytes,
+                        exportedHandle,
+                        readyHandle,
+                        releaseHandle,
+                        capabilities.physicalDeviceUuid(),
+                        SLOT_COUNT,
+                        slotStrideBytes);
+            } finally {
+                // The NativeBridge call owns all three handles on every return path.
+                exportedHandle = 0L;
+                readyHandle = 0L;
+                releaseHandle = 0L;
+            }
             nativeBound = true;
             telemetry = new Telemetry(
                     true, true, true,
@@ -134,11 +159,20 @@ public final class VulkanExternalBufferPrototype implements AutoCloseable {
                     logicalBytes, allocationBytes,
                     "bound-native");
         } catch (RuntimeException | LinkageError error) {
+            closeExportedHandle(exportedHandle);
+            closeExportedHandle(readyHandle);
+            closeExportedHandle(releaseHandle);
             releaseHandles();
             telemetry = Telemetry.inactive(
                     capacityWidth, capacityHeight, logicalBytes,
                     error.getClass().getSimpleName() + ": "
                             + String.valueOf(error.getMessage()));
+        }
+    }
+
+    private static void closeExportedHandle(long handle) {
+        if (handle != 0L) {
+            NativeBridge.closeWin32Handle(handle);
         }
     }
 
@@ -188,13 +222,34 @@ public final class VulkanExternalBufferPrototype implements AutoCloseable {
                     : (emaCopyMicros * 7L + lastCopyMicros) / 8L;
             maxCopyMicros = Math.max(maxCopyMicros, lastCopyMicros);
         } catch (RuntimeException | LinkageError error) {
-            NativeBridge.releaseVulkanInteropFrame(pendingGeneration);
+            try {
+                signalDiscardedFrame(pendingGeneration);
+            } finally {
+                NativeBridge.releaseVulkanInteropFrame(pendingGeneration);
+            }
             pendingGeneration = 0L;
             pendingWidth = 0;
             pendingHeight = 0;
             pendingSlotIndex = 0;
             throw error;
         }
+    }
+
+    private void signalDiscardedFrame(long generation) {
+        if (generation == 0L || vulkanDevice == null
+                || releaseSemaphore == VK10.VK_NULL_HANDLE) {
+            return;
+        }
+        VulkanCommandEncoder encoder = vulkanDevice.createCommandEncoder();
+        encoder.waitSemaphore(
+                readySemaphore,
+                generation,
+                VK13.VK_PIPELINE_STAGE_2_COPY_BIT);
+        encoder.signalSemaphore(
+                releaseSemaphore,
+                generation,
+                VK13.VK_PIPELINE_STAGE_2_COPY_BIT);
+        encoder.submit();
     }
 
     public boolean hasFrame() {
@@ -323,7 +378,15 @@ public final class VulkanExternalBufferPrototype implements AutoCloseable {
                 check(VK10.vkEndCommandBuffer(commandBuffer),
                         "end interop copy command");
             }
+            encoder.waitSemaphore(
+                    readySemaphore,
+                    pendingGeneration,
+                    VK13.VK_PIPELINE_STAGE_2_COPY_BIT);
             encoder.execute(commandBuffer);
+            encoder.signalSemaphore(
+                    releaseSemaphore,
+                    pendingGeneration,
+                    VK13.VK_PIPELINE_STAGE_2_COPY_BIT);
             encoder.submit();
             pendingCopyFence = nextFence;
         } catch (RuntimeException | LinkageError error) {
@@ -404,13 +467,36 @@ public final class VulkanExternalBufferPrototype implements AutoCloseable {
         }
     }
 
+    private long exportSemaphoreHandle(long semaphore) {
+        try (MemoryStack stack = MemoryStack.stackPush()) {
+            VkSemaphoreGetWin32HandleInfoKHR handleInfo =
+                    VkSemaphoreGetWin32HandleInfoKHR.calloc(stack)
+                            .sType$Default()
+                            .semaphore(semaphore)
+                            .handleType(SEMAPHORE_HANDLE_TYPE);
+            PointerBuffer output = stack.callocPointer(1);
+            check(KHRExternalSemaphoreWin32.vkGetSemaphoreWin32HandleKHR(
+                            device, handleInfo, output),
+                    "export Win32 timeline semaphore handle");
+            long handle = output.get(0);
+            if (handle == 0L) {
+                throw new IllegalStateException(
+                        "export Win32 timeline semaphore handle returned null");
+            }
+            return handle;
+        }
+    }
+
     private void allocate(VulkanDevice vulkanDevice, long requestedBytes) {
         VkDevice nextDevice = vulkanDevice.vkDevice();
         VkPhysicalDevice physicalDevice = nextDevice.getPhysicalDevice();
         validateExternalBufferSupport(physicalDevice);
+        validateExternalSemaphoreSupport(physicalDevice);
 
         long nextBuffer = VK10.VK_NULL_HANDLE;
         long nextMemory = VK10.VK_NULL_HANDLE;
+        long nextReadySemaphore = VK10.VK_NULL_HANDLE;
+        long nextReleaseSemaphore = VK10.VK_NULL_HANDLE;
         try (MemoryStack stack = MemoryStack.stackPush()) {
             VkExternalMemoryBufferCreateInfo externalBuffer =
                     VkExternalMemoryBufferCreateInfo.calloc(stack)
@@ -453,19 +539,87 @@ public final class VulkanExternalBufferPrototype implements AutoCloseable {
             check(VK10.vkBindBufferMemory(nextDevice, nextBuffer, nextMemory, 0L),
                     "bind exportable buffer memory");
 
+            VkSemaphoreTypeCreateInfo semaphoreType =
+                    VkSemaphoreTypeCreateInfo.calloc(stack)
+                            .sType$Default()
+                            .semaphoreType(VK12.VK_SEMAPHORE_TYPE_TIMELINE)
+                            .initialValue(0L);
+            VkExportSemaphoreCreateInfo semaphoreExport =
+                    VkExportSemaphoreCreateInfo.calloc(stack)
+                            .sType$Default()
+                            .pNext(semaphoreType.address())
+                            .handleTypes(SEMAPHORE_HANDLE_TYPE);
+            VkSemaphoreCreateInfo semaphoreInfo = VkSemaphoreCreateInfo.calloc(stack)
+                    .sType$Default()
+                    .pNext(semaphoreExport.address());
+            LongBuffer semaphoreOutput = stack.callocLong(1);
+            check(VK10.vkCreateSemaphore(nextDevice, semaphoreInfo, null, semaphoreOutput),
+                    "create ready timeline semaphore");
+            nextReadySemaphore = semaphoreOutput.get(0);
+            semaphoreOutput.put(0, 0L);
+            try {
+                check(VK10.vkCreateSemaphore(
+                                nextDevice, semaphoreInfo, null, semaphoreOutput),
+                        "create release timeline semaphore");
+            } catch (RuntimeException error) {
+                VK10.vkDestroySemaphore(nextDevice, nextReadySemaphore, null);
+                nextReadySemaphore = VK10.VK_NULL_HANDLE;
+                throw error;
+            }
+            nextReleaseSemaphore = semaphoreOutput.get(0);
+
             device = nextDevice;
             this.vulkanDevice = vulkanDevice;
             buffer = nextBuffer;
             memory = nextMemory;
+            readySemaphore = nextReadySemaphore;
+            releaseSemaphore = nextReleaseSemaphore;
             allocationBytes = requirements.size();
             nextBuffer = VK10.VK_NULL_HANDLE;
             nextMemory = VK10.VK_NULL_HANDLE;
+            nextReadySemaphore = VK10.VK_NULL_HANDLE;
+            nextReleaseSemaphore = VK10.VK_NULL_HANDLE;
         } finally {
             if (nextBuffer != VK10.VK_NULL_HANDLE) {
                 VK10.vkDestroyBuffer(nextDevice, nextBuffer, null);
             }
             if (nextMemory != VK10.VK_NULL_HANDLE) {
                 VK10.vkFreeMemory(nextDevice, nextMemory, null);
+            }
+            if (nextReadySemaphore != VK10.VK_NULL_HANDLE) {
+                VK10.vkDestroySemaphore(nextDevice, nextReadySemaphore, null);
+            }
+            if (nextReleaseSemaphore != VK10.VK_NULL_HANDLE) {
+                VK10.vkDestroySemaphore(nextDevice, nextReleaseSemaphore, null);
+            }
+        }
+    }
+
+    private static void validateExternalSemaphoreSupport(
+            VkPhysicalDevice physicalDevice) {
+        try (MemoryStack stack = MemoryStack.stackPush()) {
+            VkSemaphoreTypeCreateInfo semaphoreType =
+                    VkSemaphoreTypeCreateInfo.calloc(stack)
+                            .sType$Default()
+                            .semaphoreType(VK12.VK_SEMAPHORE_TYPE_TIMELINE)
+                            .initialValue(0L);
+            VkPhysicalDeviceExternalSemaphoreInfo info =
+                    VkPhysicalDeviceExternalSemaphoreInfo.calloc(stack)
+                            .sType$Default()
+                            .pNext(semaphoreType.address())
+                            .handleType(SEMAPHORE_HANDLE_TYPE);
+            VkExternalSemaphoreProperties properties =
+                    VkExternalSemaphoreProperties.calloc(stack).sType$Default();
+            VK11.vkGetPhysicalDeviceExternalSemaphoreProperties(
+                    physicalDevice, info, properties);
+            if ((properties.externalSemaphoreFeatures()
+                    & VK11.VK_EXTERNAL_SEMAPHORE_FEATURE_EXPORTABLE_BIT) == 0) {
+                throw new IllegalStateException(
+                        "opaque Win32 timeline semaphore is not exportable");
+            }
+            if ((properties.compatibleHandleTypes() & SEMAPHORE_HANDLE_TYPE) == 0) {
+                throw new IllegalStateException(
+                        "opaque Win32 timeline semaphore handle is not compatible");
             }
         }
     }
@@ -561,10 +715,18 @@ public final class VulkanExternalBufferPrototype implements AutoCloseable {
         if (device != null && memory != VK10.VK_NULL_HANDLE) {
             VK10.vkFreeMemory(device, memory, null);
         }
+        if (device != null && readySemaphore != VK10.VK_NULL_HANDLE) {
+            VK10.vkDestroySemaphore(device, readySemaphore, null);
+        }
+        if (device != null && releaseSemaphore != VK10.VK_NULL_HANDLE) {
+            VK10.vkDestroySemaphore(device, releaseSemaphore, null);
+        }
         device = null;
         vulkanDevice = null;
         buffer = VK10.VK_NULL_HANDLE;
         memory = VK10.VK_NULL_HANDLE;
+        readySemaphore = VK10.VK_NULL_HANDLE;
+        releaseSemaphore = VK10.VK_NULL_HANDLE;
         allocationBytes = 0L;
     }
 

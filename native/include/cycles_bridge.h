@@ -163,6 +163,7 @@ enum CyclesBridgeVulkanInteropStateFlags : std::uint32_t {
     CYCLES_BRIDGE_VULKAN_INTEROP_FAILED = 1U << 3U,
     CYCLES_BRIDGE_VULKAN_INTEROP_SESSION_ATTACHED = 1U << 4U,
     CYCLES_BRIDGE_VULKAN_INTEROP_FRAME_ACQUIRED = 1U << 5U,
+    CYCLES_BRIDGE_VULKAN_INTEROP_TIMELINE_SYNC = 1U << 6U,
 };
 
 struct CyclesBridgeCamera {
@@ -452,6 +453,8 @@ struct CyclesBridgeVulkanInteropBuffer {
     std::uint8_t device_uuid[16];
     std::uint32_t slot_count;
     std::uint32_t slot_stride_bytes;
+    std::uint64_t ready_semaphore_handle;
+    std::uint64_t release_semaphore_handle;
 };
 
 struct CyclesBridgeVulkanInteropState {
@@ -561,8 +564,8 @@ CYCLES_BRIDGE_API std::uint32_t cycles_bridge_query_diagnostics(
     const CyclesBridgeRenderer* renderer,
     CyclesBridgeDiagnostics* diagnostics);
 
-// The native bridge takes ownership of descriptor->memory_handle whenever
-// descriptor is non-null and the handle is non-zero, including error returns.
+// The native bridge takes ownership of all non-zero Win32 handles in the
+// descriptor whenever descriptor is non-null, including error returns.
 CYCLES_BRIDGE_API std::uint32_t cycles_bridge_bind_vulkan_interop_buffer(
     CyclesBridgeRenderer* renderer,
     const CyclesBridgeVulkanInteropBuffer* descriptor);

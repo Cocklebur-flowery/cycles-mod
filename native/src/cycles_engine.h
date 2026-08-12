@@ -60,6 +60,8 @@ class CyclesEngine final {
     bool bind_vulkan_interop_buffer(
         const CyclesBridgeVulkanInteropBuffer& descriptor,
         std::uint64_t memory_handle,
+        std::uint64_t ready_semaphore_handle,
+        std::uint64_t release_semaphore_handle,
         std::string& error);
 
     bool unbind_vulkan_interop_buffer(std::string& error);

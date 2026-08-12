@@ -563,6 +563,7 @@ public final class CyclesRendererMod {
                                 + interopState.active() + "/"
                                 + interopState.frameReady() + "/"
                                 + interopState.frameAcquired()
+                                + " timeline=" + interopState.timelineSync()
                                 + " gen=" + interopState.generation()
                                 + " slots=" + interopState.readySlotCount()
                                 + "/" + interopState.slotCount()

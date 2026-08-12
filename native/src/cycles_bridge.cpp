@@ -18,9 +18,9 @@ struct CyclesBridgeRenderer {
 
 namespace {
 
-constexpr std::uint32_t kAbiVersion = 24;
+constexpr std::uint32_t kAbiVersion = 25;
 constexpr std::uint32_t kStructVersion = 1;
-constexpr char kBuildInfo[] = "cyclesrenderer-native/cycles-5.2;abi=24";
+constexpr char kBuildInfo[] = "cyclesrenderer-native/cycles-5.2;abi=25";
 
 static_assert(sizeof(CyclesBridgeCamera) == 80);
 static_assert(offsetof(CyclesBridgeCamera, frame_id) == 8);
@@ -44,11 +44,12 @@ static_assert(offsetof(CyclesBridgeColorLutDescriptor, pixel_byte_count) == 32);
 static_assert(sizeof(CyclesBridgeDiagnostics) == 400);
 static_assert(offsetof(CyclesBridgeDiagnostics, device_uuid_valid) == 376);
 static_assert(offsetof(CyclesBridgeDiagnostics, device_uuid) == 380);
-static_assert(sizeof(CyclesBridgeVulkanInteropBuffer) == 64);
+static_assert(sizeof(CyclesBridgeVulkanInteropBuffer) == 80);
 static_assert(offsetof(CyclesBridgeVulkanInteropBuffer, allocation_byte_count) == 24);
 static_assert(offsetof(CyclesBridgeVulkanInteropBuffer, memory_handle) == 32);
 static_assert(offsetof(CyclesBridgeVulkanInteropBuffer, device_uuid) == 40);
 static_assert(offsetof(CyclesBridgeVulkanInteropBuffer, slot_count) == 56);
+static_assert(offsetof(CyclesBridgeVulkanInteropBuffer, ready_semaphore_handle) == 64);
 static_assert(sizeof(CyclesBridgeVulkanInteropState) == 72);
 static_assert(offsetof(CyclesBridgeVulkanInteropState, generation) == 24);
 static_assert(offsetof(CyclesBridgeVulkanInteropState, last_sync_micros) == 40);
@@ -302,6 +303,8 @@ bool valid_vulkan_interop_buffer(
         || descriptor.pixel_format != CYCLES_BRIDGE_PIXEL_FORMAT_RGBA16_FLOAT
         || descriptor.flags != CYCLES_BRIDGE_VULKAN_INTEROP_OWNERSHIP_TRANSFER
         || descriptor.memory_handle == 0U
+        || descriptor.ready_semaphore_handle == 0U
+        || descriptor.release_semaphore_handle == 0U
         || descriptor.slot_count == 0U || descriptor.slot_count > 3U) {
         return false;
     }
@@ -513,19 +516,29 @@ std::uint32_t cycles_bridge_query_diagnostics(
 std::uint32_t cycles_bridge_bind_vulkan_interop_buffer(
     CyclesBridgeRenderer* renderer,
     const CyclesBridgeVulkanInteropBuffer* descriptor) {
-    OwnedWin32Handle owned(descriptor != nullptr ? descriptor->memory_handle : 0U);
+    OwnedWin32Handle owned_memory(
+        descriptor != nullptr ? descriptor->memory_handle : 0U);
+    OwnedWin32Handle owned_ready(
+        descriptor != nullptr ? descriptor->ready_semaphore_handle : 0U);
+    OwnedWin32Handle owned_release(
+        descriptor != nullptr ? descriptor->release_semaphore_handle : 0U);
     if (renderer == nullptr || renderer->engine == nullptr || descriptor == nullptr
         || !valid_vulkan_interop_buffer(*descriptor)) {
         return CYCLES_BRIDGE_STATUS_INVALID_ARGUMENT;
     }
     try {
         std::string error;
-        const std::uint64_t handle = descriptor->memory_handle;
         if (!renderer->engine->bind_vulkan_interop_buffer(
-                *descriptor, handle, error)) {
+                *descriptor,
+                descriptor->memory_handle,
+                descriptor->ready_semaphore_handle,
+                descriptor->release_semaphore_handle,
+                error)) {
             return CYCLES_BRIDGE_STATUS_RENDER_ERROR;
         }
-        owned.release();
+        owned_memory.release();
+        owned_ready.release();
+        owned_release.release();
         return CYCLES_BRIDGE_STATUS_OK;
     } catch (...) {
         return CYCLES_BRIDGE_STATUS_RENDER_ERROR;

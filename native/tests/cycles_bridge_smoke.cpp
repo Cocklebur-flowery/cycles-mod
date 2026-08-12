@@ -392,7 +392,7 @@ bool verify_progressive_sampling(
 int main(int argc, char** argv) {
     const bool require_optix = argc > 1 && std::strcmp(argv[1], "--require-optix") == 0;
     std::cerr << "[smoke] ABI check\n";
-    if (cycles_bridge_abi_version() != 24U) {
+    if (cycles_bridge_abi_version() != 25U) {
         std::cerr << "unexpected native ABI " << cycles_bridge_abi_version() << '\n';
         return 1;
     }
@@ -450,12 +450,19 @@ int main(int argc, char** argv) {
         initial_diagnostics.device_uuid,
         sizeof(interop.device_uuid));
     HANDLE accepted_handle = CreateEventW(nullptr, FALSE, FALSE, nullptr);
-    if (accepted_handle == nullptr) {
+    HANDLE accepted_ready_handle = CreateEventW(nullptr, FALSE, FALSE, nullptr);
+    HANDLE accepted_release_handle = CreateEventW(nullptr, FALSE, FALSE, nullptr);
+    if (accepted_handle == nullptr || accepted_ready_handle == nullptr
+        || accepted_release_handle == nullptr) {
         cycles_bridge_destroy_renderer(renderer);
         return 1;
     }
     interop.memory_handle = static_cast<std::uint64_t>(
         reinterpret_cast<std::uintptr_t>(accepted_handle));
+    interop.ready_semaphore_handle = static_cast<std::uint64_t>(
+        reinterpret_cast<std::uintptr_t>(accepted_ready_handle));
+    interop.release_semaphore_handle = static_cast<std::uint64_t>(
+        reinterpret_cast<std::uintptr_t>(accepted_release_handle));
     const std::uint32_t bind_status =
         cycles_bridge_bind_vulkan_interop_buffer(renderer, &interop);
     if (initial_diagnostics.device_uuid_valid != 0U) {
@@ -473,16 +480,25 @@ int main(int argc, char** argv) {
             return 1;
         }
         HANDLE duplicate_handle = CreateEventW(nullptr, FALSE, FALSE, nullptr);
-        if (duplicate_handle == nullptr) {
+        HANDLE duplicate_ready_handle = CreateEventW(nullptr, FALSE, FALSE, nullptr);
+        HANDLE duplicate_release_handle = CreateEventW(nullptr, FALSE, FALSE, nullptr);
+        if (duplicate_handle == nullptr || duplicate_ready_handle == nullptr
+            || duplicate_release_handle == nullptr) {
             cycles_bridge_destroy_renderer(renderer);
             return 1;
         }
         interop.memory_handle = static_cast<std::uint64_t>(
             reinterpret_cast<std::uintptr_t>(duplicate_handle));
+        interop.ready_semaphore_handle = static_cast<std::uint64_t>(
+            reinterpret_cast<std::uintptr_t>(duplicate_ready_handle));
+        interop.release_semaphore_handle = static_cast<std::uint64_t>(
+            reinterpret_cast<std::uintptr_t>(duplicate_release_handle));
         if (cycles_bridge_bind_vulkan_interop_buffer(renderer, &interop)
                 != CYCLES_BRIDGE_STATUS_RENDER_ERROR
-            || CloseHandle(duplicate_handle) != FALSE) {
-            std::cerr << "duplicate interop handle was not rejected and closed\n";
+            || CloseHandle(duplicate_handle) != FALSE
+            || CloseHandle(duplicate_ready_handle) != FALSE
+            || CloseHandle(duplicate_release_handle) != FALSE) {
+            std::cerr << "duplicate interop handles were not rejected and closed\n";
             cycles_bridge_destroy_renderer(renderer);
             return 1;
         }
@@ -500,23 +516,34 @@ int main(int argc, char** argv) {
             || !require_ok(
                 cycles_bridge_unbind_vulkan_interop_buffer(renderer),
                 "interop handle unbind")
-            || CloseHandle(accepted_handle) != FALSE) {
+            || CloseHandle(accepted_handle) != FALSE
+            || CloseHandle(accepted_ready_handle) != FALSE
+            || CloseHandle(accepted_release_handle) != FALSE) {
             std::cerr << "empty interop frame ownership was not rejected\n";
             cycles_bridge_destroy_renderer(renderer);
             return 1;
         }
         HANDLE rejected_handle = CreateEventW(nullptr, FALSE, FALSE, nullptr);
-        if (rejected_handle == nullptr) {
+        HANDLE rejected_ready_handle = CreateEventW(nullptr, FALSE, FALSE, nullptr);
+        HANDLE rejected_release_handle = CreateEventW(nullptr, FALSE, FALSE, nullptr);
+        if (rejected_handle == nullptr || rejected_ready_handle == nullptr
+            || rejected_release_handle == nullptr) {
             cycles_bridge_destroy_renderer(renderer);
             return 1;
         }
         interop.device_uuid[0] ^= 0xFFU;
         interop.memory_handle = static_cast<std::uint64_t>(
             reinterpret_cast<std::uintptr_t>(rejected_handle));
+        interop.ready_semaphore_handle = static_cast<std::uint64_t>(
+            reinterpret_cast<std::uintptr_t>(rejected_ready_handle));
+        interop.release_semaphore_handle = static_cast<std::uint64_t>(
+            reinterpret_cast<std::uintptr_t>(rejected_release_handle));
         if (cycles_bridge_bind_vulkan_interop_buffer(renderer, &interop)
                 != CYCLES_BRIDGE_STATUS_RENDER_ERROR
-            || CloseHandle(rejected_handle) != FALSE) {
-            std::cerr << "UUID-mismatched interop handle was not rejected and closed\n";
+            || CloseHandle(rejected_handle) != FALSE
+            || CloseHandle(rejected_ready_handle) != FALSE
+            || CloseHandle(rejected_release_handle) != FALSE) {
+            std::cerr << "UUID-mismatched interop handles were not rejected and closed\n";
             cycles_bridge_destroy_renderer(renderer);
             return 1;
         }

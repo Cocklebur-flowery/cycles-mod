@@ -24,7 +24,7 @@ import static java.lang.foreign.ValueLayout.JAVA_INT;
 import static java.lang.foreign.ValueLayout.JAVA_LONG;
 
 public final class NativeBridge {
-    public static final int ABI_VERSION = 24;
+    public static final int ABI_VERSION = 25;
     public static final int PIXEL_FORMAT_RGBA16_FLOAT = 2;
     public static final int PIXEL_FORMAT_RGBA32_FLOAT = 3;
 
@@ -308,7 +308,9 @@ public final class NativeBridge {
                     JAVA_LONG.withName("memory_handle"),
                     MemoryLayout.sequenceLayout(16, JAVA_BYTE).withName("device_uuid"),
                     JAVA_INT.withName("slot_count"),
-                    JAVA_INT.withName("slot_stride_bytes"));
+                    JAVA_INT.withName("slot_stride_bytes"),
+                    JAVA_LONG.withName("ready_semaphore_handle"),
+                    JAVA_LONG.withName("release_semaphore_handle"));
     private static final MemoryLayout VULKAN_INTEROP_STATE_LAYOUT =
             MemoryLayout.structLayout(
                     JAVA_INT.withName("struct_size"),
@@ -374,7 +376,7 @@ public final class NativeBridge {
                 || CAPABILITIES_LAYOUT.byteSize() != 64L
                 || COLOR_LUT_DESCRIPTOR_LAYOUT.byteSize() != 64L
                 || DIAGNOSTICS_LAYOUT.byteSize() != 400L
-                || VULKAN_INTEROP_BUFFER_LAYOUT.byteSize() != 64L
+                || VULKAN_INTEROP_BUFFER_LAYOUT.byteSize() != 80L
                 || VULKAN_INTEROP_STATE_LAYOUT.byteSize() != 72L
                 || VERTEX_LAYOUT.byteSize() != 40L
                 || TRIANGLE_LAYOUT.byteSize() != 16L
@@ -529,13 +531,16 @@ public final class NativeBridge {
             int height,
             long allocationBytes,
             long memoryHandle,
+            long readySemaphoreHandle,
+            long releaseSemaphoreHandle,
             String deviceUuid,
             int slotCount,
             int slotStrideBytes) {
         BridgeState state = requireState();
         try {
             state.bindVulkanInteropBuffer(
-                    width, height, allocationBytes, memoryHandle, deviceUuid,
+                    width, height, allocationBytes, memoryHandle,
+                    readySemaphoreHandle, releaseSemaphoreHandle, deviceUuid,
                     slotCount, slotStrideBytes);
         } catch (Throwable error) {
             rethrowFatalError(error);
@@ -546,6 +551,20 @@ public final class NativeBridge {
 
     public static void unbindVulkanInteropBuffer() {
         invoke("native Vulkan interop unbind", BridgeState::unbindVulkanInteropBuffer);
+    }
+
+    public static void closeWin32Handle(long handle) {
+        if (handle == 0L) {
+            return;
+        }
+        BridgeState state = requireState();
+        try {
+            state.closeWin32Handle.invokeExact(handle);
+        } catch (Throwable error) {
+            rethrowFatalError(error);
+            throw new IllegalStateException(
+                    "native Win32 handle close failed: " + describe(error), error);
+        }
     }
 
     public static VulkanInteropState vulkanInteropState() {
@@ -976,13 +995,16 @@ public final class NativeBridge {
                 int height,
                 long allocationBytes,
                 long memoryHandle,
+                long readySemaphoreHandle,
+                long releaseSemaphoreHandle,
                 String deviceUuid,
                 int slotCount,
                 int slotStrideBytes) throws Throwable {
             boolean nativeCalled = false;
             try (Arena arena = Arena.ofConfined()) {
                 if (width <= 0 || height <= 0 || allocationBytes <= 0L
-                        || memoryHandle == 0L || slotCount <= 0
+                        || memoryHandle == 0L || readySemaphoreHandle == 0L
+                        || releaseSemaphoreHandle == 0L || slotCount <= 0
                         || slotStrideBytes <= 0) {
                     throw new IllegalArgumentException(
                             "invalid Vulkan interop buffer descriptor");
@@ -1004,6 +1026,8 @@ public final class NativeBridge {
                 }
                 descriptor.set(JAVA_INT, 56L, slotCount);
                 descriptor.set(JAVA_INT, 60L, slotStrideBytes);
+                descriptor.set(JAVA_LONG, 64L, readySemaphoreHandle);
+                descriptor.set(JAVA_LONG, 72L, releaseSemaphoreHandle);
                 nativeCalled = true;
                 int status = (int) bindVulkanInteropBuffer.invokeExact(
                         renderer, descriptor);
@@ -1011,6 +1035,8 @@ public final class NativeBridge {
             } catch (Throwable error) {
                 if (!nativeCalled) {
                     closeWin32Handle.invokeExact(memoryHandle);
+                    closeWin32Handle.invokeExact(readySemaphoreHandle);
+                    closeWin32Handle.invokeExact(releaseSemaphoreHandle);
                 }
                 throw error;
             }
@@ -1930,6 +1956,10 @@ public final class NativeBridge {
 
         public boolean frameAcquired() {
             return (flags & 32) != 0;
+        }
+
+        public boolean timelineSync() {
+            return (flags & 64) != 0;
         }
     }
 
