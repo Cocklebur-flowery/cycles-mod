@@ -1,6 +1,7 @@
 #include "cycles_engine.h"
 
 #include "color_management.h"
+#include "scene_update.h"
 
 #include <Windows.h>
 
@@ -181,24 +182,10 @@ ccl::PassType pass_type(std::uint32_t pass) {
     }
 }
 
-struct SectionRequest {
-    CyclesBridgeSection section{};
-    std::vector<CyclesBridgeVertex> vertices;
-    std::vector<CyclesBridgeTriangle> triangles;
-};
-
-struct SceneResourcesData {
-    CyclesBridgeSceneResources resources{};
-    std::vector<CyclesBridgeMaterial> materials;
-    std::vector<CyclesBridgeTexture> textures;
-    std::vector<std::uint8_t> texture_pixels;
-};
-
-struct SceneRequest {
-    std::shared_ptr<const SceneResourcesData> resources;
-    std::unordered_map<std::int64_t, std::shared_ptr<const SectionRequest>> sections;
-    std::uint64_t revision = 0;
-};
+using SectionRequest = cyclesrenderer::scene::SectionData;
+using SceneResourcesData = cyclesrenderer::scene::ResourcesData;
+using SceneRequest = cyclesrenderer::scene::SceneSnapshot;
+using SceneUpdate = cyclesrenderer::scene::SceneUpdate;
 
 struct SectionSceneNodes {
     ccl::Mesh* mesh = nullptr;
@@ -1716,38 +1703,49 @@ void build_scene(
 void apply_scene_delta(
     ccl::Scene* scene,
     const SceneRequest& request,
+    const SceneUpdate& update,
     SceneRuntime& runtime) {
     if (runtime.resources != request.resources) {
         throw std::logic_error("incremental scene update changed shared resources");
     }
 
-    for (auto current = runtime.sections.begin(); current != runtime.sections.end();) {
-        if (request.sections.contains(current->first)) {
-            ++current;
-            continue;
+    if (update.replace_all) {
+        for (auto current = runtime.sections.begin(); current != runtime.sections.end();) {
+            if (request.sections.contains(current->first)) {
+                ++current;
+                continue;
+            }
+            scene->delete_node(current->second.object);
+            scene->delete_node(current->second.mesh);
+            current = runtime.sections.erase(current);
         }
-        scene->delete_node(current->second.object);
-        scene->delete_node(current->second.mesh);
-        current = runtime.sections.erase(current);
     }
 
-    for (const auto& entry : request.sections) {
+    for (const auto& entry : update.mutations) {
         auto current = runtime.sections.find(entry.first);
-        if (current == runtime.sections.end()) {
-            runtime.sections.emplace(
-                entry.first,
-                create_section_nodes(scene, request, entry.second, runtime.shaders));
+        if (!entry.second.section) {
+            if (current != runtime.sections.end()) {
+                scene->delete_node(current->second.object);
+                scene->delete_node(current->second.mesh);
+                runtime.sections.erase(current);
+            }
             continue;
         }
-        if (current->second.source == entry.second) {
+        if (current == runtime.sections.end()) {
+            runtime.sections.emplace(
+                entry.first, create_section_nodes(
+                    scene, request, entry.second.section, runtime.shaders));
+            continue;
+        }
+        if (current->second.source == entry.second.section) {
             continue;
         }
 
         ccl::Mesh* mesh = current->second.mesh;
         mesh->clear(true);
-        populate_section_mesh(mesh, *entry.second);
+        populate_section_mesh(mesh, *entry.second.section);
         mesh->tag_update(scene, true);
-        current->second.source = entry.second;
+        current->second.source = entry.second.section;
     }
 }
 
@@ -2190,8 +2188,7 @@ class CyclesEngine::Impl final {
                 texture_pixels, texture_pixels + scene.texture_byte_count);
         }
 
-        auto request = std::make_shared<SceneRequest>();
-        request->resources = resources;
+        cyclesrenderer::scene::SectionMap sections;
         if (scene.triangle_count != 0) {
             auto section = std::make_shared<SectionRequest>();
             section->section.struct_size = sizeof(CyclesBridgeSection);
@@ -2204,7 +2201,7 @@ class CyclesEngine::Impl final {
             section->section.triangle_count = scene.triangle_count;
             section->vertices.assign(vertices, vertices + scene.vertex_count);
             section->triangles.assign(triangles, triangles + scene.triangle_count);
-            request->sections.emplace(0, std::move(section));
+            sections.emplace(0, std::move(section));
         }
         {
             std::lock_guard lock(request_mutex_);
@@ -2212,10 +2209,8 @@ class CyclesEngine::Impl final {
                 error = "Cycles worker is stopping";
                 return false;
             }
-            staging_resources_ = resources;
-            staging_sections_ = request->sections;
-            request->revision = ++scene_revision_;
-            requested_scene_ = std::move(request);
+            scene_updates_.replace(resources, std::move(sections));
+            requested_scene_ = scene_updates_.commit(++scene_revision_);
         }
         set_state("scene-queued", {});
         request_changed_.notify_all();
@@ -2246,8 +2241,7 @@ class CyclesEngine::Impl final {
                 error = "Cycles worker is stopping";
                 return false;
             }
-            staging_resources_ = std::move(copied);
-            staging_sections_.clear();
+            scene_updates_.reset(std::move(copied));
             requested_scene_.reset();
             requested_camera_.reset();
             ++scene_reset_revision_;
@@ -2276,17 +2270,17 @@ class CyclesEngine::Impl final {
             error = "Cycles worker is stopping";
             return false;
         }
-        if (!staging_resources_) {
+        if (!scene_updates_.resources()) {
             error = "scene resources have not been reset";
             return false;
         }
         for (const CyclesBridgeTriangle& triangle : copied->triangles) {
-            if (triangle.material_index >= staging_resources_->materials.size()) {
+            if (triangle.material_index >= scene_updates_.resources()->materials.size()) {
                 error = "section references an unknown material";
                 return false;
             }
         }
-        staging_sections_[section.section_id] = std::move(copied);
+        scene_updates_.upsert(std::move(copied));
         return true;
     }
 
@@ -2296,31 +2290,27 @@ class CyclesEngine::Impl final {
             error = "Cycles worker is stopping";
             return false;
         }
-        if (!staging_resources_) {
+        if (!scene_updates_.resources()) {
             error = "scene resources have not been reset";
             return false;
         }
-        staging_sections_.erase(section_id);
+        scene_updates_.remove(section_id);
         return true;
     }
 
     bool commit_scene(std::string& error) {
         const auto commit_start = std::chrono::steady_clock::now();
-        auto request = std::make_shared<SceneRequest>();
         {
             std::lock_guard lock(request_mutex_);
             if (stopping_) {
                 error = "Cycles worker is stopping";
                 return false;
             }
-            if (!staging_resources_) {
+            if (!scene_updates_.resources()) {
                 error = "scene resources have not been reset";
                 return false;
             }
-            request->resources = staging_resources_;
-            request->sections = staging_sections_;
-            request->revision = ++scene_revision_;
-            requested_scene_ = request;
+            requested_scene_ = scene_updates_.commit(++scene_revision_);
             if (requested_camera_) {
                 requested_camera_->sample_count =
                     static_cast<int>(requested_settings_.interactive_samples);
@@ -2497,9 +2487,8 @@ class CyclesEngine::Impl final {
             std::lock_guard lock(request_mutex_);
             diagnostics.scene_revision = requested_scene_ ? requested_scene_->revision : 0;
             diagnostics.camera_revision = requested_camera_ ? requested_camera_->revision : 0;
-            diagnostics.section_count = requested_scene_
-                ? static_cast<std::uint32_t>(requested_scene_->sections.size())
-                : 0U;
+            diagnostics.section_count =
+                static_cast<std::uint32_t>(scene_updates_.section_count());
         }
         {
             std::lock_guard lock(state_mutex_);
@@ -2929,12 +2918,14 @@ class CyclesEngine::Impl final {
     void update_session_scene(
         ccl::Session& session,
         const SceneRequest& scene_request,
+        const SceneUpdate& scene_update,
         SceneRuntime& runtime) {
         const auto delta_start = std::chrono::steady_clock::now();
         set_state("scene-updating", {});
         {
             const ccl::thread_scoped_lock scene_lock(session.scene->mutex);
-            apply_scene_delta(session.scene.get(), scene_request, runtime);
+            apply_scene_delta(
+                session.scene.get(), scene_request, scene_update, runtime);
         }
         record_scene_delta(elapsed_micros(
             delta_start, std::chrono::steady_clock::now()));
@@ -3097,7 +3088,7 @@ class CyclesEngine::Impl final {
         ccl::unique_ptr<ccl::Session> session;
         ccl::SessionParams session_params;
         SceneRuntime scene_runtime;
-        std::shared_ptr<const SceneRequest> active_scene;
+        SceneRequest active_scene;
         std::uint64_t active_scene_revision = 0;
         std::uint64_t active_camera_revision = 0;
         std::uint64_t active_reset_revision = 0;
@@ -3112,7 +3103,7 @@ class CyclesEngine::Impl final {
 
         try {
             while (true) {
-                std::shared_ptr<const SceneRequest> requested_scene;
+                std::shared_ptr<const SceneUpdate> requested_scene;
                 std::optional<CameraRequest> requested_camera;
                 std::uint64_t requested_reset_revision = 0;
                 CyclesBridgeRenderSettings requested_settings{};
@@ -3170,7 +3161,6 @@ class CyclesEngine::Impl final {
                         session->cancel(true);
                         session.reset();
                         scene_runtime.clear();
-                        active_scene.reset();
                         active_scene_revision = 0;
                         device_index = 0;
                         if (pass_registration_required) {
@@ -3204,7 +3194,7 @@ class CyclesEngine::Impl final {
                         session.reset();
                     }
                     scene_runtime.clear();
-                    active_scene.reset();
+                    active_scene.clear();
                     active_scene_revision = 0;
                     active_camera_revision = 0;
                     active_reset_revision = requested_reset_revision;
@@ -3235,13 +3225,15 @@ class CyclesEngine::Impl final {
                         frames_.invalidate_pass_cache();
                     }
                     const bool resources_changed = !session
-                        || !active_scene
+                        || !active_scene.resources
                         || scene_runtime.resources != requested_scene->resources;
+                    cyclesrenderer::scene::apply_scene_update(
+                        active_scene, *requested_scene);
                     if (resources_changed) {
                         if (!rebuild_session(
                                 session,
                                 session_params,
-                                *requested_scene,
+                                active_scene,
                                 active_settings,
                                 registered_pass_mask,
                                 scene_runtime,
@@ -3249,14 +3241,18 @@ class CyclesEngine::Impl final {
                             continue;
                         }
                     } else {
-                        update_session_scene(*session, *requested_scene, scene_runtime);
+                        update_session_scene(
+                            *session, active_scene, *requested_scene, scene_runtime);
                     }
-                    active_scene = requested_scene;
-                    active_scene_revision = active_scene->revision;
+                    active_scene_revision = requested_scene->revision;
+                    {
+                        std::lock_guard lock(request_mutex_);
+                        scene_updates_.acknowledge(*requested_scene);
+                    }
                     active_camera_revision = 0;
                 }
 
-                if (!render_in_flight && session && active_scene && requested_camera
+                if (!render_in_flight && session && active_scene.resources && requested_camera
                     && requested_camera->revision != active_camera_revision) {
                     if (!requested_camera->preserve_pass_cache) {
                         frames_.invalidate_pass_cache();
@@ -3269,7 +3265,7 @@ class CyclesEngine::Impl final {
                     start_render(
                         *session,
                         session_params,
-                        *active_scene,
+                        active_scene,
                         *requested_camera,
                         active_settings);
                     active_camera_revision = requested_camera->revision;
@@ -3302,9 +3298,8 @@ class CyclesEngine::Impl final {
     std::uint32_t requested_reset_level_ = CYCLES_BRIDGE_RESET_NONE;
     bool requested_pass_only_change_ = false;
     CyclesBridgeRenderSettings requested_settings_{};
-    std::shared_ptr<const SceneResourcesData> staging_resources_;
-    std::unordered_map<std::int64_t, std::shared_ptr<const SectionRequest>> staging_sections_;
-    std::shared_ptr<const SceneRequest> requested_scene_;
+    cyclesrenderer::scene::SceneUpdateAccumulator scene_updates_;
+    std::shared_ptr<const SceneUpdate> requested_scene_;
     std::optional<CameraRequest> requested_camera_;
     std::chrono::steady_clock::time_point last_camera_change_{};
 

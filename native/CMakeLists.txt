@@ -37,6 +37,7 @@ add_library(cyclesrenderer_native SHARED
     src/color_management.cpp
     src/cycles_bridge.cpp
     src/cycles_engine.cpp
+    src/scene_update.cpp
 )
 
 target_compile_features(cyclesrenderer_native PRIVATE cxx_std_20)
@@ -168,9 +169,12 @@ add_custom_command(TARGET cyclesrenderer_native POST_BUILD
 )
 
 add_executable(cyclesrenderer_smoke
+    src/scene_update.cpp
     tests/cycles_bridge_smoke.cpp
+    tests/scene_update_test.cpp
 )
 target_compile_features(cyclesrenderer_smoke PRIVATE cxx_std_20)
+target_include_directories(cyclesrenderer_smoke PRIVATE include src)
 target_link_libraries(cyclesrenderer_smoke PRIVATE cyclesrenderer_native)
 set_target_properties(cyclesrenderer_smoke PROPERTIES
     CXX_EXTENSIONS OFF
@@ -183,3 +187,7 @@ set_target_properties(cyclesrenderer_smoke PROPERTIES
 
 enable_testing()
 add_test(NAME cyclesrenderer_native_smoke COMMAND cyclesrenderer_smoke)
+add_test(
+    NAME cyclesrenderer_scene_update
+    COMMAND cyclesrenderer_smoke --scene-update-only
+)

@@ -409,7 +409,17 @@ bool verify_progressive_sampling(
 
 }  // namespace
 
+bool run_scene_update_tests();
+
 int main(int argc, char** argv) {
+    std::cerr << "[smoke] Scene update accumulator\n";
+    if (!run_scene_update_tests()) {
+        return 1;
+    }
+    if (argc > 1 && std::strcmp(argv[1], "--scene-update-only") == 0) {
+        std::cerr << "[smoke] Scene update accumulator complete\n";
+        return 0;
+    }
     const bool require_optix = argc > 1 && std::strcmp(argv[1], "--require-optix") == 0;
     std::cerr << "[smoke] ABI check\n";
     if (cycles_bridge_abi_version() != 26U) {
@@ -1183,7 +1193,7 @@ int main(int argc, char** argv) {
     CyclesBridgeSection expanded_section = section;
     expanded_section.vertex_count = static_cast<std::uint32_t>(expanded_vertices.size());
     expanded_section.triangle_count = static_cast<std::uint32_t>(expanded_triangles.size());
-    std::cerr << "[smoke] Updating the existing section in place\n";
+    std::cerr << "[smoke] Coalescing rapid section update/remove/update commits\n";
     if (!require_ok(
             cycles_bridge_upsert_section(
                 renderer,
@@ -1191,7 +1201,19 @@ int main(int argc, char** argv) {
                 expanded_vertices.data(),
                 expanded_triangles.data()),
             "section update")
-        || !require_ok(cycles_bridge_commit_scene(renderer), "updated scene commit")
+        || !require_ok(cycles_bridge_commit_scene(renderer), "first rapid scene commit")
+        || !require_ok(
+            cycles_bridge_remove_section(renderer, section.section_id),
+            "rapid section removal")
+        || !require_ok(cycles_bridge_commit_scene(renderer), "second rapid scene commit")
+        || !require_ok(
+            cycles_bridge_upsert_section(
+                renderer,
+                &expanded_section,
+                expanded_vertices.data(),
+                expanded_triangles.data()),
+            "rapid final section update")
+        || !require_ok(cycles_bridge_commit_scene(renderer), "third rapid scene commit")
         || !wait_for_checksum_change(
             renderer,
             camera,
@@ -1200,6 +1222,15 @@ int main(int argc, char** argv) {
             initial_checksum,
             "updated section",
             info)) {
+        cycles_bridge_destroy_renderer(renderer);
+        return 1;
+    }
+    if (!require_ok(
+            cycles_bridge_query_diagnostics(renderer, &diagnostics),
+            "rapid scene diagnostics")
+        || diagnostics.section_count != 1U) {
+        std::cerr << "rapid scene commits produced section count "
+                  << diagnostics.section_count << '\n';
         cycles_bridge_destroy_renderer(renderer);
         return 1;
     }
@@ -1234,7 +1265,7 @@ int main(int argc, char** argv) {
     if (!require_ok(
             cycles_bridge_query_diagnostics(renderer, &diagnostics),
             "scene timing diagnostics")
-        || diagnostics.scene_commit_count < 3U
+        || diagnostics.scene_commit_count < 5U
         || diagnostics.scene_delta_count < 2U
         || diagnostics.render_start_count == 0U) {
         std::cerr << "missing scene timing telemetry: commits="
