@@ -902,6 +902,42 @@ public final class CyclesRendererMod {
             y += 10;
             graphics.text(
                     minecraft.font,
+                    "scene queue us=" + diagnostics.lastSceneQueueMicros()
+                            + "/" + diagnostics.emaSceneQueueMicros()
+                            + "/" + diagnostics.maxSceneQueueMicros()
+                            + " reset wait=" + diagnostics.lastResetWaitMicros()
+                            + "/" + diagnostics.emaResetWaitMicros()
+                            + "/" + diagnostics.maxResetWaitMicros(),
+                    6, y, 0xFFE0E0E0);
+            y += 10;
+            graphics.text(
+                    minecraft.font,
+                    "device update us=" + diagnostics.lastDeviceUpdateMicros()
+                            + "/" + diagnostics.emaDeviceUpdateMicros()
+                            + "/" + diagnostics.maxDeviceUpdateMicros()
+                            + " geometry=" + diagnostics.lastGeometryUpdateMicros()
+                            + "/" + diagnostics.emaGeometryUpdateMicros()
+                            + "/" + diagnostics.maxGeometryUpdateMicros(),
+                    6, y, 0xFFE0E0E0);
+            y += 10;
+            graphics.text(
+                    minecraft.font,
+                    "Cycles BVH status us=" + diagnostics.lastBvhUpdateMicros()
+                            + "/" + diagnostics.emaBvhUpdateMicros()
+                            + "/" + diagnostics.maxBvhUpdateMicros(),
+                    6, y, 0xFFE0E0E0);
+            y += 10;
+            graphics.text(
+                    minecraft.font,
+                    "scene -> first frame us=" + diagnostics.lastSceneFirstFrameMicros()
+                            + "/" + diagnostics.emaSceneFirstFrameMicros()
+                            + "/" + diagnostics.maxSceneFirstFrameMicros()
+                            + " rev=" + diagnostics.sceneTimingRevision()
+                            + " count=" + diagnostics.sceneTimingCount(),
+                    6, y, 0xFFE0E0E0);
+            y += 10;
+            graphics.text(
+                    minecraft.font,
                     "largest EMA stage=" + largestEmaStage(
                             presentation, capture, scene, diagnostics),
                     6, y, 0xFFFFDD88);
@@ -936,12 +972,18 @@ public final class CyclesRendererMod {
             NativeBridge.Diagnostics diagnostics) {
         String[] names = {
             "GPU upload", "mesh capture", "Java scene", "FFI upsert", "FFI commit",
-            "Cycles delta", "render start", "native display"
+            "Cycles delta", "render start", "scene queue", "reset wait",
+            "device update", "geometry update", "BVH status",
+            "scene first frame", "native display"
         };
         long[] micros = {
             presentation.emaUploadMicros(), capture.emaCaptureMicros(), scene.emaUpdateMicros(),
             scene.emaUpsertMicros(), scene.emaCommitMicros(),
             diagnostics.emaSceneDeltaMicros(), diagnostics.emaRenderStartMicros(),
+            diagnostics.emaSceneQueueMicros(), diagnostics.emaResetWaitMicros(),
+            diagnostics.emaDeviceUpdateMicros(), diagnostics.emaGeometryUpdateMicros(),
+            diagnostics.emaBvhUpdateMicros(),
+            diagnostics.emaSceneFirstFrameMicros(),
             diagnostics.emaConvertMicros()
         };
         int largest = 0;

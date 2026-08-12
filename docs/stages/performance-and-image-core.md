@@ -248,3 +248,20 @@ P1 至 P4 完成后进行一次 1080p 游戏人工里程碑：观察实际 sampl
 - 自动验证通过 `buildNative`、`cyclesrenderer_scene_update` CTest 和 Gradle `build`。完整 Native smoke 在初版实现后曾完整通过；最终复跑被既有 OptiX/OIDN 异步帧 variant 断言波动阻断，未修改不属于 RT-P1 的降噪逻辑。
 
 游戏内验收使用相同世界、视距和 Section 常驻数，对比优化前后的 F10 `Scene commit last/EMA/max`：单方块修改时 commit 应不再随 resident Section 数明显增长。`Scene delta` 仍包含 Cycles Mesh/BVH 更新，本阶段不会降低该项，也不会改变 Section 捕获或 Java FFM upsert 时间。
+
+### RT-P2：Mesh 更新卡顿归因
+
+- ABI v27 在诊断结构尾部追加按 Scene revision 对齐的 `queue`、`reset wait`、`device update`、`geometry update`、`BVH status` 与 `scene -> first frame` last/EMA/max。原有字段偏移保持不变，Java 与 Native 必须配套部署。
+- `queue` 从 `commit_scene` 发布 revision 计到 Cycles 工作线程开始应用；`reset wait` 单独测量 `Session::reset`，包含 Cycles `PathTrace::cancel` 等待当前渲染任务退出的同步成本；`scene -> first frame` 从该 revision 开始应用计到对应场景首帧发布。
+- `device update`、`geometry update` 和 `BVH status` 使用 Cycles Progress 状态转换采样，不修改固定 Cycles 5.2 源码。它们是低侵入近似值：短于状态回调粒度的阶段可能显示为 0，`BVH status` 合并对象与场景加速结构，不能单独区分 BLAS/TLAS。
+- 计时状态封装在独立 `cycles_scene_timing.h`，引擎只负责 revision 生命周期、reset 边界与首帧完成通知；没有改变 Mesh 格式、Section 粒度、更新策略、Vulkan interop 或采样设置。
+- F10 增加四行并把新阶段加入 `largest EMA stage`。游戏内先分别测试单方块破坏/放置、连续跑图两类负载：若 `reset wait` 接近卡顿值，下一阶段优化取消/重启边界；若 `device/geometry/BVH` 接近卡顿值，下一阶段优化设备几何与加速结构更新；若这些 CPU wall-clock 都低但 Minecraft 仍掉帧，则转查 OptiX 与 Vulkan 的同 GPU 队列竞争。
+- 自动验证使用独立 Native 输出目录完成完整链接，`cyclesrenderer_scene_update` 与 Gradle `compileJava` 通过。完整 smoke 曾在实现过程中通过；最终实现后的两次复跑均被既有 OptiX/OIDN 异步帧 variant 断言提前阻断，未修改不属于 RT-P2 的降噪逻辑。常规 `buildNative` 的默认 DLL 输出被运行中的客户端占用，因此未覆盖正在使用的 DLL。
+
+### RT-P3：场景更新优先调度
+
+- Cycles worker 不再要求 `render_in_flight` 先发布旧相机帧才准入新的 Scene revision。Section 更新到达后立即进入场景更新路径，避免上一帧、上一轮 Scene device update 与后续 commit 形成串行排队。
+- 增量 Mesh 变更、相机配置和 `Session::reset` 现在合并在同一个 `scene->mutex` 临界区内完成；Session 线程不能在 Mesh 已变更而最终 reset 尚未发布的窗口中抢回锁，旧帧也不会被当作当前 Scene 的首帧确认。
+- `PathTrace::cancel` 仍只能等待当前已提交的 OptiX kernel batch 返回，不能抢占 GPU 内部正在执行的单个 batch。实时交互 sample 必须保持小批次；本阶段不修改 Cycles 5.2 内核调度或 Section Mesh 格式。
+- RT-P2 的 BVH 状态捕获补充 `Updating Geometry BVH`、`Updating Scene BVH` 以及 OptiX acceleration-structure substatus。旧版本 F10 中的 `BVH 0` 不代表没有 BVH 更新。
+- 预期游戏内表现是 `scene queue` 不再随连续跑图长期增长，`scene -> first frame` 主要反映当前 revision 的 device/BVH 更新与第一帧成本。若修复后 `device update` 或 BVH 仍出现数百毫秒尖峰，下一阶段再优化 BLAS/TLAS 更新粒度。

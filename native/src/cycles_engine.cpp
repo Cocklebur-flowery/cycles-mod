@@ -1,6 +1,7 @@
 #include "cycles_engine.h"
 
 #include "color_management.h"
+#include "cycles_scene_timing.h"
 #include "scene_update.h"
 
 #include <Windows.h>
@@ -2330,6 +2331,7 @@ class CyclesEngine::Impl final {
 
     bool commit_scene(std::string& error) {
         const auto commit_start = std::chrono::steady_clock::now();
+        std::uint64_t committed_revision = 0U;
         {
             std::lock_guard lock(request_mutex_);
             if (stopping_) {
@@ -2341,6 +2343,7 @@ class CyclesEngine::Impl final {
                 return false;
             }
             requested_scene_ = scene_updates_.commit(++scene_revision_);
+            committed_revision = requested_scene_->revision;
             if (requested_camera_) {
                 requested_camera_->sample_count =
                     static_cast<int>(requested_settings_.interactive_samples);
@@ -2353,6 +2356,7 @@ class CyclesEngine::Impl final {
         }
         record_scene_commit(elapsed_micros(
             commit_start, std::chrono::steady_clock::now()));
+        scene_timing_.record_commit(committed_revision);
         set_state("scene-queued", {});
         request_changed_.notify_all();
         return true;
@@ -2579,6 +2583,7 @@ class CyclesEngine::Impl final {
             }
         }
         frames_.fill_diagnostics(diagnostics);
+        scene_timing_.fill_diagnostics(diagnostics);
     }
 
     bool render(
@@ -2867,6 +2872,13 @@ class CyclesEngine::Impl final {
         ccl::SceneParams scene_params;
         scene_params.background = false;
         auto session = ccl::make_unique<ccl::Session>(session_params, scene_params);
+        ccl::Session* session_pointer = session.get();
+        session->progress.set_update_callback([this, session_pointer] {
+            ccl::string status;
+            ccl::string substatus;
+            session_pointer->progress.get_status(status, substatus);
+            scene_timing_.observe_status(status, substatus);
+        });
         if (use_graphics_interop) {
             session->set_display_driver(
                 ccl::make_unique<VulkanInteropDisplayDriver>(
@@ -2967,33 +2979,61 @@ class CyclesEngine::Impl final {
         ccl::Session& session,
         const ccl::SessionParams& params,
         const SceneRequest& scene_request,
+        std::uint64_t scene_revision,
         const CameraRequest& camera_request,
-        const CyclesBridgeRenderSettings& settings) {
-        const auto start_time = std::chrono::steady_clock::now();
+        const CyclesBridgeRenderSettings& settings,
+        const SceneUpdate* scene_update = nullptr,
+        SceneRuntime* scene_runtime = nullptr) {
         ccl::BufferParams buffer;
         DenoiserSchedule denoiser_schedule{};
+        ccl::SessionParams render_params = params;
+        std::uint32_t reset_wait_micros = 0U;
+        std::uint32_t scene_delta_micros = 0U;
+        const bool apply_delta = scene_update != nullptr && scene_runtime != nullptr;
+        if (apply_delta) {
+            set_state("scene-updating", {});
+        }
+        const auto delta_start = std::chrono::steady_clock::now();
+        auto start_time = std::chrono::steady_clock::now();
         {
             const ccl::thread_scoped_lock scene_lock(session.scene->mutex);
+            if (apply_delta) {
+                apply_scene_delta(
+                    session.scene.get(), scene_request, *scene_update, *scene_runtime);
+                scene_delta_micros = elapsed_micros(
+                    delta_start, std::chrono::steady_clock::now());
+            }
+            start_time = std::chrono::steady_clock::now();
             buffer = configure_camera(session, scene_request, camera_request, settings);
             denoiser_schedule = configure_scene_settings(
                 session.scene.get(), params.device, settings,
                 camera_request.sampling_state,
                 camera_request.sample_count);
+            render_params.samples = std::max(1, camera_request.sample_count);
+            const bool still =
+                camera_request.sampling_state == CYCLES_BRIDGE_SAMPLING_STILL;
+            const std::uint32_t time_limit_millis = still
+                ? settings.still_time_limit_millis
+                : settings.interactive_time_limit_millis;
+            render_params.time_limit = static_cast<double>(time_limit_millis) / 1000.0;
+            const auto reset_start = std::chrono::steady_clock::now();
+            session.reset(render_params, buffer);
+            reset_wait_micros = elapsed_micros(
+                reset_start, std::chrono::steady_clock::now());
+            {
+                std::lock_guard lock(interop_mutex_);
+                interop_configured_camera_revision_ = camera_request.revision;
+            }
+            frames_.configure(
+                settings,
+                camera_request.camera.depth_far,
+                render_params.samples,
+                denoiser_schedule.effective != 0U,
+                camera_request.revision);
         }
-        ccl::SessionParams render_params = params;
-        render_params.samples = std::max(1, camera_request.sample_count);
-        const bool still =
-            camera_request.sampling_state == CYCLES_BRIDGE_SAMPLING_STILL;
-        const std::uint32_t time_limit_millis = still
-            ? settings.still_time_limit_millis
-            : settings.interactive_time_limit_millis;
-        render_params.time_limit = static_cast<double>(time_limit_millis) / 1000.0;
-        frames_.configure(
-            settings,
-            camera_request.camera.depth_far,
-            render_params.samples,
-            denoiser_schedule.effective != 0U,
-            camera_request.revision);
+        if (apply_delta) {
+            record_scene_delta(scene_delta_micros);
+        }
         frames_.set_sample_count(0);
         sampling_target_ = render_params.samples;
         sampling_measure_count_ = 0;
@@ -3049,7 +3089,7 @@ class CyclesEngine::Impl final {
                 : 0U;
             sample_rate_diagnostic_ = 0.0F;
         }
-        session.reset(render_params, buffer);
+        scene_timing_.record_reset_wait(scene_revision, reset_wait_micros);
         session.start();
         record_render_start(elapsed_micros(
             start_time, std::chrono::steady_clock::now()));
@@ -3233,7 +3273,8 @@ class CyclesEngine::Impl final {
                     frames_.clear();
                 } else if (render_in_flight
                            && produced_camera_revision()
-                               == render_camera_revision) {
+                                == render_camera_revision) {
+                    scene_timing_.complete_scene_update(active_scene_revision);
                     render_in_flight = false;
                 }
 
@@ -3250,8 +3291,9 @@ class CyclesEngine::Impl final {
                     set_state("fallback", backend_error);
                 }
 
-                if (!render_in_flight && requested_scene
+                if (requested_scene
                     && requested_scene->revision != active_scene_revision) {
+                    scene_timing_.begin_scene_update(requested_scene->revision);
                     if (!pass_only_settings_update) {
                         frames_.invalidate_pass_cache();
                     }
@@ -3260,6 +3302,7 @@ class CyclesEngine::Impl final {
                         || scene_runtime.resources != requested_scene->resources;
                     cyclesrenderer::scene::apply_scene_update(
                         active_scene, *requested_scene);
+                    bool scene_render_started = false;
                     if (resources_changed) {
                         if (!rebuild_session(
                                 session,
@@ -3271,6 +3314,21 @@ class CyclesEngine::Impl final {
                                 device_index)) {
                             continue;
                         }
+                        render_in_flight = false;
+                    } else if (requested_camera) {
+                        render_camera_revision = requested_camera->revision;
+                        start_render(
+                            *session,
+                            session_params,
+                            active_scene,
+                            requested_scene->revision,
+                            *requested_camera,
+                            active_settings,
+                            requested_scene.get(),
+                            &scene_runtime);
+                        active_camera_revision = requested_camera->revision;
+                        render_in_flight = true;
+                        scene_render_started = true;
                     } else {
                         update_session_scene(
                             *session, active_scene, *requested_scene, scene_runtime);
@@ -3280,7 +3338,9 @@ class CyclesEngine::Impl final {
                         std::lock_guard lock(request_mutex_);
                         scene_updates_.acknowledge(*requested_scene);
                     }
-                    active_camera_revision = 0;
+                    if (!scene_render_started) {
+                        active_camera_revision = 0;
+                    }
                 }
 
                 if (!render_in_flight && session && active_scene.resources && requested_camera
@@ -3297,6 +3357,7 @@ class CyclesEngine::Impl final {
                         *session,
                         session_params,
                         active_scene,
+                        active_scene_revision,
                         *requested_camera,
                         active_settings);
                     active_camera_revision = requested_camera->revision;
@@ -3359,6 +3420,7 @@ class CyclesEngine::Impl final {
     std::uint32_t last_render_start_micros_ = 0;
     std::uint32_t ema_render_start_micros_ = 0;
     std::uint32_t max_render_start_micros_ = 0;
+    cyclesrenderer::timing::CyclesSceneTiming scene_timing_;
     std::uint64_t registered_pass_mask_diagnostic_ =
         1ULL << CYCLES_BRIDGE_PASS_COMBINED;
     std::uint32_t pass_registry_rebuild_count_ = 0;

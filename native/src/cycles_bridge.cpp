@@ -18,9 +18,9 @@ struct CyclesBridgeRenderer {
 
 namespace {
 
-constexpr std::uint32_t kAbiVersion = 26;
+constexpr std::uint32_t kAbiVersion = 27;
 constexpr std::uint32_t kStructVersion = 1;
-constexpr char kBuildInfo[] = "cyclesrenderer-native/cycles-5.2;abi=26";
+constexpr char kBuildInfo[] = "cyclesrenderer-native/cycles-5.2;abi=27";
 
 static_assert(sizeof(CyclesBridgeCamera) == 80);
 static_assert(offsetof(CyclesBridgeCamera, frame_id) == 8);
@@ -41,9 +41,12 @@ static_assert(sizeof(CyclesBridgePassDescriptor) == 64);
 static_assert(sizeof(CyclesBridgeCapabilities) == 64);
 static_assert(sizeof(CyclesBridgeColorLutDescriptor) == 64);
 static_assert(offsetof(CyclesBridgeColorLutDescriptor, pixel_byte_count) == 32);
-static_assert(sizeof(CyclesBridgeDiagnostics) == 400);
+static_assert(sizeof(CyclesBridgeDiagnostics) == 504);
 static_assert(offsetof(CyclesBridgeDiagnostics, device_uuid_valid) == 376);
 static_assert(offsetof(CyclesBridgeDiagnostics, device_uuid) == 380);
+static_assert(offsetof(CyclesBridgeDiagnostics, scene_timing_revision) == 400);
+static_assert(offsetof(CyclesBridgeDiagnostics, last_scene_queue_micros) == 416);
+static_assert(offsetof(CyclesBridgeDiagnostics, timing_reserved) == 500);
 static_assert(sizeof(CyclesBridgeVulkanInteropBuffer) == 80);
 static_assert(offsetof(CyclesBridgeVulkanInteropBuffer, allocation_byte_count) == 24);
 static_assert(offsetof(CyclesBridgeVulkanInteropBuffer, memory_handle) == 32);

@@ -412,7 +412,7 @@ bool verify_progressive_sampling(
 int main(int argc, char** argv) {
     const bool require_optix = argc > 1 && std::strcmp(argv[1], "--require-optix") == 0;
     std::cerr << "[smoke] ABI check\n";
-    if (cycles_bridge_abi_version() != 26U) {
+    if (cycles_bridge_abi_version() != 27U) {
         std::cerr << "unexpected native ABI " << cycles_bridge_abi_version() << '\n';
         return 1;
     }
@@ -1205,6 +1205,16 @@ int main(int argc, char** argv) {
     }
     if (frame.generation <= initial_generation) {
         std::cerr << "section update did not change the rendered frame\n";
+        cycles_bridge_destroy_renderer(renderer);
+        return 1;
+    }
+    if (!require_ok(
+            cycles_bridge_query_diagnostics(renderer, &diagnostics),
+            "scene preemption diagnostics")
+        || diagnostics.scene_timing_revision == 0U
+        || diagnostics.scene_timing_count == 0U
+        || diagnostics.last_scene_first_frame_micros == 0U) {
+        std::cerr << "scene update was not associated with a completed first frame\n";
         cycles_bridge_destroy_renderer(renderer);
         return 1;
     }

@@ -447,6 +447,28 @@ struct CyclesBridgeDiagnostics {
     std::uint32_t device_uuid_valid;
     std::uint8_t device_uuid[16];
     std::uint32_t reserved;
+    std::uint64_t scene_timing_revision;
+    std::uint64_t scene_timing_count;
+    std::uint32_t last_scene_queue_micros;
+    std::uint32_t ema_scene_queue_micros;
+    std::uint32_t max_scene_queue_micros;
+    std::uint32_t last_reset_wait_micros;
+    std::uint32_t ema_reset_wait_micros;
+    std::uint32_t max_reset_wait_micros;
+    std::uint32_t last_device_update_micros;
+    std::uint32_t ema_device_update_micros;
+    std::uint32_t max_device_update_micros;
+    std::uint32_t last_geometry_update_micros;
+    std::uint32_t ema_geometry_update_micros;
+    std::uint32_t max_geometry_update_micros;
+    std::uint32_t last_bvh_update_micros;
+    std::uint32_t ema_bvh_update_micros;
+    std::uint32_t max_bvh_update_micros;
+    std::uint32_t phase_reserved[3];
+    std::uint32_t last_scene_first_frame_micros;
+    std::uint32_t ema_scene_first_frame_micros;
+    std::uint32_t max_scene_first_frame_micros;
+    std::uint32_t timing_reserved;
 };
 
 struct CyclesBridgeVulkanInteropBuffer {
