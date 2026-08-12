@@ -4,16 +4,28 @@ import com.mojang.blaze3d.PrimitiveTopology;
 import com.mojang.blaze3d.vertex.MeshData;
 import com.mojang.blaze3d.vertex.VertexFormat;
 import com.mojang.blaze3d.vertex.VertexFormatElement;
+import it.unimi.dsi.fastutil.ints.IntArrayList;
+import net.minecraft.client.color.block.BlockColors;
+import net.minecraft.client.color.block.BlockTintSource;
+import net.minecraft.client.model.geom.builders.UVPair;
+import net.minecraft.client.renderer.block.BlockAndTintGetter;
 import net.minecraft.client.renderer.chunk.ChunkSectionLayer;
 import net.minecraft.client.renderer.chunk.RenderSectionRegion;
 import net.minecraft.client.renderer.chunk.SectionCompiler;
+import net.minecraft.client.resources.model.geometry.BakedQuad;
 import net.minecraft.client.multiplayer.ClientLevel;
+import net.minecraft.core.BlockPos;
 import net.minecraft.core.SectionPos;
+import net.minecraft.util.ARGB;
+import net.minecraft.world.level.block.state.BlockState;
+import net.neoforged.neoforge.client.extensions.common.IClientBlockExtensions;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
+import java.util.ArrayDeque;
+import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedQueue;
@@ -33,6 +45,8 @@ public final class SectionGeometryCollector {
     private static final AtomicLong LAST_CAPTURE_MICROS = new AtomicLong();
     private static final AtomicLong EMA_CAPTURE_MICROS = new AtomicLong();
     private static final AtomicLong MAX_CAPTURE_MICROS = new AtomicLong();
+    private static final ThreadLocal<MaterialColorCapture> MATERIAL_COLOR_CAPTURE =
+            new ThreadLocal<>();
 
     private static volatile boolean enabled;
     private static volatile ClientLevel activeLevel;
@@ -64,6 +78,43 @@ public final class SectionGeometryCollector {
         MAX_CAPTURE_MICROS.set(0L);
     }
 
+    public static void beginMaterialColorCapture(
+            SectionPos sectionPos,
+            RenderSectionRegion region) {
+        ClientLevel expectedLevel = activeLevel;
+        if (!enabled || expectedLevel == null
+                || region.getLightEngine() != expectedLevel.getLightEngine()) {
+            MATERIAL_COLOR_CAPTURE.remove();
+            return;
+        }
+        MATERIAL_COLOR_CAPTURE.set(new MaterialColorCapture(sectionPos.asLong()));
+    }
+
+    public static void capturePhysicalMaterialColors(
+            ChunkSectionLayer layer,
+            float x,
+            float y,
+            float z,
+            BakedQuad quad,
+            BlockAndTintGetter level,
+            BlockPos position,
+            BlockState state,
+            BlockColors blockColors) {
+        MaterialColorCapture capture = MATERIAL_COLOR_CAPTURE.get();
+        if (capture == null) {
+            return;
+        }
+
+        int tint = capture.tintColor(blockColors, level, position, state, quad.materialInfo().tintIndex());
+        int[] colors = new int[BakedQuad.VERTEX_COUNT];
+        for (int corner = 0; corner < BakedQuad.VERTEX_COUNT; corner++) {
+            colors[corner] = packRgba(ARGB.multiply(quad.bakedColors().color(corner), tint));
+        }
+        capture.colors
+                .computeIfAbsent(signature(layer, x, y, z, quad), ignored -> new ArrayDeque<>())
+                .addLast(colors);
+    }
+
     public static SectionGeometrySnapshot poll() {
         Long sectionNode;
         while ((sectionNode = COMPLETED.poll()) != null) {
@@ -80,6 +131,8 @@ public final class SectionGeometryCollector {
             SectionPos sectionPos,
             RenderSectionRegion region,
             SectionCompiler.Results results) {
+        MaterialColorCapture materialColors = MATERIAL_COLOR_CAPTURE.get();
+        MATERIAL_COLOR_CAPTURE.remove();
         ClientLevel expectedLevel = activeLevel;
         if (!enabled || expectedLevel == null
                 || region.getLightEngine() != expectedLevel.getLightEngine()) {
@@ -89,7 +142,12 @@ public final class SectionGeometryCollector {
         long captureStart = System.nanoTime();
         try {
             SectionGeometrySnapshot snapshot = decode(
-                    sectionPos, results, SEQUENCE.incrementAndGet());
+                    sectionPos,
+                    results,
+                    SEQUENCE.incrementAndGet(),
+                    materialColors != null && materialColors.sectionNode == sectionPos.asLong()
+                            ? materialColors
+                            : null);
             if (expectedLevel != activeLevel) {
                 return;
             }
@@ -129,7 +187,8 @@ public final class SectionGeometryCollector {
     private static SectionGeometrySnapshot decode(
             SectionPos sectionPos,
             SectionCompiler.Results results,
-            long sequence) {
+            long sequence,
+            MaterialColorCapture materialColors) {
         int vertexCount = 0;
         int quadCount = 0;
         for (Map.Entry<ChunkSectionLayer, MeshData> entry : results.renderedLayers.entrySet()) {
@@ -186,6 +245,14 @@ public final class SectionGeometryCollector {
             int layerQuadCount = draw.vertexCount() / 4;
             for (int quad = 0; quad < layerQuadCount; quad++) {
                 int vertexBase = layerVertexBase + quad * 4;
+                if (materialColors != null) {
+                    ArrayDeque<int[]> candidates = materialColors.colors.get(
+                            signature(layer, vertices, vertexBase));
+                    int[] physicalColors = candidates == null ? null : candidates.pollFirst();
+                    if (physicalColors != null) {
+                        System.arraycopy(physicalColors, 0, colors, vertexBase, physicalColors.length);
+                    }
+                }
                 writeQuadNormal(vertices, vertexBase);
                 for (int triangle = 0; triangle < 2; triangle++) {
                     int target = outputTriangle * SectionGeometrySnapshot.TRIANGLE_INT_STRIDE;
@@ -227,6 +294,69 @@ public final class SectionGeometryCollector {
         };
     }
 
+    private static QuadSignature signature(
+            ChunkSectionLayer layer,
+            float x,
+            float y,
+            float z,
+            BakedQuad quad) {
+        long first = 0xCBF29CE484222325L ^ layer.ordinal();
+        long second = 0x9E3779B97F4A7C15L ^ layer.ordinal();
+        for (int corner = 0; corner < BakedQuad.VERTEX_COUNT; corner++) {
+            first = mixFirst(first, Float.floatToRawIntBits(quad.position(corner).x() + x));
+            first = mixFirst(first, Float.floatToRawIntBits(quad.position(corner).y() + y));
+            first = mixFirst(first, Float.floatToRawIntBits(quad.position(corner).z() + z));
+            first = mixFirst(first, Float.floatToRawIntBits(UVPair.unpackU(quad.packedUV(corner))));
+            first = mixFirst(first, Float.floatToRawIntBits(UVPair.unpackV(quad.packedUV(corner))));
+
+            second = mixSecond(second, Float.floatToRawIntBits(quad.position(corner).x() + x));
+            second = mixSecond(second, Float.floatToRawIntBits(quad.position(corner).y() + y));
+            second = mixSecond(second, Float.floatToRawIntBits(quad.position(corner).z() + z));
+            second = mixSecond(second, Float.floatToRawIntBits(UVPair.unpackU(quad.packedUV(corner))));
+            second = mixSecond(second, Float.floatToRawIntBits(UVPair.unpackV(quad.packedUV(corner))));
+        }
+        return new QuadSignature(first, second);
+    }
+
+    private static QuadSignature signature(
+            ChunkSectionLayer layer,
+            float[] vertices,
+            int vertexBase) {
+        long first = 0xCBF29CE484222325L ^ layer.ordinal();
+        long second = 0x9E3779B97F4A7C15L ^ layer.ordinal();
+        for (int corner = 0; corner < 4; corner++) {
+            int offset = (vertexBase + corner) * SectionGeometrySnapshot.VERTEX_FLOAT_STRIDE;
+            first = mixFirst(first, Float.floatToRawIntBits(vertices[offset]));
+            first = mixFirst(first, Float.floatToRawIntBits(vertices[offset + 1]));
+            first = mixFirst(first, Float.floatToRawIntBits(vertices[offset + 2]));
+            first = mixFirst(first, Float.floatToRawIntBits(vertices[offset + 6]));
+            first = mixFirst(first, Float.floatToRawIntBits(vertices[offset + 7]));
+
+            second = mixSecond(second, Float.floatToRawIntBits(vertices[offset]));
+            second = mixSecond(second, Float.floatToRawIntBits(vertices[offset + 1]));
+            second = mixSecond(second, Float.floatToRawIntBits(vertices[offset + 2]));
+            second = mixSecond(second, Float.floatToRawIntBits(vertices[offset + 6]));
+            second = mixSecond(second, Float.floatToRawIntBits(vertices[offset + 7]));
+        }
+        return new QuadSignature(first, second);
+    }
+
+    private static long mixFirst(long hash, int value) {
+        return (hash ^ Integer.toUnsignedLong(value)) * 0x100000001B3L;
+    }
+
+    private static long mixSecond(long hash, int value) {
+        return Long.rotateLeft(hash ^ Integer.toUnsignedLong(value) * 0xD6E8FEB86659FD93L, 27)
+                * 0x9E3779B185EBCA87L;
+    }
+
+    private static int packRgba(int argb) {
+        return ARGB.red(argb)
+                | ARGB.green(argb) << 8
+                | ARGB.blue(argb) << 16
+                | ARGB.alpha(argb) << 24;
+    }
+
     private static void writeQuadNormal(float[] vertices, int vertexBase) {
         int first = vertexBase * SectionGeometrySnapshot.VERTEX_FLOAT_STRIDE;
         int second = (vertexBase + 1) * SectionGeometrySnapshot.VERTEX_FLOAT_STRIDE;
@@ -266,5 +396,62 @@ public final class SectionGeometryCollector {
             long lastCaptureMicros,
             long emaCaptureMicros,
             long maxCaptureMicros) {
+    }
+
+    private record QuadSignature(long first, long second) {
+    }
+
+    private record TintKey(long blockPosition, int tintIndex) {
+    }
+
+    private static final class MaterialColorCapture {
+        private final long sectionNode;
+        private final Map<QuadSignature, ArrayDeque<int[]>> colors = new HashMap<>();
+        private final Map<TintKey, Integer> tintColors = new HashMap<>();
+
+        private MaterialColorCapture(long sectionNode) {
+            this.sectionNode = sectionNode;
+        }
+
+        private int tintColor(
+                BlockColors blockColors,
+                BlockAndTintGetter level,
+                BlockPos position,
+                BlockState state,
+                int tintIndex) {
+            if (tintIndex < 0) {
+                return 0xFFFFFFFF;
+            }
+            TintKey key = new TintKey(position.asLong(), tintIndex);
+            Integer cached = tintColors.get(key);
+            if (cached != null) {
+                return cached;
+            }
+
+            int color = resolveTintColor(blockColors, level, position, state, tintIndex);
+            tintColors.put(key, color);
+            return color;
+        }
+
+        private static int resolveTintColor(
+                BlockColors blockColors,
+                BlockAndTintGetter level,
+                BlockPos position,
+                BlockState state,
+                int tintIndex) {
+            BlockTintSource source = blockColors.getTintSource(state, tintIndex);
+            if (source != null) {
+                return ARGB.opaque(source.colorInWorld(state, level, position));
+            }
+            if (blockColors.getTintSources(state).isEmpty()) {
+                IntArrayList dynamicColors = new IntArrayList();
+                IClientBlockExtensions.of(state)
+                        .collectDynamicTintValues(state, level, position, dynamicColors);
+                if (tintIndex < dynamicColors.size()) {
+                    return ARGB.opaque(dynamicColors.getInt(tintIndex));
+                }
+            }
+            return 0xFFFFFFFF;
+        }
     }
 }
