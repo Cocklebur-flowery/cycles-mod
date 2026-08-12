@@ -36,6 +36,7 @@
 #include "scene/image.h"
 #include "scene/image_loader.h"
 #include "scene/integrator.h"
+#include "scene/light.h"
 #include "scene/mesh.h"
 #include "scene/object.h"
 #include "scene/pass.h"
@@ -197,11 +198,15 @@ struct SceneRuntime {
     std::shared_ptr<const SceneResourcesData> resources;
     std::vector<ccl::Shader*> shaders;
     std::unordered_map<std::int64_t, SectionSceneNodes> sections;
+    ccl::BackgroundLight* background_light = nullptr;
+    ccl::Object* background_light_object = nullptr;
 
     void clear() {
         resources.reset();
         shaders.clear();
         sections.clear();
+        background_light = nullptr;
+        background_light_object = nullptr;
     }
 };
 
@@ -1568,22 +1573,23 @@ void apply_atmosphere_settings(
 
 void configure_background(
     ccl::Scene* scene,
-    const CyclesBridgeRenderSettings& settings) {
+    const CyclesBridgeRenderSettings& settings,
+    SceneRuntime& runtime) {
     auto graph = ccl::make_unique<ccl::ShaderGraph>();
     ccl::TextureCoordinateNode* coordinates =
         graph->create_node<ccl::TextureCoordinateNode>();
-    ccl::MappingNode* y_up_to_z_up = graph->create_node<ccl::MappingNode>();
-    y_up_to_z_up->set_mapping_type(ccl::NODE_MAPPING_TYPE_VECTOR);
-    // (x, y, z) -> (x, -z, y): Minecraft +Y becomes Cycles sky +Z.
-    y_up_to_z_up->set_rotation(ccl::make_float3(
-        90.0F * kDegreesToRadians, 0.0F, 0.0F));
     ccl::SkyTextureNode* sky = graph->create_node<ccl::SkyTextureNode>();
+    sky->set_tex_mapping_type(ccl::TextureMapping::VECTOR);
+    // Minecraft is Y-up while the Cycles sky model is Z-up. Keep this on
+    // SkyTextureNode's own mapping so Cycles can transform the analytic sun
+    // direction and retain its dedicated sun-guiding path.
+    sky->set_tex_mapping_rotation(ccl::make_float3(
+        90.0F * kDegreesToRadians, 0.0F, 0.0F));
     apply_atmosphere_settings(sky, settings);
 
     ccl::BackgroundNode* background = graph->create_node<ccl::BackgroundNode>();
     background->set_strength(1.0F);
-    graph->connect(coordinates->output("Generated"), y_up_to_z_up->input("Vector"));
-    graph->connect(y_up_to_z_up->output("Vector"), sky->input("Vector"));
+    graph->connect(coordinates->output("Generated"), sky->input("Vector"));
     graph->connect(sky->output("Color"), background->input("Color"));
     graph->connect(background->output("Background"), graph->output()->input("Surface"));
     scene->default_background->set_graph(std::move(graph));
@@ -1591,6 +1597,24 @@ void configure_background(
     scene->background->set_shader(scene->default_background);
     scene->background->set_transparent(false);
     scene->background->tag_update(scene);
+
+    // A world shader alone is visible to camera/miss rays, but it is not
+    // sampled as an emitter. Cycles requires a BackgroundLight for direct
+    // environment lighting, MIS and analytic Nishita sun sampling.
+    runtime.background_light = scene->create_node<ccl::BackgroundLight>();
+    runtime.background_light->name = "minecraft_world";
+    runtime.background_light->set_use_mis(true);
+    ccl::array<ccl::Node*> used_shaders;
+    used_shaders.push_back_slow(scene->default_background);
+    runtime.background_light->set_used_shaders(used_shaders);
+
+    runtime.background_light_object = scene->create_node<ccl::Object>();
+    runtime.background_light_object->name = "minecraft_world";
+    runtime.background_light_object->set_geometry(runtime.background_light);
+    runtime.background_light_object->set_visibility(
+        ccl::PATH_RAY_VISIBILITY_ALL & ~ccl::PATH_RAY_VISIBILITY_CAMERA);
+    runtime.background_light->tag_update(scene);
+    runtime.background_light_object->tag_update(scene);
 }
 
 void populate_section_mesh(ccl::Mesh* mesh, const SectionRequest& section) {
@@ -1676,7 +1700,7 @@ void build_scene(
     SceneRuntime& runtime) {
     runtime.clear();
     runtime.resources = request.resources;
-    configure_background(scene, settings);
+    configure_background(scene, settings, runtime);
     scene->integrator->set_max_bounce(3);
     scene->integrator->set_max_diffuse_bounce(2);
     scene->integrator->set_max_glossy_bounce(1);
@@ -1861,6 +1885,12 @@ DenoiserSchedule configure_scene_settings(
     integrator->set_max_transmission_bounce(static_cast<int>(settings.transmission_bounces));
     integrator->set_max_volume_bounce(static_cast<int>(settings.volume_bounces));
     integrator->set_transparent_max_bounce(static_cast<int>(settings.transparent_bounces));
+    // Keep Blender's Fast GI Approximation disabled. These defaults are also
+    // zero in Cycles, but setting them explicitly prevents future scene/setup
+    // changes from silently replacing true diffuse bounces with AO.
+    integrator->set_ao_bounces(0);
+    integrator->set_ao_factor(0.0F);
+    integrator->set_ao_additive_factor(0.0F);
     integrator->set_sample_clamp_direct(settings.clamp_direct);
     integrator->set_sample_clamp_indirect(settings.clamp_indirect);
     integrator->set_filter_glossy(settings.filter_glossy);

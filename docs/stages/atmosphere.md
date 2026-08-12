@@ -2,7 +2,9 @@
 
 ## 已实现范围
 
-世界背景使用 Cycles 5.2 原生 `Sky Texture` 的 `Multiple Scattering` 模型，并接到 World `Background`。这不是 Minecraft 原版天空贴图的屏幕合成，而是参与 Cycles 路径追踪照明的程序天空。
+世界背景使用 Cycles 5.2 原生 `Sky Texture` 的 `Multiple Scattering` 模型，并接到 World `Background`。场景同时创建启用 MIS 的 Cycles `BackgroundLight`，因此天空不只对相机可见，也会被作为环境发光体主动采样；Sky Texture 自身的坐标映射把 Minecraft 的 Y-up 转换为 Cycles 天空模型的 Z-up，并保留解析太阳引导。太阳圆盘、太阳直射和天空漫反射间接光都进入同一套路径追踪积分。
+
+Cycles 的 Fast GI Approximation 保持关闭：`ao_bounces`、`ao_factor` 与 `ao_additive_factor` 显式为零。方块间的亮度传递来自真实 diffuse bounce，而不是用 AO 替代的近似 GI。关闭“太阳圆盘”只移除天空模型中的太阳圆盘/直射成分，天空环境本身仍会照亮场景，这与 Blender 的 World Sky 行为一致。
 
 F9 的 NeoForge 客户端配置新增 `atmosphere` 分组：
 
@@ -28,8 +30,9 @@ Cycles 5.2 在当前持续 Session 内原地替换 World shader 后会停在 `re
 - 参数暂未自动跟随 Minecraft 世界时间、维度、天气、雨雪或生物群系。
 - 目前只有 World surface 天空照明；未实现空气透视、体积雾、云层或天气体积。
 - 太阳是 Cycles 天空节点的一部分；尚未建立独立 Minecraft 日月天体、月相和星空。
+- Minecraft 编译区块提供的顶点颜色当前仍同时承载生物群系染色和原版烘焙亮度/AO，材质桥会把它乘入基础色。因此世界光修复后仍可能残留一部分原版 AO 外观；不能直接丢弃该通道，否则草、树叶等生物群系染色会一起丢失。后续材质桥阶段需要拆分“纯染色”和“烘焙光照”。
 - 大气修改会重建 Cycles Session、丢弃旧累积结果并重新采样；短暂停顿和噪声恢复是当前预期行为，不适合每帧驱动太阳位置。
 
 ## 验证契约
 
-原生 smoke 覆盖：ABI v26、参数范围、程序天空空场景、运行时修改太阳高度/旋转后受控重建并产生新帧，以及重建前后 Section 数量与 scene-delta 计数不变。游戏内仍需验证 F9 保存、F10 显示和不同太阳高度下的视觉结果。
+原生 smoke 覆盖：ABI v26、参数范围、程序天空空场景、运行时修改太阳高度/旋转后受控重建并产生新帧，以及重建前后 Section 数量与 scene-delta 计数不变。游戏内仍需验证 F9 保存、F10 显示、不同太阳高度下的地平线方向、太阳盘可见性、直射阴影和背光区域的漫反射回弹。
