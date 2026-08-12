@@ -61,6 +61,7 @@ using namespace std::chrono_literals;
 
 constexpr std::uint32_t kMaximumRenderWidth = 3840;
 constexpr std::uint32_t kMaximumRenderHeight = 2160;
+constexpr float kDegreesToRadians = 0.01745329251994329577F;
 
 CyclesBridgeRenderSettings default_settings() {
     CyclesBridgeRenderSettings settings{};
@@ -87,6 +88,15 @@ CyclesBridgeRenderSettings default_settings() {
     settings.aperture_blades = 0U;
     settings.aperture_rotation_degrees = 0.0F;
     settings.aperture_ratio = 1.0F;
+    settings.atmosphere_sun_disc = 1U;
+    settings.atmosphere_sun_size_degrees = 0.545F;
+    settings.atmosphere_sun_intensity = 1.0F;
+    settings.atmosphere_sun_elevation_degrees = 45.0F;
+    settings.atmosphere_sun_rotation_degrees = 35.0F;
+    settings.atmosphere_altitude_meters = 1000.0F;
+    settings.atmosphere_air_density = 1.0F;
+    settings.atmosphere_aerosol_density = 1.0F;
+    settings.atmosphere_ozone_density = 2.0F;
     settings.interactive_samples = 1;
     settings.still_samples = 8;
     settings.stationary_delay_millis = 150;
@@ -1536,19 +1546,23 @@ ccl::Shader* create_material_shader(
     return shader;
 }
 
-void configure_background(ccl::Scene* scene) {
+void configure_background(
+    ccl::Scene* scene,
+    const CyclesBridgeRenderSettings& settings) {
     auto graph = ccl::make_unique<ccl::ShaderGraph>();
     ccl::SkyTextureNode* sky = graph->create_node<ccl::SkyTextureNode>();
     sky->set_sky_type(ccl::NODE_SKY_MULTIPLE_SCATTERING);
-    sky->set_sun_disc(true);
-    sky->set_sun_size(0.009512F);
-    sky->set_sun_intensity(1.0F);
-    sky->set_sun_elevation(0.785398163F);
-    sky->set_sun_rotation(0.610865238F);
-    sky->set_altitude(1000.0F);
-    sky->set_air_density(1.0F);
-    sky->set_aerosol_density(1.0F);
-    sky->set_ozone_density(2.0F);
+    sky->set_sun_disc(settings.atmosphere_sun_disc != 0U);
+    sky->set_sun_size(settings.atmosphere_sun_size_degrees * kDegreesToRadians);
+    sky->set_sun_intensity(settings.atmosphere_sun_intensity);
+    sky->set_sun_elevation(
+        settings.atmosphere_sun_elevation_degrees * kDegreesToRadians);
+    sky->set_sun_rotation(
+        settings.atmosphere_sun_rotation_degrees * kDegreesToRadians);
+    sky->set_altitude(settings.atmosphere_altitude_meters);
+    sky->set_air_density(settings.atmosphere_air_density);
+    sky->set_aerosol_density(settings.atmosphere_aerosol_density);
+    sky->set_ozone_density(settings.atmosphere_ozone_density);
 
     ccl::BackgroundNode* background = graph->create_node<ccl::BackgroundNode>();
     background->set_strength(1.0F);
@@ -1637,10 +1651,14 @@ SectionSceneNodes create_section_nodes(
     return {mesh, object, section};
 }
 
-void build_scene(ccl::Scene* scene, const SceneRequest& request, SceneRuntime& runtime) {
+void build_scene(
+    ccl::Scene* scene,
+    const SceneRequest& request,
+    const CyclesBridgeRenderSettings& settings,
+    SceneRuntime& runtime) {
     runtime.clear();
     runtime.resources = request.resources;
-    configure_background(scene);
+    configure_background(scene, settings);
     scene->integrator->set_max_bounce(3);
     scene->integrator->set_max_diffuse_bounce(2);
     scene->integrator->set_max_glossy_bounce(1);
@@ -2816,7 +2834,7 @@ class CyclesEngine::Impl final {
             session->set_display_driver(ccl::make_unique<FrameDisplayDriver>(frames_));
         }
         create_output_passes(session->scene.get(), registered_pass_mask);
-        build_scene(session->scene.get(), scene_request, runtime);
+        build_scene(session->scene.get(), scene_request, settings, runtime);
         const DenoiserSchedule denoiser_schedule = configure_scene_settings(
             session->scene.get(), device, settings,
             CYCLES_BRIDGE_SAMPLING_INTERACTIVE,

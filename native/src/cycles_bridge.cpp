@@ -18,9 +18,9 @@ struct CyclesBridgeRenderer {
 
 namespace {
 
-constexpr std::uint32_t kAbiVersion = 25;
+constexpr std::uint32_t kAbiVersion = 26;
 constexpr std::uint32_t kStructVersion = 1;
-constexpr char kBuildInfo[] = "cyclesrenderer-native/cycles-5.2;abi=25";
+constexpr char kBuildInfo[] = "cyclesrenderer-native/cycles-5.2;abi=26";
 
 static_assert(sizeof(CyclesBridgeCamera) == 80);
 static_assert(offsetof(CyclesBridgeCamera, frame_id) == 8);
@@ -36,7 +36,7 @@ static_assert(sizeof(CyclesBridgeFrame) == 40);
 static_assert(sizeof(CyclesBridgeFrameView) == 72);
 static_assert(offsetof(CyclesBridgeFrameView, generation) == 16);
 static_assert(offsetof(CyclesBridgeFrameView, pixels) == 48);
-static_assert(sizeof(CyclesBridgeRenderSettings) == 232);
+static_assert(sizeof(CyclesBridgeRenderSettings) == 272);
 static_assert(sizeof(CyclesBridgePassDescriptor) == 64);
 static_assert(sizeof(CyclesBridgeCapabilities) == 64);
 static_assert(sizeof(CyclesBridgeColorLutDescriptor) == 64);
@@ -228,6 +228,32 @@ bool valid_settings(const CyclesBridgeRenderSettings& settings) {
         && settings.aperture_rotation_degrees <= 360.0F
         && std::isfinite(settings.aperture_ratio)
         && settings.aperture_ratio >= 0.1F && settings.aperture_ratio <= 10.0F
+        && valid_bool(settings.atmosphere_sun_disc)
+        && std::isfinite(settings.atmosphere_sun_size_degrees)
+        && settings.atmosphere_sun_size_degrees >= 0.01F
+        && settings.atmosphere_sun_size_degrees <= 180.0F
+        && std::isfinite(settings.atmosphere_sun_intensity)
+        && settings.atmosphere_sun_intensity >= 0.0F
+        && settings.atmosphere_sun_intensity <= 1000.0F
+        && std::isfinite(settings.atmosphere_sun_elevation_degrees)
+        && settings.atmosphere_sun_elevation_degrees >= -90.0F
+        && settings.atmosphere_sun_elevation_degrees <= 90.0F
+        && std::isfinite(settings.atmosphere_sun_rotation_degrees)
+        && settings.atmosphere_sun_rotation_degrees >= -360.0F
+        && settings.atmosphere_sun_rotation_degrees <= 360.0F
+        && std::isfinite(settings.atmosphere_altitude_meters)
+        && settings.atmosphere_altitude_meters >= 0.0F
+        && settings.atmosphere_altitude_meters <= 60000.0F
+        && std::isfinite(settings.atmosphere_air_density)
+        && settings.atmosphere_air_density >= 0.0F
+        && settings.atmosphere_air_density <= 10.0F
+        && std::isfinite(settings.atmosphere_aerosol_density)
+        && settings.atmosphere_aerosol_density >= 0.0F
+        && settings.atmosphere_aerosol_density <= 10.0F
+        && std::isfinite(settings.atmosphere_ozone_density)
+        && settings.atmosphere_ozone_density >= 0.0F
+        && settings.atmosphere_ozone_density <= 10.0F
+        && settings.atmosphere_reserved == 0U
         && settings.interactive_samples >= 1U && settings.interactive_samples <= 4096U
         && settings.still_samples >= 1U && settings.still_samples <= 4096U
         && settings.stationary_delay_millis <= 10000U

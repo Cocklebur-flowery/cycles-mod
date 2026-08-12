@@ -307,6 +307,16 @@ struct CyclesBridgeRenderSettings {
     std::uint32_t aperture_blades;
     float aperture_rotation_degrees;
     float aperture_ratio;
+    std::uint32_t atmosphere_sun_disc;
+    float atmosphere_sun_size_degrees;
+    float atmosphere_sun_intensity;
+    float atmosphere_sun_elevation_degrees;
+    float atmosphere_sun_rotation_degrees;
+    float atmosphere_altitude_meters;
+    float atmosphere_air_density;
+    float atmosphere_aerosol_density;
+    float atmosphere_ozone_density;
+    std::uint32_t atmosphere_reserved;
 };
 
 struct CyclesBridgePassDescriptor {

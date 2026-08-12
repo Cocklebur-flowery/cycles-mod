@@ -40,6 +40,15 @@ public final class CyclesClientConfig {
     private static final ModConfigSpec.IntValue CAMERA_APERTURE_BLADES;
     private static final ModConfigSpec.DoubleValue CAMERA_APERTURE_ROTATION;
     private static final ModConfigSpec.DoubleValue CAMERA_APERTURE_RATIO;
+    private static final ModConfigSpec.BooleanValue ATMOSPHERE_SUN_DISC;
+    private static final ModConfigSpec.DoubleValue ATMOSPHERE_SUN_SIZE;
+    private static final ModConfigSpec.DoubleValue ATMOSPHERE_SUN_INTENSITY;
+    private static final ModConfigSpec.DoubleValue ATMOSPHERE_SUN_ELEVATION;
+    private static final ModConfigSpec.DoubleValue ATMOSPHERE_SUN_ROTATION;
+    private static final ModConfigSpec.DoubleValue ATMOSPHERE_ALTITUDE;
+    private static final ModConfigSpec.DoubleValue ATMOSPHERE_AIR_DENSITY;
+    private static final ModConfigSpec.DoubleValue ATMOSPHERE_AEROSOL_DENSITY;
+    private static final ModConfigSpec.DoubleValue ATMOSPHERE_OZONE_DENSITY;
     private static final ModConfigSpec.IntValue MINIMUM_BOUNCE;
     private static final ModConfigSpec.IntValue MAXIMUM_BOUNCE;
     private static final ModConfigSpec.IntValue DIFFUSE_BOUNCES;
@@ -160,6 +169,29 @@ public final class CyclesClientConfig {
                 .defineInRange("apertureRatio", 1.0D, 0.1D, 10.0D);
         builder.pop();
 
+        builder.push("atmosphere");
+        ATMOSPHERE_SUN_DISC = builder.translation("config.cyclesrenderer.atmosphere.sunDisc")
+                .define("sunDisc", true);
+        ATMOSPHERE_SUN_SIZE = builder.translation("config.cyclesrenderer.atmosphere.sunSize")
+                .comment("Angular diameter of the procedural sun in degrees.")
+                .defineInRange("sunSizeDegrees", 0.545D, 0.01D, 180.0D);
+        ATMOSPHERE_SUN_INTENSITY = builder.translation("config.cyclesrenderer.atmosphere.sunIntensity")
+                .defineInRange("sunIntensity", 1.0D, 0.0D, 1000.0D);
+        ATMOSPHERE_SUN_ELEVATION = builder.translation("config.cyclesrenderer.atmosphere.sunElevation")
+                .defineInRange("sunElevationDegrees", 45.0D, -90.0D, 90.0D);
+        ATMOSPHERE_SUN_ROTATION = builder.translation("config.cyclesrenderer.atmosphere.sunRotation")
+                .defineInRange("sunRotationDegrees", 35.0D, -360.0D, 360.0D);
+        ATMOSPHERE_ALTITUDE = builder.translation("config.cyclesrenderer.atmosphere.altitude")
+                .comment("Observer altitude above sea level in meters.")
+                .defineInRange("altitudeMeters", 1000.0D, 0.0D, 60000.0D);
+        ATMOSPHERE_AIR_DENSITY = builder.translation("config.cyclesrenderer.atmosphere.airDensity")
+                .defineInRange("airDensity", 1.0D, 0.0D, 10.0D);
+        ATMOSPHERE_AEROSOL_DENSITY = builder.translation("config.cyclesrenderer.atmosphere.aerosolDensity")
+                .defineInRange("aerosolDensity", 1.0D, 0.0D, 10.0D);
+        ATMOSPHERE_OZONE_DENSITY = builder.translation("config.cyclesrenderer.atmosphere.ozoneDensity")
+                .defineInRange("ozoneDensity", 2.0D, 0.0D, 10.0D);
+        builder.pop();
+
         builder.push("lightPaths");
         MINIMUM_BOUNCE = builder.translation("config.cyclesrenderer.lightPaths.minimumBounce")
                 .defineInRange("minimumBounce", 0, 0, 64);
@@ -258,6 +290,14 @@ public final class CyclesClientConfig {
                 CAMERA_APERTURE_CIRCULAR.get() ? 0 : CAMERA_APERTURE_BLADES.get(),
                 CAMERA_APERTURE_ROTATION.get().floatValue(),
                 CAMERA_APERTURE_RATIO.get().floatValue(),
+                ATMOSPHERE_SUN_DISC.get(), ATMOSPHERE_SUN_SIZE.get().floatValue(),
+                ATMOSPHERE_SUN_INTENSITY.get().floatValue(),
+                ATMOSPHERE_SUN_ELEVATION.get().floatValue(),
+                ATMOSPHERE_SUN_ROTATION.get().floatValue(),
+                ATMOSPHERE_ALTITUDE.get().floatValue(),
+                ATMOSPHERE_AIR_DENSITY.get().floatValue(),
+                ATMOSPHERE_AEROSOL_DENSITY.get().floatValue(),
+                ATMOSPHERE_OZONE_DENSITY.get().floatValue(),
                 DENOISER_MODE.get(), DENOISER_START_SAMPLE.get(), DENOISER_INPUT.get(),
                 DENOISER_PREFILTER.get(), DENOISER_QUALITY.get(), DENOISER_USE_GPU.get(),
                 EXPOSURE_EV.get().floatValue(), GAMMA.get().floatValue(), VIEW_TRANSFORM.get(),

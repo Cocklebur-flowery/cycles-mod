@@ -24,7 +24,7 @@ import static java.lang.foreign.ValueLayout.JAVA_INT;
 import static java.lang.foreign.ValueLayout.JAVA_LONG;
 
 public final class NativeBridge {
-    public static final int ABI_VERSION = 25;
+    public static final int ABI_VERSION = 26;
     public static final int PIXEL_FORMAT_RGBA16_FLOAT = 2;
     public static final int PIXEL_FORMAT_RGBA32_FLOAT = 3;
 
@@ -172,7 +172,17 @@ public final class NativeBridge {
             JAVA_FLOAT.withName("f_stop"),
             JAVA_INT.withName("aperture_blades"),
             JAVA_FLOAT.withName("aperture_rotation_degrees"),
-            JAVA_FLOAT.withName("aperture_ratio"));
+            JAVA_FLOAT.withName("aperture_ratio"),
+            JAVA_INT.withName("atmosphere_sun_disc"),
+            JAVA_FLOAT.withName("atmosphere_sun_size_degrees"),
+            JAVA_FLOAT.withName("atmosphere_sun_intensity"),
+            JAVA_FLOAT.withName("atmosphere_sun_elevation_degrees"),
+            JAVA_FLOAT.withName("atmosphere_sun_rotation_degrees"),
+            JAVA_FLOAT.withName("atmosphere_altitude_meters"),
+            JAVA_FLOAT.withName("atmosphere_air_density"),
+            JAVA_FLOAT.withName("atmosphere_aerosol_density"),
+            JAVA_FLOAT.withName("atmosphere_ozone_density"),
+            JAVA_INT.withName("atmosphere_reserved"));
     private static final MemoryLayout PASS_DESCRIPTOR_LAYOUT = MemoryLayout.structLayout(
             JAVA_INT.withName("struct_size"),
             JAVA_INT.withName("struct_version"),
@@ -371,7 +381,7 @@ public final class NativeBridge {
                 || SECTION_LAYOUT.byteSize() != 48L
                 || FRAME_LAYOUT.byteSize() != 40L
                 || FRAME_VIEW_LAYOUT.byteSize() != 72L
-                || SETTINGS_LAYOUT.byteSize() != 232L
+                || SETTINGS_LAYOUT.byteSize() != 272L
                 || PASS_DESCRIPTOR_LAYOUT.byteSize() != 64L
                 || CAPABILITIES_LAYOUT.byteSize() != 64L
                 || COLOR_LUT_DESCRIPTOR_LAYOUT.byteSize() != 64L
@@ -1219,6 +1229,15 @@ public final class NativeBridge {
             settingsSegment.set(JAVA_INT, 220L, settings.apertureBlades());
             settingsSegment.set(JAVA_FLOAT, 224L, settings.apertureRotationDegrees());
             settingsSegment.set(JAVA_FLOAT, 228L, settings.apertureRatio());
+            settingsSegment.set(JAVA_INT, 232L, settings.atmosphereSunDisc() ? 1 : 0);
+            settingsSegment.set(JAVA_FLOAT, 236L, settings.atmosphereSunSizeDegrees());
+            settingsSegment.set(JAVA_FLOAT, 240L, settings.atmosphereSunIntensity());
+            settingsSegment.set(JAVA_FLOAT, 244L, settings.atmosphereSunElevationDegrees());
+            settingsSegment.set(JAVA_FLOAT, 248L, settings.atmosphereSunRotationDegrees());
+            settingsSegment.set(JAVA_FLOAT, 252L, settings.atmosphereAltitudeMeters());
+            settingsSegment.set(JAVA_FLOAT, 256L, settings.atmosphereAirDensity());
+            settingsSegment.set(JAVA_FLOAT, 260L, settings.atmosphereAerosolDensity());
+            settingsSegment.set(JAVA_FLOAT, 264L, settings.atmosphereOzoneDensity());
             checkRendererStatus(
                     (int) applySettings.invokeExact(renderer, settingsSegment),
                     "settings update");

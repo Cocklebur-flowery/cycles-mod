@@ -251,6 +251,15 @@ CyclesBridgeRenderSettings default_settings() {
     settings.aperture_blades = 6U;
     settings.aperture_rotation_degrees = 15.0F;
     settings.aperture_ratio = 1.2F;
+    settings.atmosphere_sun_disc = 1U;
+    settings.atmosphere_sun_size_degrees = 0.545F;
+    settings.atmosphere_sun_intensity = 1.0F;
+    settings.atmosphere_sun_elevation_degrees = 45.0F;
+    settings.atmosphere_sun_rotation_degrees = 35.0F;
+    settings.atmosphere_altitude_meters = 1000.0F;
+    settings.atmosphere_air_density = 1.0F;
+    settings.atmosphere_aerosol_density = 1.0F;
+    settings.atmosphere_ozone_density = 2.0F;
     settings.interactive_samples = 1;
     settings.still_samples = 1;
     settings.stationary_delay_millis = 150;
@@ -403,7 +412,7 @@ bool verify_progressive_sampling(
 int main(int argc, char** argv) {
     const bool require_optix = argc > 1 && std::strcmp(argv[1], "--require-optix") == 0;
     std::cerr << "[smoke] ABI check\n";
-    if (cycles_bridge_abi_version() != 25U) {
+    if (cycles_bridge_abi_version() != 26U) {
         std::cerr << "unexpected native ABI " << cycles_bridge_abi_version() << '\n';
         return 1;
     }
