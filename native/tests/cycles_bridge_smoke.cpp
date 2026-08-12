@@ -392,7 +392,7 @@ bool verify_progressive_sampling(
 int main(int argc, char** argv) {
     const bool require_optix = argc > 1 && std::strcmp(argv[1], "--require-optix") == 0;
     std::cerr << "[smoke] ABI check\n";
-    if (cycles_bridge_abi_version() != 23U) {
+    if (cycles_bridge_abi_version() != 24U) {
         std::cerr << "unexpected native ABI " << cycles_bridge_abi_version() << '\n';
         return 1;
     }
@@ -443,6 +443,8 @@ int main(int argc, char** argv) {
     interop.pixel_format = CYCLES_BRIDGE_PIXEL_FORMAT_RGBA16_FLOAT;
     interop.flags = CYCLES_BRIDGE_VULKAN_INTEROP_OWNERSHIP_TRANSFER;
     interop.allocation_byte_count = 480ULL * 270ULL * 8ULL;
+    interop.slot_count = 1U;
+    interop.slot_stride_bytes = 480U * 270U * 8U;
     std::memcpy(
         interop.device_uuid,
         initial_diagnostics.device_uuid,

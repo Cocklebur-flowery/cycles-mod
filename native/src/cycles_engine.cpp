@@ -1100,12 +1100,48 @@ struct VulkanInteropSnapshot {
     }
 };
 
+enum class VulkanInteropSlotOwner : std::uint8_t {
+    FREE,
+    WRITING,
+    READY,
+    ACQUIRED,
+};
+
+struct VulkanInteropSlot {
+    VulkanInteropSlotOwner owner = VulkanInteropSlotOwner::FREE;
+    std::uint64_t generation = 0U;
+    std::uint32_t width = 0U;
+    std::uint32_t height = 0U;
+    std::uint32_t sample_count = 0U;
+};
+
+using VulkanInteropSlots = std::array<VulkanInteropSlot, 3>;
+
+void refresh_vulkan_interop_slot_flags(
+    CyclesBridgeVulkanInteropState& state,
+    const VulkanInteropSlots& slots,
+    std::uint32_t slot_count) {
+    state.flags &= ~(
+        CYCLES_BRIDGE_VULKAN_INTEROP_FRAME_READY
+        | CYCLES_BRIDGE_VULKAN_INTEROP_FRAME_ACQUIRED);
+    state.ready_slot_count = 0U;
+    for (std::uint32_t index = 0; index < slot_count; ++index) {
+        if (slots[index].owner == VulkanInteropSlotOwner::READY) {
+            state.flags |= CYCLES_BRIDGE_VULKAN_INTEROP_FRAME_READY;
+            state.ready_slot_count++;
+        } else if (slots[index].owner == VulkanInteropSlotOwner::ACQUIRED) {
+            state.flags |= CYCLES_BRIDGE_VULKAN_INTEROP_FRAME_ACQUIRED;
+        }
+    }
+}
+
 class VulkanInteropDisplayDriver final : public ccl::DisplayDriver {
  public:
     VulkanInteropDisplayDriver(
         VulkanInteropSnapshot&& snapshot,
         FrameStore& frames,
         CyclesBridgeVulkanInteropState& state,
+        VulkanInteropSlots& slots,
         std::mutex& state_mutex,
         std::condition_variable& state_changed,
         bool& stopping,
@@ -1114,6 +1150,7 @@ class VulkanInteropDisplayDriver final : public ccl::DisplayDriver {
         : snapshot_(std::move(snapshot)),
           frames_(frames),
           state_(state),
+          slots_(slots),
           state_mutex_(state_mutex),
           state_changed_(state_changed),
           stopping_(stopping),
@@ -1123,9 +1160,12 @@ class VulkanInteropDisplayDriver final : public ccl::DisplayDriver {
     ~VulkanInteropDisplayDriver() override {
         std::unique_lock lock(state_mutex_);
         state_changed_.wait(lock, [this] {
-            return stopping_
-                || (state_.flags
-                    & CYCLES_BRIDGE_VULKAN_INTEROP_FRAME_ACQUIRED) == 0U;
+            if (stopping_) {
+                return true;
+            }
+            return std::none_of(slots_.begin(), slots_.end(), [](const auto& slot) {
+                return slot.owner == VulkanInteropSlotOwner::ACQUIRED;
+            });
         });
         state_.flags = 0U;
     }
@@ -1140,28 +1180,51 @@ class VulkanInteropDisplayDriver final : public ccl::DisplayDriver {
             || texture_width <= 0 || texture_height <= 0) {
             return false;
         }
-        {
-            std::unique_lock lock(state_mutex_);
-            state_changed_.wait(lock, [this] {
-                return stopping_
-                    || (state_.flags
-                        & (CYCLES_BRIDGE_VULKAN_INTEROP_FRAME_READY
-                           | CYCLES_BRIDGE_VULKAN_INTEROP_FRAME_ACQUIRED)) == 0U;
-            });
-            if (stopping_) {
-                return false;
-            }
-        }
-        if (!frames_.display_update_begin(params, texture_width, texture_height)) {
-            return false;
-        }
         const std::uint64_t width = static_cast<std::uint32_t>(params.full_size.x);
         const std::uint64_t height = static_cast<std::uint32_t>(params.full_size.y);
         compatible_ = width <= std::numeric_limits<std::uint64_t>::max() / height
             && width * height
-                <= snapshot_.descriptor.allocation_byte_count / sizeof(ccl::half4);
+                <= snapshot_.descriptor.slot_stride_bytes / sizeof(ccl::half4);
         current_width_ = static_cast<std::uint32_t>(width);
         current_height_ = static_cast<std::uint32_t>(height);
+        current_slot_ = -1;
+        if (compatible_) {
+            std::unique_lock lock(state_mutex_);
+            const bool has_free_slot = [this] {
+                return std::any_of(
+                    slots_.begin(),
+                    slots_.begin() + snapshot_.descriptor.slot_count,
+                    [](const auto& slot) {
+                        return slot.owner == VulkanInteropSlotOwner::FREE;
+                    });
+            }();
+            if (!has_free_slot) {
+                state_.producer_wait_count++;
+            }
+            state_changed_.wait(lock, [this] {
+                return stopping_ || std::any_of(
+                    slots_.begin(),
+                    slots_.begin() + snapshot_.descriptor.slot_count,
+                    [](const auto& slot) {
+                        return slot.owner == VulkanInteropSlotOwner::FREE;
+                    });
+            });
+            if (stopping_) {
+                return false;
+            }
+            const auto free_slot = std::find_if(
+                slots_.begin(),
+                slots_.begin() + snapshot_.descriptor.slot_count,
+                [](const auto& slot) {
+                    return slot.owner == VulkanInteropSlotOwner::FREE;
+                });
+            current_slot_ = static_cast<int>(std::distance(slots_.begin(), free_slot));
+            free_slot->owner = VulkanInteropSlotOwner::WRITING;
+        }
+        if (!frames_.display_update_begin(params, texture_width, texture_height)) {
+            release_writing_slot();
+            return false;
+        }
         used_interop_ = false;
         update_started_ = std::chrono::steady_clock::now();
         return true;
@@ -1169,6 +1232,7 @@ class VulkanInteropDisplayDriver final : public ccl::DisplayDriver {
 
     void update_end() override {
         if (!used_interop_) {
+            release_writing_slot();
             frames_.display_update_end();
             return;
         }
@@ -1185,11 +1249,28 @@ class VulkanInteropDisplayDriver final : public ccl::DisplayDriver {
         state_.last_sync_micros = elapsed;
         state_.ema_sync_micros = update_ema(state_.ema_sync_micros, elapsed);
         state_.max_sync_micros = std::max(state_.max_sync_micros, elapsed);
+        VulkanInteropSlot& slot = slots_[current_slot_];
+        slot.owner = VulkanInteropSlotOwner::READY;
+        slot.generation = state_.generation;
+        slot.width = current_width_;
+        slot.height = current_height_;
+        slot.sample_count = state_.sample_count;
+        state_.slot_index = static_cast<std::uint32_t>(current_slot_);
+        state_.ready_slot_count = static_cast<std::uint32_t>(std::count_if(
+            slots_.begin(),
+            slots_.begin() + snapshot_.descriptor.slot_count,
+            [](const auto& candidate) {
+                return candidate.owner == VulkanInteropSlotOwner::READY;
+            }));
+        refresh_vulkan_interop_slot_flags(
+            state_, slots_, snapshot_.descriptor.slot_count);
+        current_slot_ = -1;
         produced_camera_revision_ = configured_camera_revision_;
     }
 
     ccl::half4* map_texture_buffer() override {
         used_interop_ = false;
+        release_writing_slot();
         return frames_.display_buffer();
     }
 
@@ -1208,19 +1289,23 @@ class VulkanInteropDisplayDriver final : public ccl::DisplayDriver {
     }
 
     void graphics_interop_update_buffer() override {
-        if (snapshot_.memory_handle == nullptr
-            || !graphics_interop_buffer_.is_empty()) {
-            used_interop_ = !graphics_interop_buffer_.is_empty();
-            return;
+        if (snapshot_.memory_handle != nullptr
+            && graphics_interop_buffer_.is_empty()) {
+            const auto handle = static_cast<std::int64_t>(
+                reinterpret_cast<std::intptr_t>(snapshot_.memory_handle));
+            graphics_interop_buffer_.assign(
+                ccl::GraphicsInteropDevice::VULKAN,
+                handle,
+                static_cast<std::size_t>(snapshot_.descriptor.allocation_byte_count));
+            snapshot_.memory_handle = nullptr;
         }
-        const auto handle = static_cast<std::int64_t>(
-            reinterpret_cast<std::intptr_t>(snapshot_.memory_handle));
-        graphics_interop_buffer_.assign(
-            ccl::GraphicsInteropDevice::VULKAN,
-            handle,
-            static_cast<std::size_t>(snapshot_.descriptor.allocation_byte_count));
-        snapshot_.memory_handle = nullptr;
-        used_interop_ = true;
+        used_interop_ = !graphics_interop_buffer_.is_empty() && current_slot_ >= 0;
+        if (used_interop_) {
+            const std::size_t stride = snapshot_.descriptor.slot_stride_bytes;
+            graphics_interop_buffer_.set_range(
+                static_cast<std::size_t>(current_slot_) * stride,
+                stride);
+        }
     }
 
     void zero() override {
@@ -1231,9 +1316,25 @@ class VulkanInteropDisplayDriver final : public ccl::DisplayDriver {
     void draw(const Params&) override {}
 
  private:
+    void release_writing_slot() {
+        if (current_slot_ < 0) {
+            return;
+        }
+        {
+            std::lock_guard lock(state_mutex_);
+            VulkanInteropSlot& slot = slots_[current_slot_];
+            if (slot.owner == VulkanInteropSlotOwner::WRITING) {
+                slot = {};
+            }
+        }
+        current_slot_ = -1;
+        state_changed_.notify_all();
+    }
+
     VulkanInteropSnapshot snapshot_;
     FrameStore& frames_;
     CyclesBridgeVulkanInteropState& state_;
+    VulkanInteropSlots& slots_;
     std::mutex& state_mutex_;
     std::condition_variable& state_changed_;
     bool& stopping_;
@@ -1244,6 +1345,7 @@ class VulkanInteropDisplayDriver final : public ccl::DisplayDriver {
     bool used_interop_ = false;
     std::uint32_t current_width_ = 0U;
     std::uint32_t current_height_ = 0U;
+    int current_slot_ = -1;
 };
 
 class MemoryImageLoader final : public ccl::ImageLoader {
@@ -1834,6 +1936,8 @@ class CyclesEngine::Impl final {
         interop_state_.flags = CYCLES_BRIDGE_VULKAN_INTEROP_BOUND;
         interop_state_.width = descriptor.width;
         interop_state_.height = descriptor.height;
+        interop_state_.slot_count = descriptor.slot_count;
+        interop_slots_ = {};
         return true;
     }
 
@@ -1851,6 +1955,7 @@ class CyclesEngine::Impl final {
         }
         interop_descriptor_ = {};
         interop_state_ = {};
+        interop_slots_ = {};
         return true;
     }
 
@@ -1867,17 +1972,48 @@ class CyclesEngine::Impl final {
     void acquire_vulkan_interop_frame(
         std::uint64_t previous_generation,
         CyclesBridgeVulkanInteropState& state) {
-        std::lock_guard lock(interop_mutex_);
-        if ((interop_state_.flags & CYCLES_BRIDGE_VULKAN_INTEROP_FRAME_READY) != 0U
-            && interop_state_.generation > previous_generation) {
-            interop_state_.flags &= ~CYCLES_BRIDGE_VULKAN_INTEROP_FRAME_READY;
-            interop_state_.flags |= CYCLES_BRIDGE_VULKAN_INTEROP_FRAME_ACQUIRED;
+        bool released_stale_slots = false;
+        {
+            std::lock_guard lock(interop_mutex_);
+            VulkanInteropSlot* selected = nullptr;
+            std::uint32_t selected_index = 0U;
+            for (std::uint32_t index = 0; index < interop_descriptor_.slot_count; ++index) {
+                VulkanInteropSlot& slot = interop_slots_[index];
+                if (slot.owner == VulkanInteropSlotOwner::READY
+                    && slot.generation > previous_generation
+                    && (selected == nullptr || slot.generation > selected->generation)) {
+                    selected = &slot;
+                    selected_index = index;
+                }
+            }
+            if (selected != nullptr) {
+                for (std::uint32_t index = 0; index < interop_descriptor_.slot_count; ++index) {
+                    VulkanInteropSlot& slot = interop_slots_[index];
+                    if (&slot != selected
+                        && slot.owner == VulkanInteropSlotOwner::READY
+                        && slot.generation < selected->generation) {
+                        slot = {};
+                        released_stale_slots = true;
+                    }
+                }
+                selected->owner = VulkanInteropSlotOwner::ACQUIRED;
+                interop_state_.width = selected->width;
+                interop_state_.height = selected->height;
+                interop_state_.sample_count = selected->sample_count;
+                interop_state_.generation = selected->generation;
+                interop_state_.slot_index = selected_index;
+            }
+            refresh_vulkan_interop_slot_flags(
+                interop_state_, interop_slots_, interop_descriptor_.slot_count);
+            const std::uint32_t struct_size = state.struct_size;
+            const std::uint32_t struct_version = state.struct_version;
+            state = interop_state_;
+            state.struct_size = struct_size;
+            state.struct_version = struct_version;
         }
-        const std::uint32_t struct_size = state.struct_size;
-        const std::uint32_t struct_version = state.struct_version;
-        state = interop_state_;
-        state.struct_size = struct_size;
-        state.struct_version = struct_version;
+        if (released_stale_slots) {
+            interop_changed_.notify_all();
+        }
     }
 
     bool release_vulkan_interop_frame(
@@ -1885,13 +2021,20 @@ class CyclesEngine::Impl final {
         std::string& error) {
         {
             std::lock_guard lock(interop_mutex_);
-            if ((interop_state_.flags
-                 & CYCLES_BRIDGE_VULKAN_INTEROP_FRAME_ACQUIRED) == 0U
-                || interop_state_.generation != generation) {
+            const auto acquired = std::find_if(
+                interop_slots_.begin(),
+                interop_slots_.begin() + interop_descriptor_.slot_count,
+                [generation](const auto& slot) {
+                    return slot.owner == VulkanInteropSlotOwner::ACQUIRED
+                        && slot.generation == generation;
+                });
+            if (acquired == interop_slots_.begin() + interop_descriptor_.slot_count) {
                 error = "Vulkan interop frame token is not acquired";
                 return false;
             }
-            interop_state_.flags &= ~CYCLES_BRIDGE_VULKAN_INTEROP_FRAME_ACQUIRED;
+            *acquired = {};
+            refresh_vulkan_interop_slot_flags(
+                interop_state_, interop_slots_, interop_descriptor_.slot_count);
         }
         interop_changed_.notify_all();
         return true;
@@ -2579,6 +2722,7 @@ class CyclesEngine::Impl final {
                     std::move(interop_snapshot),
                     frames_,
                     interop_state_,
+                    interop_slots_,
                     interop_mutex_,
                     interop_changed_,
                     interop_stopping_,
@@ -3099,6 +3243,7 @@ class CyclesEngine::Impl final {
     HANDLE interop_memory_handle_ = nullptr;
     CyclesBridgeVulkanInteropBuffer interop_descriptor_{};
     CyclesBridgeVulkanInteropState interop_state_{};
+    VulkanInteropSlots interop_slots_{};
     std::uint64_t interop_configured_camera_revision_ = 0;
     std::uint64_t interop_produced_camera_revision_ = 0;
 };

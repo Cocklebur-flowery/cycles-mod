@@ -450,7 +450,8 @@ struct CyclesBridgeVulkanInteropBuffer {
     std::uint64_t allocation_byte_count;
     std::uint64_t memory_handle;
     std::uint8_t device_uuid[16];
-    std::uint32_t reserved[2];
+    std::uint32_t slot_count;
+    std::uint32_t slot_stride_bytes;
 };
 
 struct CyclesBridgeVulkanInteropState {
@@ -465,8 +466,10 @@ struct CyclesBridgeVulkanInteropState {
     std::uint32_t last_sync_micros;
     std::uint32_t ema_sync_micros;
     std::uint32_t max_sync_micros;
-    std::uint32_t reserved_0;
-    std::uint64_t reserved_1;
+    std::uint32_t slot_index;
+    std::uint32_t slot_count;
+    std::uint32_t ready_slot_count;
+    std::uint64_t producer_wait_count;
 };
 
 struct CyclesBridgeVertex {

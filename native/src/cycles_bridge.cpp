@@ -18,9 +18,9 @@ struct CyclesBridgeRenderer {
 
 namespace {
 
-constexpr std::uint32_t kAbiVersion = 23;
+constexpr std::uint32_t kAbiVersion = 24;
 constexpr std::uint32_t kStructVersion = 1;
-constexpr char kBuildInfo[] = "cyclesrenderer-native/cycles-5.2;abi=22";
+constexpr char kBuildInfo[] = "cyclesrenderer-native/cycles-5.2;abi=24";
 
 static_assert(sizeof(CyclesBridgeCamera) == 80);
 static_assert(offsetof(CyclesBridgeCamera, frame_id) == 8);
@@ -48,9 +48,11 @@ static_assert(sizeof(CyclesBridgeVulkanInteropBuffer) == 64);
 static_assert(offsetof(CyclesBridgeVulkanInteropBuffer, allocation_byte_count) == 24);
 static_assert(offsetof(CyclesBridgeVulkanInteropBuffer, memory_handle) == 32);
 static_assert(offsetof(CyclesBridgeVulkanInteropBuffer, device_uuid) == 40);
-static_assert(sizeof(CyclesBridgeVulkanInteropState) == 64);
+static_assert(offsetof(CyclesBridgeVulkanInteropBuffer, slot_count) == 56);
+static_assert(sizeof(CyclesBridgeVulkanInteropState) == 72);
 static_assert(offsetof(CyclesBridgeVulkanInteropState, generation) == 24);
 static_assert(offsetof(CyclesBridgeVulkanInteropState, last_sync_micros) == 40);
+static_assert(offsetof(CyclesBridgeVulkanInteropState, producer_wait_count) == 64);
 static_assert(sizeof(CyclesBridgeVertex) == 40);
 static_assert(offsetof(CyclesBridgeVertex, packed_rgba) == 32);
 static_assert(sizeof(CyclesBridgeTriangle) == 16);
@@ -299,13 +301,21 @@ bool valid_vulkan_interop_buffer(
         || descriptor.width == 0U || descriptor.height == 0U
         || descriptor.pixel_format != CYCLES_BRIDGE_PIXEL_FORMAT_RGBA16_FLOAT
         || descriptor.flags != CYCLES_BRIDGE_VULKAN_INTEROP_OWNERSHIP_TRANSFER
-        || descriptor.memory_handle == 0U) {
+        || descriptor.memory_handle == 0U
+        || descriptor.slot_count == 0U || descriptor.slot_count > 3U) {
         return false;
     }
     const std::uint64_t pixel_count =
         static_cast<std::uint64_t>(descriptor.width) * descriptor.height;
-    return pixel_count <= std::numeric_limits<std::uint64_t>::max() / 8U
-        && descriptor.allocation_byte_count >= pixel_count * 8U;
+    if (pixel_count > std::numeric_limits<std::uint64_t>::max() / 8U
+        || descriptor.slot_stride_bytes < pixel_count * 8U) {
+        return false;
+    }
+    return descriptor.slot_stride_bytes
+            <= std::numeric_limits<std::uint64_t>::max() / descriptor.slot_count
+        && descriptor.allocation_byte_count
+            >= static_cast<std::uint64_t>(descriptor.slot_stride_bytes)
+                * descriptor.slot_count;
 }
 
 }  // namespace

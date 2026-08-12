@@ -24,7 +24,7 @@ import static java.lang.foreign.ValueLayout.JAVA_INT;
 import static java.lang.foreign.ValueLayout.JAVA_LONG;
 
 public final class NativeBridge {
-    public static final int ABI_VERSION = 23;
+    public static final int ABI_VERSION = 24;
     public static final int PIXEL_FORMAT_RGBA16_FLOAT = 2;
     public static final int PIXEL_FORMAT_RGBA32_FLOAT = 3;
 
@@ -307,8 +307,8 @@ public final class NativeBridge {
                     JAVA_LONG.withName("allocation_byte_count"),
                     JAVA_LONG.withName("memory_handle"),
                     MemoryLayout.sequenceLayout(16, JAVA_BYTE).withName("device_uuid"),
-                    JAVA_INT.withName("reserved_0"),
-                    JAVA_INT.withName("reserved_1"));
+                    JAVA_INT.withName("slot_count"),
+                    JAVA_INT.withName("slot_stride_bytes"));
     private static final MemoryLayout VULKAN_INTEROP_STATE_LAYOUT =
             MemoryLayout.structLayout(
                     JAVA_INT.withName("struct_size"),
@@ -322,8 +322,10 @@ public final class NativeBridge {
                     JAVA_INT.withName("last_sync_micros"),
                     JAVA_INT.withName("ema_sync_micros"),
                     JAVA_INT.withName("max_sync_micros"),
-                    JAVA_INT.withName("reserved_0"),
-                    JAVA_LONG.withName("reserved_1"));
+                    JAVA_INT.withName("slot_index"),
+                    JAVA_INT.withName("slot_count"),
+                    JAVA_INT.withName("ready_slot_count"),
+                    JAVA_LONG.withName("producer_wait_count"));
     private static final MemoryLayout VERTEX_LAYOUT = MemoryLayout.structLayout(
             JAVA_FLOAT.withName("position_x"),
             JAVA_FLOAT.withName("position_y"),
@@ -373,7 +375,7 @@ public final class NativeBridge {
                 || COLOR_LUT_DESCRIPTOR_LAYOUT.byteSize() != 64L
                 || DIAGNOSTICS_LAYOUT.byteSize() != 400L
                 || VULKAN_INTEROP_BUFFER_LAYOUT.byteSize() != 64L
-                || VULKAN_INTEROP_STATE_LAYOUT.byteSize() != 64L
+                || VULKAN_INTEROP_STATE_LAYOUT.byteSize() != 72L
                 || VERTEX_LAYOUT.byteSize() != 40L
                 || TRIANGLE_LAYOUT.byteSize() != 16L
                 || MATERIAL_LAYOUT.byteSize() != 32L
@@ -994,6 +996,12 @@ public final class NativeBridge {
                 for (int index = 0; index < uuid.length; index++) {
                     descriptor.set(JAVA_BYTE, 40L + index, uuid[index]);
                 }
+                descriptor.set(JAVA_INT, 56L, 1);
+                descriptor.set(
+                        JAVA_INT, 60L,
+                        Math.toIntExact(Math.multiplyExact(
+                                Math.multiplyExact((long) width, height),
+                                8L)));
                 nativeCalled = true;
                 int status = (int) bindVulkanInteropBuffer.invokeExact(
                         renderer, descriptor);
@@ -1051,7 +1059,11 @@ public final class NativeBridge {
                     vulkanInteropStateSegment.get(JAVA_LONG, 32L),
                     vulkanInteropStateSegment.get(JAVA_INT, 40L),
                     vulkanInteropStateSegment.get(JAVA_INT, 44L),
-                    vulkanInteropStateSegment.get(JAVA_INT, 48L));
+                    vulkanInteropStateSegment.get(JAVA_INT, 48L),
+                    vulkanInteropStateSegment.get(JAVA_INT, 52L),
+                    vulkanInteropStateSegment.get(JAVA_INT, 56L),
+                    vulkanInteropStateSegment.get(JAVA_INT, 60L),
+                    vulkanInteropStateSegment.get(JAVA_LONG, 64L));
         }
 
         @FunctionalInterface
@@ -1889,7 +1901,11 @@ public final class NativeBridge {
             long completedFrameCount,
             int lastSyncMicros,
             int emaSyncMicros,
-            int maxSyncMicros) {
+            int maxSyncMicros,
+            int slotIndex,
+            int slotCount,
+            int readySlotCount,
+            long producerWaitCount) {
         public boolean bound() {
             return (flags & 1) != 0;
         }
