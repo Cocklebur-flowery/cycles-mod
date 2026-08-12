@@ -30,6 +30,7 @@ public final class SectionSceneManager {
     private final ConcurrentLinkedQueue<Long> unloadedChunks = new ConcurrentLinkedQueue<>();
 
     private ClientLevel level;
+    private LabPbrResources.Discovery pbrDiscovery = LabPbrResources.empty();
     private long resourceRevision = Long.MIN_VALUE;
     private int sceneOriginX;
     private int sceneOriginY;
@@ -140,6 +141,7 @@ public final class SectionSceneManager {
     public void reset() {
         level = null;
         resourceRevision = Long.MIN_VALUE;
+        pbrDiscovery = LabPbrResources.empty();
         sections.clear();
         unloadedChunks.clear();
         lastCameraSectionX = Integer.MIN_VALUE;
@@ -338,6 +340,10 @@ public final class SectionSceneManager {
                 pendingCommit);
     }
 
+    public LabPbrResources.Discovery pbrDiscovery() {
+        return pbrDiscovery;
+    }
+
     private void upsertNative(SectionGeometrySnapshot snapshot) {
         long start = System.nanoTime();
         NativeBridge.upsertSection(snapshot);
@@ -410,7 +416,7 @@ public final class SectionSceneManager {
         return Math.floorDiv(blockCoordinate, ORIGIN_GRANULARITY) * ORIGIN_GRANULARITY;
     }
 
-    private static SectionGeometrySnapshot.SceneResources createResources(
+    private SectionGeometrySnapshot.SceneResources createResources(
             Minecraft minecraft,
             int originX,
             int originY,
@@ -423,6 +429,8 @@ public final class SectionSceneManager {
         if (sprites.isEmpty()) {
             throw new IllegalStateException("Minecraft block texture atlas has no sprites");
         }
+        pbrDiscovery = LabPbrResources.discover(
+                minecraft.getResourceManager(), sprites.values());
 
         int atlasWidth = 0;
         int atlasHeight = 0;
