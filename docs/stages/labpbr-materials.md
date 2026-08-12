@@ -1,6 +1,6 @@
 # LabPBR 1.3 材质桥（PBR-0）
 
-状态：PBR-0 至 PBR-5 已完成；PBR-6 待游戏内验收
+状态：PBR-0 至 PBR-5 已完成；PBR-6 自动验收已完成，待游戏内视觉验收
 目标资源包：`run/resourcepacks/SPBR-21.zip`
 目标格式：ShaderLABS LabPBR 1.3
 
@@ -197,3 +197,16 @@ F10 按动态诊断区显示：
 - Distant Horizons PBR；
 - oldPBR 或其他未声明格式；
 - 性能热点、BVH 或线程调度优化。
+
+## 10. PBR-6 自动验收记录
+
+2026-08-12 对当前开发资源包 `run/resourcepacks/SPBR-21.zip` 做了只读检查：
+
+- 声明为 `format=lab-pbr/1.3`；
+- 包内发现 3055 张 `_n.png` 与 4379 张 `_s.png`；
+- Java 离线编译与资源处理通过；
+- 公共 ABI 已更新到 29；
+- OptiX 原生烟测通过，包含三纹理 LabPBR 场景；
+- 原生增量场景更新测试通过。
+
+仍需游戏内确认法线方向、粗糙/金属差异、自发光范围以及 F9/F10 文案；这些视觉结果无法由离线烟测代替。

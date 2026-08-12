@@ -23,6 +23,7 @@
   "cyclesrenderer.configuration.output": "Output",
   "cyclesrenderer.configuration.sampling": "Sampling",
   "cyclesrenderer.configuration.camera": "Camera",
+  "cyclesrenderer.configuration.materials": "Materials / PBR",
   "cyclesrenderer.configuration.lightPaths": "Light Paths",
   "cyclesrenderer.configuration.filter": "Pixel Filter",
   "cyclesrenderer.configuration.denoise": "Denoising",
