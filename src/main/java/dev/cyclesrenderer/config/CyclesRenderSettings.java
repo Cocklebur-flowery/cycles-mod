@@ -42,6 +42,15 @@ public record CyclesRenderSettings(
         SamplingPattern samplingPattern,
         float cameraClipNear,
         float cameraClipFar,
+        ProjectionMode projectionMode,
+        float focalLengthMm,
+        float sensorWidthMm,
+        boolean depthOfField,
+        float focusDistance,
+        float fStop,
+        int apertureBlades,
+        float apertureRotationDegrees,
+        float apertureRatio,
         DenoiserMode denoiserMode,
         int denoiserStartSample,
         DenoiserInput denoiserInput,
@@ -149,6 +158,26 @@ public record CyclesRenderSettings(
         @Override
         public String translationGroup() {
             return "sampling_pattern";
+        }
+    }
+
+    public enum ProjectionMode implements NativeEnum, NamedEnum {
+        MINECRAFT_FOV(0), PHYSICAL_LENS(1);
+
+        private final int nativeId;
+
+        ProjectionMode(int nativeId) {
+            this.nativeId = nativeId;
+        }
+
+        @Override
+        public int nativeId() {
+            return nativeId;
+        }
+
+        @Override
+        public String translationGroup() {
+            return "projection_mode";
         }
     }
 

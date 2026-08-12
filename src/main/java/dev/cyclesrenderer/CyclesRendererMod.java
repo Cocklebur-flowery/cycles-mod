@@ -467,6 +467,26 @@ public final class CyclesRendererMod {
             y += 10;
             graphics.text(
                     minecraft.font,
+                    "camera projection=" + settings.projectionMode().name()
+                            + "/" + diagnostics.projectionModeName()
+                            + " fov=" + oneDecimalDegrees(diagnostics.verticalFovRadians())
+                            + "deg lens=" + settings.focalLengthMm()
+                            + "mm sensor=" + settings.sensorWidthMm() + "mm",
+                    6, y, 0xFFE0E0E0);
+            y += 10;
+            graphics.text(
+                    minecraft.font,
+                    "dof=" + settings.depthOfField() + "/" + diagnostics.depthOfField()
+                            + " focus=" + diagnostics.focusDistance()
+                            + " f/" + diagnostics.fStop()
+                            + " radius=" + diagnostics.apertureSize()
+                            + " blades=" + diagnostics.apertureBlades()
+                            + " rot=" + oneDecimalDegrees(diagnostics.apertureRotationRadians())
+                            + "deg ratio=" + diagnostics.apertureRatio(),
+                    6, y, 0xFFE0E0E0);
+            y += 10;
+            graphics.text(
+                    minecraft.font,
                     "settings=" + diagnostics.settingsRevision()
                             + " reset=" + diagnostics.resetName(),
                     6, y, 0xFFE0E0E0);
@@ -669,6 +689,10 @@ public final class CyclesRendererMod {
 
     private static double oneDecimalMebibytes(long bytes) {
         return Math.round(bytes / 104_857.6D) / 10.0D;
+    }
+
+    private static double oneDecimalDegrees(float radians) {
+        return Math.round(Math.toDegrees(radians) * 10.0D) / 10.0D;
     }
 
     private static int sampleProgressPercent(NativeBridge.Diagnostics diagnostics) {

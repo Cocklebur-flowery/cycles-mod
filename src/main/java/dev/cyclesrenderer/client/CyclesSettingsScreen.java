@@ -129,6 +129,12 @@ public final class CyclesSettingsScreen extends Screen {
                 "screen.cyclesrenderer.settings.sampling_pattern",
                 settings.samplingPattern().getTranslatedName(),
                 settings.seed()));
+        lines.add(Component.translatable(
+                "screen.cyclesrenderer.settings.camera",
+                settings.projectionMode().getTranslatedName(),
+                settings.focalLengthMm(),
+                settings.sensorWidthMm(),
+                settings.depthOfField() ? CommonComponents.OPTION_ON : CommonComponents.OPTION_OFF));
         if (!NativeBridge.isReady()) {
             lines.add(Component.translatable("screen.cyclesrenderer.settings.native_not_loaded"));
             return lines;

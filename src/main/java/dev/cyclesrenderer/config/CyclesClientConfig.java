@@ -30,6 +30,16 @@ public final class CyclesClientConfig {
     private static final ModConfigSpec.EnumValue<CyclesRenderSettings.SamplingPattern> SAMPLING_PATTERN;
     private static final ModConfigSpec.DoubleValue CAMERA_CLIP_NEAR;
     private static final ModConfigSpec.DoubleValue CAMERA_CLIP_FAR;
+    private static final ModConfigSpec.EnumValue<CyclesRenderSettings.ProjectionMode> CAMERA_PROJECTION;
+    private static final ModConfigSpec.DoubleValue CAMERA_FOCAL_LENGTH;
+    private static final ModConfigSpec.DoubleValue CAMERA_SENSOR_WIDTH;
+    private static final ModConfigSpec.BooleanValue CAMERA_DEPTH_OF_FIELD;
+    private static final ModConfigSpec.DoubleValue CAMERA_FOCUS_DISTANCE;
+    private static final ModConfigSpec.DoubleValue CAMERA_F_STOP;
+    private static final ModConfigSpec.BooleanValue CAMERA_APERTURE_CIRCULAR;
+    private static final ModConfigSpec.IntValue CAMERA_APERTURE_BLADES;
+    private static final ModConfigSpec.DoubleValue CAMERA_APERTURE_ROTATION;
+    private static final ModConfigSpec.DoubleValue CAMERA_APERTURE_RATIO;
     private static final ModConfigSpec.IntValue MINIMUM_BOUNCE;
     private static final ModConfigSpec.IntValue MAXIMUM_BOUNCE;
     private static final ModConfigSpec.IntValue DIFFUSE_BOUNCES;
@@ -123,6 +133,31 @@ public final class CyclesClientConfig {
         CAMERA_CLIP_FAR = builder.translation("config.cyclesrenderer.camera.clipFar")
                 .comment("Far clipping plane in blocks/meters; zero follows the Minecraft camera.")
                 .defineInRange("clipFar", 0.0D, 0.0D, 1000000.0D);
+        CAMERA_PROJECTION = builder.translation("config.cyclesrenderer.camera.projection")
+                .comment("Minecraft FOV preserves gameplay camera effects; physical lens overrides FOV.")
+                .defineEnum("projection", CyclesRenderSettings.ProjectionMode.MINECRAFT_FOV);
+        CAMERA_FOCAL_LENGTH = builder.translation("config.cyclesrenderer.camera.focalLength")
+                .comment("Physical focal length in millimeters; also controls DOF aperture size.")
+                .defineInRange("focalLengthMm", 50.0D, 1.0D, 300.0D);
+        CAMERA_SENSOR_WIDTH = builder.translation("config.cyclesrenderer.camera.sensorWidth")
+                .comment("Horizontal sensor width in millimeters.")
+                .defineInRange("sensorWidthMm", 36.0D, 1.0D, 100.0D);
+        CAMERA_DEPTH_OF_FIELD = builder.translation("config.cyclesrenderer.camera.depthOfField")
+                .define("depthOfField", false);
+        CAMERA_FOCUS_DISTANCE = builder.translation("config.cyclesrenderer.camera.focusDistance")
+                .comment("Focus plane distance in blocks/meters.")
+                .defineInRange("focusDistance", 10.0D, 0.01D, 1000000.0D);
+        CAMERA_F_STOP = builder.translation("config.cyclesrenderer.camera.fStop")
+                .defineInRange("fStop", 2.8D, 0.1D, 128.0D);
+        CAMERA_APERTURE_CIRCULAR = builder.translation("config.cyclesrenderer.camera.apertureCircular")
+                .comment("Use a circular aperture; otherwise the configured blade count is used.")
+                .define("apertureCircular", true);
+        CAMERA_APERTURE_BLADES = builder.translation("config.cyclesrenderer.camera.apertureBlades")
+                .defineInRange("apertureBlades", 6, 3, 16);
+        CAMERA_APERTURE_ROTATION = builder.translation("config.cyclesrenderer.camera.apertureRotation")
+                .defineInRange("apertureRotationDegrees", 0.0D, -360.0D, 360.0D);
+        CAMERA_APERTURE_RATIO = builder.translation("config.cyclesrenderer.camera.apertureRatio")
+                .defineInRange("apertureRatio", 1.0D, 0.1D, 10.0D);
         builder.pop();
 
         builder.push("lightPaths");
@@ -217,6 +252,12 @@ public final class CyclesClientConfig {
                 PIXEL_FILTER.get(), FILTER_WIDTH.get().floatValue(), SEED.get(),
                 SAMPLING_PATTERN.get(),
                 CAMERA_CLIP_NEAR.get().floatValue(), CAMERA_CLIP_FAR.get().floatValue(),
+                CAMERA_PROJECTION.get(), CAMERA_FOCAL_LENGTH.get().floatValue(),
+                CAMERA_SENSOR_WIDTH.get().floatValue(), CAMERA_DEPTH_OF_FIELD.get(),
+                CAMERA_FOCUS_DISTANCE.get().floatValue(), CAMERA_F_STOP.get().floatValue(),
+                CAMERA_APERTURE_CIRCULAR.get() ? 0 : CAMERA_APERTURE_BLADES.get(),
+                CAMERA_APERTURE_ROTATION.get().floatValue(),
+                CAMERA_APERTURE_RATIO.get().floatValue(),
                 DENOISER_MODE.get(), DENOISER_START_SAMPLE.get(), DENOISER_INPUT.get(),
                 DENOISER_PREFILTER.get(), DENOISER_QUALITY.get(), DENOISER_USE_GPU.get(),
                 EXPOSURE_EV.get().floatValue(), GAMMA.get().floatValue(), VIEW_TRANSFORM.get(),

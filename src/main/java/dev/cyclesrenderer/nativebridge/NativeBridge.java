@@ -23,7 +23,7 @@ import static java.lang.foreign.ValueLayout.JAVA_INT;
 import static java.lang.foreign.ValueLayout.JAVA_LONG;
 
 public final class NativeBridge {
-    public static final int ABI_VERSION = 18;
+    public static final int ABI_VERSION = 19;
     public static final int PIXEL_FORMAT_RGBA16_FLOAT = 2;
     public static final int PIXEL_FORMAT_RGBA32_FLOAT = 3;
 
@@ -163,7 +163,15 @@ public final class NativeBridge {
             JAVA_INT.withName("sampling_pattern"),
             JAVA_FLOAT.withName("camera_clip_near"),
             JAVA_FLOAT.withName("camera_clip_far"),
-            MemoryLayout.sequenceLayout(3, JAVA_INT).withName("reserved"));
+            JAVA_INT.withName("projection_mode"),
+            JAVA_FLOAT.withName("focal_length_mm"),
+            JAVA_FLOAT.withName("sensor_width_mm"),
+            JAVA_INT.withName("depth_of_field"),
+            JAVA_FLOAT.withName("focus_distance"),
+            JAVA_FLOAT.withName("f_stop"),
+            JAVA_INT.withName("aperture_blades"),
+            JAVA_FLOAT.withName("aperture_rotation_degrees"),
+            JAVA_FLOAT.withName("aperture_ratio"));
     private static final MemoryLayout PASS_DESCRIPTOR_LAYOUT = MemoryLayout.structLayout(
             JAVA_INT.withName("struct_size"),
             JAVA_INT.withName("struct_version"),
@@ -275,7 +283,15 @@ public final class NativeBridge {
             JAVA_INT.withName("sampling_pattern"),
             JAVA_FLOAT.withName("effective_camera_clip_near"),
             JAVA_FLOAT.withName("effective_camera_clip_far"),
-            JAVA_INT.withName("reserved"));
+            JAVA_INT.withName("projection_mode"),
+            JAVA_FLOAT.withName("vertical_fov_radians"),
+            JAVA_INT.withName("depth_of_field"),
+            JAVA_FLOAT.withName("focus_distance"),
+            JAVA_FLOAT.withName("f_stop"),
+            JAVA_FLOAT.withName("aperture_size"),
+            JAVA_INT.withName("aperture_blades"),
+            JAVA_FLOAT.withName("aperture_rotation_radians"),
+            JAVA_FLOAT.withName("aperture_ratio"));
     private static final MemoryLayout VERTEX_LAYOUT = MemoryLayout.structLayout(
             JAVA_FLOAT.withName("position_x"),
             JAVA_FLOAT.withName("position_y"),
@@ -319,11 +335,11 @@ public final class NativeBridge {
                 || SECTION_LAYOUT.byteSize() != 48L
                 || FRAME_LAYOUT.byteSize() != 40L
                 || FRAME_VIEW_LAYOUT.byteSize() != 72L
-                || SETTINGS_LAYOUT.byteSize() != 208L
+                || SETTINGS_LAYOUT.byteSize() != 232L
                 || PASS_DESCRIPTOR_LAYOUT.byteSize() != 64L
                 || CAPABILITIES_LAYOUT.byteSize() != 64L
                 || COLOR_LUT_DESCRIPTOR_LAYOUT.byteSize() != 64L
-                || DIAGNOSTICS_LAYOUT.byteSize() != 344L
+                || DIAGNOSTICS_LAYOUT.byteSize() != 376L
                 || VERTEX_LAYOUT.byteSize() != 40L
                 || TRIANGLE_LAYOUT.byteSize() != 16L
                 || MATERIAL_LAYOUT.byteSize() != 32L
@@ -895,6 +911,15 @@ public final class NativeBridge {
             settingsSegment.set(JAVA_INT, 184L, settings.samplingPattern().nativeId());
             settingsSegment.set(JAVA_FLOAT, 188L, settings.cameraClipNear());
             settingsSegment.set(JAVA_FLOAT, 192L, settings.cameraClipFar());
+            settingsSegment.set(JAVA_INT, 196L, settings.projectionMode().nativeId());
+            settingsSegment.set(JAVA_FLOAT, 200L, settings.focalLengthMm());
+            settingsSegment.set(JAVA_FLOAT, 204L, settings.sensorWidthMm());
+            settingsSegment.set(JAVA_INT, 208L, settings.depthOfField() ? 1 : 0);
+            settingsSegment.set(JAVA_FLOAT, 212L, settings.focusDistance());
+            settingsSegment.set(JAVA_FLOAT, 216L, settings.fStop());
+            settingsSegment.set(JAVA_INT, 220L, settings.apertureBlades());
+            settingsSegment.set(JAVA_FLOAT, 224L, settings.apertureRotationDegrees());
+            settingsSegment.set(JAVA_FLOAT, 228L, settings.apertureRatio());
             checkRendererStatus(
                     (int) applySettings.invokeExact(renderer, settingsSegment),
                     "settings update");
@@ -1078,7 +1103,16 @@ public final class NativeBridge {
                     diagnosticsSegment.get(JAVA_INT, 324L),
                     diagnosticsSegment.get(JAVA_INT, 328L),
                     diagnosticsSegment.get(JAVA_FLOAT, 332L),
-                    diagnosticsSegment.get(JAVA_FLOAT, 336L));
+                    diagnosticsSegment.get(JAVA_FLOAT, 336L),
+                    diagnosticsSegment.get(JAVA_INT, 340L),
+                    diagnosticsSegment.get(JAVA_FLOAT, 344L),
+                    diagnosticsSegment.get(JAVA_INT, 348L) != 0,
+                    diagnosticsSegment.get(JAVA_FLOAT, 352L),
+                    diagnosticsSegment.get(JAVA_FLOAT, 356L),
+                    diagnosticsSegment.get(JAVA_FLOAT, 360L),
+                    diagnosticsSegment.get(JAVA_INT, 364L),
+                    diagnosticsSegment.get(JAVA_FLOAT, 368L),
+                    diagnosticsSegment.get(JAVA_FLOAT, 372L));
         }
 
         private RenderedFrame renderFrame(
@@ -1640,7 +1674,16 @@ public final class NativeBridge {
             int denoiserScheduleSkipCount,
             int samplingPattern,
             float effectiveCameraClipNear,
-            float effectiveCameraClipFar) {
+            float effectiveCameraClipFar,
+            int projectionMode,
+            float verticalFovRadians,
+            boolean depthOfField,
+            float focusDistance,
+            float fStop,
+            float apertureSize,
+            int apertureBlades,
+            float apertureRotationRadians,
+            float apertureRatio) {
         public String stateName() {
             return switch (stateCode) {
                 case 1 -> "scene-staging";
@@ -1715,6 +1758,14 @@ public final class NativeBridge {
                 case 3 -> "BLUE_NOISE_FIRST";
                 case 4 -> "BLUE_NOISE_ROUND";
                 default -> "UNKNOWN(" + samplingPattern + ")";
+            };
+        }
+
+        public String projectionModeName() {
+            return switch (projectionMode) {
+                case 0 -> "MINECRAFT_FOV";
+                case 1 -> "PHYSICAL_LENS";
+                default -> "UNKNOWN(" + projectionMode + ")";
             };
         }
 
