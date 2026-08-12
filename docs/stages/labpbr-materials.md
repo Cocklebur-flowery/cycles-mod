@@ -60,14 +60,14 @@ namespace:textures/path_s.png
 | `_n` | R/G | DirectX 切线空间 X/Y | 解码并重建 Z，交给 Cycles DirectX Normal Map |
 | `_n` | B | 材质 AO | 检测并统计，不乘入 Base Color |
 | `_n` | A | 高度/位移 | 保留格式能力信息，第一版不做 POM/位移 |
-| `_s` | R | 感知光滑度 | 转为 Principled Roughness 输入 `1 - smoothness` |
+| `_s` | R | 感知光滑度 | 按 LabPBR 解码为线性粗糙度 `(1 - smoothness)^2` |
 | `_s` | G 0..229 | 线性介电 F0 | 转为 Principled Specular IOR Level |
 | `_s` | G 230..255 | 预定义/反照率金属 | 第一版统一作为 Metalness 1，颜色取 Base Color |
 | `_s` | B | 孔隙度或 SSS | 检测并统计，第一版不接入着色器 |
 | `_s` | A 0..254 | 自发光强度 | 使用 Base Color 作为发光颜色并按强度缩放 |
 | `_s` | A 255 | 忽略/无自发光 | 转为零自发光 |
 
-LabPBR 文档给出的线性粗糙度为 `(1 - smoothness)^2`。Cycles Principled 会在内部把 Roughness 输入平方成微表面 alpha，因此桥接层输入 `1 - smoothness`，不能预先再次平方。
+LabPBR 的 R 通道保存感知光滑度。桥接层严格按格式定义先解码为线性粗糙度 `(1 - smoothness)^2`，再写入材质图集供 Cycles Principled 使用，避免把感知编码值误当成已经线性的粗糙度。
 
 介电 F0 使用 Principled 默认 IOR 1.5 的基准 F0 0.04，换算为：
 

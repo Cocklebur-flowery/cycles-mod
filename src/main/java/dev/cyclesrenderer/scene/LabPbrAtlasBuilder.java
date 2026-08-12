@@ -203,7 +203,10 @@ public final class LabPbrAtlasBuilder {
                 int encodedF0OrMetal = ARGB.green(argb);
                 int emission = ARGB.alpha(argb);
                 int output = (targetY * atlasWidth + targetX) * 4;
-                target[output] = (byte) (255 - smoothness);
+                float perceptualSmoothness = smoothness / 255.0F;
+                float perceptualRoughness = 1.0F - perceptualSmoothness;
+                float linearRoughness = perceptualRoughness * perceptualRoughness;
+                target[output] = (byte) toUnorm8(linearRoughness);
                 target[output + 1] = (byte) (encodedF0OrMetal >= 230 ? 255 : 0);
                 target[output + 2] = (byte) (encodedF0OrMetal >= 230
                         ? toUnorm8(fallbackF0)
