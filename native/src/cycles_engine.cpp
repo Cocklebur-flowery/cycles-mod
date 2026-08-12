@@ -1783,7 +1783,10 @@ class CyclesEngine::Impl final {
         }
         std::lock_guard lock(interop_mutex_);
         if (interop_memory_handle_ != nullptr
-            || (interop_state_.flags & CYCLES_BRIDGE_VULKAN_INTEROP_ACTIVE) != 0U) {
+            || (interop_state_.flags
+                & (CYCLES_BRIDGE_VULKAN_INTEROP_BOUND
+                   | CYCLES_BRIDGE_VULKAN_INTEROP_ACTIVE
+                   | CYCLES_BRIDGE_VULKAN_INTEROP_SESSION_ATTACHED)) != 0U) {
             error = "Vulkan interop buffer is already bound";
             return false;
         }

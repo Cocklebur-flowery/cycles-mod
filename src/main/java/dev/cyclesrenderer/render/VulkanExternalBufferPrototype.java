@@ -243,20 +243,17 @@ public final class VulkanExternalBufferPrototype implements AutoCloseable {
         if (device != null) {
             RenderSystem.assertOnRenderThread();
         }
-        try {
-            if (nativeBound && NativeBridge.isReady()) {
-                NativeBridge.VulkanInteropState state = NativeBridge.vulkanInteropState();
-                if (state.sessionAttached()) {
-                    throw new IllegalStateException(
-                            "native renderer must close before Vulkan interop memory");
-                }
-                NativeBridge.unbindVulkanInteropBuffer();
+        if (nativeBound && NativeBridge.isReady()) {
+            NativeBridge.VulkanInteropState state = NativeBridge.vulkanInteropState();
+            if (state.sessionAttached()) {
+                throw new IllegalStateException(
+                        "native renderer must close before Vulkan interop memory");
             }
-        } finally {
-            nativeBound = false;
-            releaseHandles();
-            telemetry = Telemetry.inactive("released");
+            NativeBridge.unbindVulkanInteropBuffer();
         }
+        nativeBound = false;
+        releaseHandles();
+        telemetry = Telemetry.inactive("released");
     }
 
     private void releaseHandles() {
