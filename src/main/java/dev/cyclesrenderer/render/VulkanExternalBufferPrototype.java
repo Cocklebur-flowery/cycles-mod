@@ -9,6 +9,7 @@ import com.mojang.blaze3d.textures.GpuTextureView;
 import com.mojang.blaze3d.vulkan.VulkanCommandEncoder;
 import com.mojang.blaze3d.vulkan.VulkanDevice;
 import com.mojang.blaze3d.vulkan.VulkanGpuTexture;
+import dev.cyclesrenderer.config.CyclesRenderSettings;
 import dev.cyclesrenderer.mixin.GpuDeviceAccessor;
 import dev.cyclesrenderer.nativebridge.NativeBridge;
 import net.minecraft.client.Minecraft;
@@ -41,10 +42,7 @@ import org.lwjgl.vulkan.VkPhysicalDeviceMemoryProperties;
 import java.nio.LongBuffer;
 
 public final class VulkanExternalBufferPrototype implements AutoCloseable {
-    public static final int WIDTH = 480;
-    public static final int HEIGHT = 270;
     public static final int BYTES_PER_PIXEL = 8;
-    public static final long LOGICAL_BYTES = (long) WIDTH * HEIGHT * BYTES_PER_PIXEL;
 
     private static final int HANDLE_TYPE =
             VK11.VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_WIN32_BIT;
@@ -56,11 +54,18 @@ public final class VulkanExternalBufferPrototype implements AutoCloseable {
     private long buffer;
     private long memory;
     private long allocationBytes;
+    private int capacityWidth;
+    private int capacityHeight;
+    private long logicalBytes;
     private boolean nativeBound;
     private TextureTarget frameTarget;
     private GpuFence pendingCopyFence;
     private long pendingGeneration;
+    private int pendingWidth;
+    private int pendingHeight;
     private long displayedGeneration;
+    private int displayedWidth;
+    private int displayedHeight;
     private long copyCount;
     private long generationGaps;
     private long lastCopyMicros;
@@ -69,21 +74,30 @@ public final class VulkanExternalBufferPrototype implements AutoCloseable {
     private boolean nativeActive;
     private Telemetry telemetry = Telemetry.inactive("not initialized");
 
-    public void initialize(Minecraft minecraft) {
+    public void initialize(Minecraft minecraft, CyclesRenderSettings settings) {
         RenderSystem.assertOnRenderThread();
         close();
+
+        Capacity capacity = Capacity.from(settings);
+        capacityWidth = capacity.width();
+        capacityHeight = capacity.height();
+        logicalBytes = capacity.logicalBytes();
 
         VulkanCapabilityProbe.InteropBootstrap bootstrap =
                 VulkanCapabilityProbe.interopBootstrap();
         if (!bootstrap.extensionsRequested()) {
-            telemetry = Telemetry.inactive("device extensions not requested");
+            telemetry = Telemetry.inactive(
+                    capacityWidth, capacityHeight, logicalBytes,
+                    "device extensions not requested");
             return;
         }
 
         VulkanCapabilityProbe.Snapshot capabilities =
                 VulkanCapabilityProbe.snapshot(minecraft);
         if (!capabilities.interopExtensionsEnabled()) {
-            telemetry = Telemetry.inactive("device extensions not enabled");
+            telemetry = Telemetry.inactive(
+                    capacityWidth, capacityHeight, logicalBytes,
+                    "device extensions not enabled");
             return;
         }
 
@@ -92,24 +106,29 @@ public final class VulkanExternalBufferPrototype implements AutoCloseable {
                     ((GpuDeviceAccessor) (Object) RenderSystem.getDevice())
                             .cyclesrenderer$getBackend();
             if (!(backend instanceof VulkanDevice vulkanDevice)) {
-                telemetry = Telemetry.inactive("active graphics backend is not Vulkan");
+                telemetry = Telemetry.inactive(
+                        capacityWidth, capacityHeight, logicalBytes,
+                        "active graphics backend is not Vulkan");
                 return;
             }
-            allocate(vulkanDevice);
+            allocate(vulkanDevice, logicalBytes);
             long exportedHandle = exportMemoryHandle();
             NativeBridge.bindVulkanInteropBuffer(
-                    WIDTH,
-                    HEIGHT,
+                    capacityWidth,
+                    capacityHeight,
                     allocationBytes,
                     exportedHandle,
                     capabilities.physicalDeviceUuid());
             nativeBound = true;
             telemetry = new Telemetry(
-                    true, true, true, LOGICAL_BYTES, allocationBytes,
+                    true, true, true,
+                    capacityWidth, capacityHeight,
+                    logicalBytes, allocationBytes,
                     "bound-native");
         } catch (RuntimeException | LinkageError error) {
             releaseHandles();
             telemetry = Telemetry.inactive(
+                    capacityWidth, capacityHeight, logicalBytes,
                     error.getClass().getSimpleName() + ": "
                             + String.valueOf(error.getMessage()));
         }
@@ -143,10 +162,13 @@ public final class VulkanExternalBufferPrototype implements AutoCloseable {
             return;
         }
         pendingGeneration = state.generation();
+        pendingWidth = state.width();
+        pendingHeight = state.height();
         try {
-            ensureFrameTarget();
+            validateFrameDimensions(pendingWidth, pendingHeight);
+            ensureFrameTarget(pendingWidth, pendingHeight);
             long start = System.nanoTime();
-            encodeCopy();
+            encodeCopy(pendingWidth, pendingHeight);
             lastCopyMicros = nanosToMicros(System.nanoTime() - start);
             emaCopyMicros = emaCopyMicros == 0L
                     ? lastCopyMicros
@@ -155,6 +177,8 @@ public final class VulkanExternalBufferPrototype implements AutoCloseable {
         } catch (RuntimeException | LinkageError error) {
             NativeBridge.releaseVulkanInteropFrame(pendingGeneration);
             pendingGeneration = 0L;
+            pendingWidth = 0;
+            pendingHeight = 0;
             throw error;
         }
     }
@@ -185,6 +209,8 @@ public final class VulkanExternalBufferPrototype implements AutoCloseable {
                 displayedGeneration,
                 copyCount,
                 generationGaps,
+                displayedWidth,
+                displayedHeight,
                 lastCopyMicros,
                 emaCopyMicros,
                 maxCopyMicros);
@@ -195,18 +221,44 @@ public final class VulkanExternalBufferPrototype implements AutoCloseable {
         finishPendingCopy(true);
     }
 
-    private void ensureFrameTarget() {
-        if (frameTarget == null) {
-            frameTarget = new TextureTarget(
-                    "Cycles Vulkan interop frame",
-                    WIDTH,
-                    HEIGHT,
-                    false,
-                    GpuFormat.RGBA16_FLOAT);
+    private void validateFrameDimensions(int width, int height) {
+        if (width <= 0 || height <= 0) {
+            throw new IllegalStateException(
+                    "native interop frame has invalid dimensions " + width + "x" + height);
+        }
+        long frameBytes;
+        try {
+            frameBytes = Math.multiplyExact(
+                    Math.multiplyExact((long) width, height),
+                    BYTES_PER_PIXEL);
+        } catch (ArithmeticException error) {
+            throw new IllegalStateException(
+                    "native interop frame dimensions overflow " + width + "x" + height,
+                    error);
+        }
+        if (frameBytes > logicalBytes || frameBytes > allocationBytes) {
+            throw new IllegalStateException(
+                    "native interop frame " + width + "x" + height
+                            + " requires " + frameBytes + " bytes, capacity is "
+                            + capacityWidth + "x" + capacityHeight + " ("
+                            + logicalBytes + " logical, " + allocationBytes + " allocated)");
         }
     }
 
-    private void encodeCopy() {
+    private void ensureFrameTarget(int width, int height) {
+        if (frameTarget == null) {
+            frameTarget = new TextureTarget(
+                    "Cycles Vulkan interop frame",
+                    width,
+                    height,
+                    false,
+                    GpuFormat.RGBA16_FLOAT);
+        } else if (frameTarget.width != width || frameTarget.height != height) {
+            frameTarget.resize(width, height);
+        }
+    }
+
+    private void encodeCopy(int width, int height) {
         if (vulkanDevice == null || frameTarget == null) {
             throw new IllegalStateException("Vulkan interop copy target is not initialized");
         }
@@ -227,15 +279,15 @@ public final class VulkanExternalBufferPrototype implements AutoCloseable {
                         VK13.VK_ACCESS_2_TRANSFER_READ_BIT);
                 VkBufferImageCopy.Buffer region = VkBufferImageCopy.calloc(1, stack);
                 region.bufferOffset(0L);
-                region.bufferRowLength(WIDTH);
-                region.bufferImageHeight(HEIGHT);
+                region.bufferRowLength(width);
+                region.bufferImageHeight(height);
                 VkImageSubresourceLayers subresource = region.imageSubresource();
                 subresource.aspectMask(VK10.VK_IMAGE_ASPECT_COLOR_BIT);
                 subresource.mipLevel(0);
                 subresource.baseArrayLayer(0);
                 subresource.layerCount(1);
                 region.imageOffset().set(0, 0, 0);
-                region.imageExtent().set(WIDTH, HEIGHT, 1);
+                region.imageExtent().set(width, height, 1);
                 VK12.vkCmdCopyBufferToImage(
                         commandBuffer,
                         buffer,
@@ -299,7 +351,11 @@ public final class VulkanExternalBufferPrototype implements AutoCloseable {
             generationGaps += pendingGeneration - displayedGeneration - 1L;
         }
         displayedGeneration = pendingGeneration;
+        displayedWidth = pendingWidth;
+        displayedHeight = pendingHeight;
         pendingGeneration = 0L;
+        pendingWidth = 0;
+        pendingHeight = 0;
         copyCount++;
     }
 
@@ -327,7 +383,7 @@ public final class VulkanExternalBufferPrototype implements AutoCloseable {
         }
     }
 
-    private void allocate(VulkanDevice vulkanDevice) {
+    private void allocate(VulkanDevice vulkanDevice, long requestedBytes) {
         VkDevice nextDevice = vulkanDevice.vkDevice();
         VkPhysicalDevice physicalDevice = nextDevice.getPhysicalDevice();
         validateExternalBufferSupport(physicalDevice);
@@ -342,7 +398,7 @@ public final class VulkanExternalBufferPrototype implements AutoCloseable {
             VkBufferCreateInfo bufferInfo = VkBufferCreateInfo.calloc(stack)
                     .sType$Default()
                     .pNext(externalBuffer.address())
-                    .size(LOGICAL_BYTES)
+                    .size(requestedBytes)
                     .usage(USAGE)
                     .sharingMode(VK10.VK_SHARING_MODE_EXCLUSIVE);
             LongBuffer bufferOutput = stack.callocLong(1);
@@ -462,6 +518,11 @@ public final class VulkanExternalBufferPrototype implements AutoCloseable {
         }
         releaseHandles();
         displayedGeneration = 0L;
+        displayedWidth = 0;
+        displayedHeight = 0;
+        pendingGeneration = 0L;
+        pendingWidth = 0;
+        pendingHeight = 0;
         nativeActive = false;
         copyCount = 0L;
         generationGaps = 0L;
@@ -485,15 +546,45 @@ public final class VulkanExternalBufferPrototype implements AutoCloseable {
         allocationBytes = 0L;
     }
 
+    private record Capacity(int width, int height, long logicalBytes) {
+        private static Capacity from(CyclesRenderSettings settings) {
+            int width = Math.max(
+                    1,
+                    (int) Math.floor(settings.renderWidth()
+                            * (settings.resolutionPercentage() / 100.0)));
+            int height = Math.max(
+                    1,
+                    (int) Math.floor(settings.renderHeight()
+                            * (settings.resolutionPercentage() / 100.0)));
+            long bytes = Math.multiplyExact(
+                    Math.multiplyExact((long) width, height),
+                    BYTES_PER_PIXEL);
+            return new Capacity(width, height, bytes);
+        }
+    }
+
     public record Telemetry(
             boolean requested,
             boolean allocated,
             boolean nativeBound,
+            int capacityWidth,
+            int capacityHeight,
             long logicalBytes,
             long allocationBytes,
             String state) {
         private static Telemetry inactive(String state) {
-            return new Telemetry(false, false, false, 0L, 0L, state);
+            return inactive(0, 0, 0L, state);
+        }
+
+        private static Telemetry inactive(
+                int capacityWidth,
+                int capacityHeight,
+                long logicalBytes,
+                String state) {
+            return new Telemetry(
+                    false, false, false,
+                    capacityWidth, capacityHeight,
+                    logicalBytes, 0L, state);
         }
     }
 
@@ -503,6 +594,8 @@ public final class VulkanExternalBufferPrototype implements AutoCloseable {
             long displayedGeneration,
             long copyCount,
             long generationGaps,
+            int displayedWidth,
+            int displayedHeight,
             long lastCopyMicros,
             long emaCopyMicros,
             long maxCopyMicros) {}

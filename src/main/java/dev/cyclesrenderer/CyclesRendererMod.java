@@ -153,7 +153,9 @@ public final class CyclesRendererMod {
             lastFrameDeliveryNanos = 0L;
             SCENE_MANAGER.reset();
             FRAME_PRESENTER.reset();
-            INTEROP_BUFFER.initialize(Minecraft.getInstance());
+            INTEROP_BUFFER.initialize(
+                    Minecraft.getInstance(),
+                    CyclesClientConfig.snapshot());
             SectionGeometryCollector.setEnabled(true);
             testFrameEnabled = true;
             LOGGER.info("Experimental renderer enabled; building the streamed Cycles scene");
@@ -508,8 +510,8 @@ public final class CyclesRendererMod {
                         "interop buffer=" + interopBuffer.state()
                                 + " allocated/bound=" + interopBuffer.allocated()
                                 + "/" + interopBuffer.nativeBound()
-                                + " size=" + VulkanExternalBufferPrototype.WIDTH
-                                + "x" + VulkanExternalBufferPrototype.HEIGHT
+                                + " capacity=" + interopBuffer.capacityWidth()
+                                + "x" + interopBuffer.capacityHeight()
                                 + " logical/alloc MiB="
                                 + oneDecimalMebibytes(interopBuffer.logicalBytes())
                                 + "/" + oneDecimalMebibytes(
@@ -535,6 +537,8 @@ public final class CyclesRendererMod {
                         minecraft.font,
                         "interop vk copy pending/display=" + interopCopy.pending()
                                 + "/" + interopCopy.displayedGeneration()
+                                + " size=" + interopCopy.displayedWidth()
+                                + "x" + interopCopy.displayedHeight()
                                 + " count=" + interopCopy.copyCount()
                                 + " gaps=" + interopCopy.generationGaps()
                                 + " enqueue us=" + interopCopy.lastCopyMicros()
