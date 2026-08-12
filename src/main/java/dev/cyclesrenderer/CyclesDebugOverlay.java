@@ -197,6 +197,27 @@ final class CyclesDebugOverlay {
                             diagnostics.emaRenderStartMicros(), diagnostics.maxRenderStartMicros()),
                     COLOR_TIMING);
             out.line(
+                    "scene queue=" + timing(diagnostics.lastSceneQueueMicros(),
+                            diagnostics.emaSceneQueueMicros(), diagnostics.maxSceneQueueMicros())
+                            + "  reset wait=" + timing(diagnostics.lastResetWaitMicros(),
+                            diagnostics.emaResetWaitMicros(), diagnostics.maxResetWaitMicros()),
+                    COLOR_TIMING);
+            out.line(
+                    "device update=" + timing(diagnostics.lastDeviceUpdateMicros(),
+                            diagnostics.emaDeviceUpdateMicros(), diagnostics.maxDeviceUpdateMicros())
+                            + "  geometry=" + timing(diagnostics.lastGeometryUpdateMicros(),
+                            diagnostics.emaGeometryUpdateMicros(),
+                            diagnostics.maxGeometryUpdateMicros()),
+                    COLOR_TIMING);
+            out.line(
+                    "BVH status=" + timing(diagnostics.lastBvhUpdateMicros(),
+                            diagnostics.emaBvhUpdateMicros(), diagnostics.maxBvhUpdateMicros())
+                            + "  first frame=" + timing(
+                            diagnostics.lastSceneFirstFrameMicros(),
+                            diagnostics.emaSceneFirstFrameMicros(),
+                            diagnostics.maxSceneFirstFrameMicros()),
+                    COLOR_TIMING);
+            out.line(
                     "native display=" + timing(diagnostics.lastConvertMicros(),
                             diagnostics.emaConvertMicros(), diagnostics.maxConvertMicros())
                             + "  native copy=" + timing(diagnostics.lastCopyMicros(),
@@ -395,14 +416,19 @@ final class CyclesDebugOverlay {
         String[] names = {
             "camera queue", "frame pull", "GPU upload", "mesh capture", "Java scene",
             "FFI upsert", "FFI commit", "Cycles commit", "Cycles delta",
-            "render start", "native display", "native copy"
+            "render start", "scene queue", "reset wait", "device update",
+            "geometry update", "BVH status", "scene first frame",
+            "native display", "native copy"
         };
         long[] micros = {
             runtime.emaCameraCallMicros(), runtime.emaBridgeCallMicros(),
             presentation.emaUploadMicros(), capture.emaCaptureMicros(),
             scene.emaUpdateMicros(), scene.emaUpsertMicros(), scene.emaCommitMicros(),
             diagnostics.emaSceneCommitMicros(), diagnostics.emaSceneDeltaMicros(),
-            diagnostics.emaRenderStartMicros(), diagnostics.emaConvertMicros(),
+            diagnostics.emaRenderStartMicros(), diagnostics.emaSceneQueueMicros(),
+            diagnostics.emaResetWaitMicros(), diagnostics.emaDeviceUpdateMicros(),
+            diagnostics.emaGeometryUpdateMicros(), diagnostics.emaBvhUpdateMicros(),
+            diagnostics.emaSceneFirstFrameMicros(), diagnostics.emaConvertMicros(),
             diagnostics.emaCopyMicros()
         };
         int largest = 0;

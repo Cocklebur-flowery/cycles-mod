@@ -292,21 +292,32 @@ bool run_scene_update_integration_test() {
     expanded.vertex_count = static_cast<std::uint32_t>(expanded_vertices.size());
     expanded.triangle_count = static_cast<std::uint32_t>(expanded_triangles.size());
 
-    if (!require_ok(
-            cycles_bridge_upsert_section(
-                renderer, &expanded, expanded_vertices.data(), expanded_triangles.data()),
-            "rapid update")
-        || !require_ok(cycles_bridge_commit_scene(renderer), "rapid update commit")
-        || !require_ok(
-            cycles_bridge_remove_section(renderer, section.section_id), "rapid removal")
-        || !require_ok(cycles_bridge_commit_scene(renderer), "rapid removal commit")
-        || !require_ok(
-            cycles_bridge_upsert_section(
-                renderer, &expanded, expanded_vertices.data(), expanded_triangles.data()),
-            "rapid final update")
-        || !require_ok(cycles_bridge_commit_scene(renderer), "rapid final commit")
-        || !wait_for_changed_frame(
-            renderer, camera, frame, pixels, initial_checksum, 1U, 4U)) {
+    constexpr std::uint64_t kBurstCommitCount = 32U;
+    for (std::uint64_t index = 0; index < kBurstCommitCount; ++index) {
+        const bool use_expanded = index % 2U == 0U
+            || index + 1U == kBurstCommitCount;
+        const CyclesBridgeSection& next_section = use_expanded ? expanded : section;
+        const CyclesBridgeVertex* next_vertices = use_expanded
+            ? expanded_vertices.data() : vertices.data();
+        const CyclesBridgeTriangle* next_triangles = use_expanded
+            ? expanded_triangles.data() : triangles.data();
+        if (!require_ok(
+                cycles_bridge_upsert_section(
+                    renderer, &next_section, next_vertices, next_triangles),
+                "burst update")
+            || !require_ok(cycles_bridge_commit_scene(renderer), "burst update commit")) {
+            cycles_bridge_destroy_renderer(renderer);
+            return false;
+        }
+    }
+    if (!wait_for_changed_frame(
+            renderer,
+            camera,
+            frame,
+            pixels,
+            initial_checksum,
+            1U,
+            1U + kBurstCommitCount)) {
         cycles_bridge_destroy_renderer(renderer);
         return false;
     }
@@ -316,7 +327,13 @@ bool run_scene_update_integration_test() {
             cycles_bridge_remove_section(renderer, section.section_id), "final removal")
         && require_ok(cycles_bridge_commit_scene(renderer), "final removal commit")
         && wait_for_changed_frame(
-            renderer, camera, frame, pixels, expanded_checksum, 0U, 5U);
+            renderer,
+            camera,
+            frame,
+            pixels,
+            expanded_checksum,
+            0U,
+            2U + kBurstCommitCount);
     cycles_bridge_destroy_renderer(renderer);
     return removed;
 }

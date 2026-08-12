@@ -3029,14 +3029,15 @@ class CyclesEngine::Impl final {
         ccl::Session& session,
         const SceneRequest& scene_request,
         const SceneUpdate& scene_update,
-        SceneRuntime& runtime) {
+        SceneRuntime& runtime,
+        ccl::thread_scoped_lock& scene_lock) {
+        if (!scene_lock.owns_lock()) {
+            throw std::logic_error("scene update requires the Cycles scene lock");
+        }
         const auto delta_start = std::chrono::steady_clock::now();
         set_state("scene-updating", {});
-        {
-            const ccl::thread_scoped_lock scene_lock(session.scene->mutex);
-            apply_scene_delta(
-                session.scene.get(), scene_request, scene_update, runtime);
-        }
+        apply_scene_delta(
+            session.scene.get(), scene_request, scene_update, runtime);
         record_scene_delta(elapsed_micros(
             delta_start, std::chrono::steady_clock::now()));
         set_state("scene-ready", {});
@@ -3050,7 +3051,8 @@ class CyclesEngine::Impl final {
         const CameraRequest& camera_request,
         const CyclesBridgeRenderSettings& settings,
         const SceneUpdate* scene_update = nullptr,
-        SceneRuntime* scene_runtime = nullptr) {
+        SceneRuntime* scene_runtime = nullptr,
+        ccl::thread_scoped_lock* acquired_scene_lock = nullptr) {
         ccl::BufferParams buffer;
         DenoiserSchedule denoiser_schedule{};
         ccl::SessionParams render_params = params;
@@ -3062,8 +3064,15 @@ class CyclesEngine::Impl final {
         }
         const auto delta_start = std::chrono::steady_clock::now();
         auto start_time = std::chrono::steady_clock::now();
+        ccl::thread_scoped_lock local_scene_lock(
+            session.scene->mutex, std::defer_lock);
+        if (acquired_scene_lock == nullptr) {
+            local_scene_lock.lock();
+            acquired_scene_lock = &local_scene_lock;
+        } else if (!acquired_scene_lock->owns_lock()) {
+            throw std::logic_error("render start received an unlocked Cycles scene lock");
+        }
         {
-            const ccl::thread_scoped_lock scene_lock(session.scene->mutex);
             if (apply_delta) {
                 apply_scene_delta(
                     session.scene.get(), scene_request, *scene_update, *scene_runtime);
@@ -3360,6 +3369,30 @@ class CyclesEngine::Impl final {
 
                 if (requested_scene
                     && requested_scene->revision != active_scene_revision) {
+                    ccl::thread_scoped_lock scene_lock;
+                    const bool initially_incremental = session
+                        && active_scene.resources
+                        && scene_runtime.resources == requested_scene->resources;
+                    if (initially_incremental) {
+                        scene_lock = ccl::thread_scoped_lock(
+                            session->scene->mutex, std::defer_lock);
+                        if (!scene_lock.try_lock()) {
+                            set_state("scene-queued", {});
+                            continue;
+                        }
+                    }
+                    if (initially_incremental) {
+                        std::lock_guard request_lock(request_mutex_);
+                        if (scene_reset_revision_ != requested_reset_revision) {
+                            continue;
+                        }
+                        requested_scene = requested_scene_;
+                        requested_camera = requested_camera_;
+                    }
+                    if (!requested_scene
+                        || requested_scene->revision == active_scene_revision) {
+                        continue;
+                    }
                     scene_timing_.begin_scene_update(requested_scene->revision);
                     if (!pass_only_settings_update) {
                         frames_.invalidate_pass_cache();
@@ -3367,6 +3400,9 @@ class CyclesEngine::Impl final {
                     const bool resources_changed = !session
                         || !active_scene.resources
                         || scene_runtime.resources != requested_scene->resources;
+                    if (resources_changed && scene_lock.owns_lock()) {
+                        scene_lock.unlock();
+                    }
                     cyclesrenderer::scene::apply_scene_update(
                         active_scene, *requested_scene);
                     bool scene_render_started = false;
@@ -3383,6 +3419,10 @@ class CyclesEngine::Impl final {
                         }
                         render_in_flight = false;
                     } else if (requested_camera) {
+                        if (!scene_lock.owns_lock()) {
+                            throw std::logic_error(
+                                "incremental render started without the Cycles scene lock");
+                        }
                         render_camera_revision = requested_camera->revision;
                         start_render(
                             *session,
@@ -3392,13 +3432,25 @@ class CyclesEngine::Impl final {
                             *requested_camera,
                             active_settings,
                             requested_scene.get(),
-                            &scene_runtime);
+                            &scene_runtime,
+                            &scene_lock);
                         active_camera_revision = requested_camera->revision;
                         render_in_flight = true;
                         scene_render_started = true;
                     } else {
+                        if (!scene_lock.owns_lock()) {
+                            throw std::logic_error(
+                                "incremental update started without the Cycles scene lock");
+                        }
                         update_session_scene(
-                            *session, active_scene, *requested_scene, scene_runtime);
+                            *session,
+                            active_scene,
+                            *requested_scene,
+                            scene_runtime,
+                            scene_lock);
+                    }
+                    if (scene_lock.owns_lock()) {
+                        scene_lock.unlock();
                     }
                     active_scene_revision = requested_scene->revision;
                     {

@@ -107,6 +107,9 @@ F10 叠加层采用“当前值 + 最近窗口统计”，不把目标值伪装�
 | P16 | `feat: synchronize vulkan interop ring` | 三槽生命周期与 CUDA/Vulkan 正式同步 | 待开始 |
 | P17 | `feat: prototype hdr swapchain` | Windows HDR surface 与输出 shader 原型 | 待开始 |
 | RT-P1 | `perf: publish incremental native scene updates` | Native commit 合并增量、工作线程确认、完整重建恢复 | 已完成自动验证；待游戏内 F10 对比 |
+| RT-P2 | `perf: trace cycles scene update phases` | Scene queue/reset/device/geometry/BVH/首帧分项遥测 | 已完成自动验证；待游戏内对比 |
+| RT-P3 | `perf: prioritize realtime scene updates` | 场景变更不再等待旧帧发布后才进入 Cycles | 已完成自动验证；待游戏内对比 |
+| RT-P4 | `perf: coalesce locked scene updates` | Scene 锁忙时保留最新 revision，避免串行追赶旧更新 | 已完成实现；待自动验证与游戏内对比 |
 
 ## 5. 稳定契约和保持不动的范围
 
@@ -257,6 +260,15 @@ P1 至 P4 完成后进行一次 1080p 游戏人工里程碑：观察实际 sampl
 - 计时状态封装在独立 `cycles_scene_timing.h`，引擎只负责 revision 生命周期、reset 边界与首帧完成通知；没有改变 Mesh 格式、Section 粒度、更新策略、Vulkan interop 或采样设置。
 - F10 增加四行并把新阶段加入 `largest EMA stage`。游戏内先分别测试单方块破坏/放置、连续跑图两类负载：若 `reset wait` 接近卡顿值，下一阶段优化取消/重启边界；若 `device/geometry/BVH` 接近卡顿值，下一阶段优化设备几何与加速结构更新；若这些 CPU wall-clock 都低但 Minecraft 仍掉帧，则转查 OptiX 与 Vulkan 的同 GPU 队列竞争。
 - 自动验证使用独立 Native 输出目录完成完整链接，`cyclesrenderer_scene_update` 与 Gradle `compileJava` 通过。完整 smoke 曾在实现过程中通过；最终实现后的两次复跑均被既有 OptiX/OIDN 异步帧 variant 断言提前阻断，未修改不属于 RT-P2 的降噪逻辑。常规 `buildNative` 的默认 DLL 输出被运行中的客户端占用，因此未覆盖正在使用的 DLL。
+
+### RT-P4：Scene 锁忙时 latest-only 合并
+
+- 游戏内遥测确认长卡顿不在 Java、FFI commit 或 Vulkan copy：`Cycles delta` 达到约 0.6–1.3 秒，而 `render start` 仅约 2.4 毫秒。该旧计时从获取 `scene->mutex` 前开始，因此主要混入了 Cycles Session 正在执行设备几何/BVH 更新时的锁等待。
+- Cycles 工作线程不再携带旧 `SceneUpdate` 阻塞等待 `scene->mutex`。锁忙时保持请求为 queued，并在 16 毫秒工作循环后重新读取 accumulator 已合并的最新 revision；成功取得锁后再次刷新 Scene/Camera 请求，才更新工作线程快照并开始 revision 计时。
+- 只有真正应用成功的 update 才调用 `acknowledge`。RT-P1 的 epoch、mutation sequence 和 full replacement 语义保持不变；被跳过的旧 revision 不会误清除更新期间到达的新 mutation。
+- `Cycles delta` 现在只测量持锁后的实际 delta 应用，等待锁的时间归入 `scene queue`。当前 F10 恢复显示 RT-P2 的 queue/reset/device/geometry/BVH/first-frame 分项，并将它们重新纳入 largest EMA 判断。
+- 此阶段只压缩连续区块更新形成的 `N × 单次更新` 串行冻结，不能消除当前一次 Cycles 几何/BVH 更新本身的成本。单次更新耗时将在后续阶段根据恢复后的 device/geometry/BVH 数据继续优化。
+- Public ABI、Scene/Section/材质布局、Vulkan interop、PBR 数据和固定 Cycles 5.2 源码均未改变。Native Scene integration 将同一 Section 的快速提交扩展为 32 次交替更新，并验证最终 latest 状态和删除仍能产生正确帧。
 
 ### RT-P3：场景更新优先调度
 
