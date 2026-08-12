@@ -39,6 +39,7 @@ public record CyclesRenderSettings(
         PixelFilter pixelFilter,
         float filterWidth,
         int seed,
+        SamplingPattern samplingPattern,
         DenoiserMode denoiserMode,
         int denoiserStartSample,
         DenoiserInput denoiserInput,
@@ -122,6 +123,30 @@ public record CyclesRenderSettings(
         @Override
         public String translationGroup() {
             return "pixel_filter";
+        }
+    }
+
+    public enum SamplingPattern implements NativeEnum, NamedEnum {
+        SOBOL_BURLEY(0),
+        TABULATED_SOBOL(1),
+        BLUE_NOISE_PURE(2),
+        BLUE_NOISE_FIRST(3),
+        BLUE_NOISE_ROUND(4);
+
+        private final int nativeId;
+
+        SamplingPattern(int nativeId) {
+            this.nativeId = nativeId;
+        }
+
+        @Override
+        public int nativeId() {
+            return nativeId;
+        }
+
+        @Override
+        public String translationGroup() {
+            return "sampling_pattern";
         }
     }
 

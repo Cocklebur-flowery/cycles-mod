@@ -439,6 +439,8 @@ public final class CyclesRendererMod {
             graphics.text(
                     minecraft.font,
                     "sampling=" + diagnostics.samplingStateName()
+                            + " pattern=" + settings.samplingPattern().name()
+                            + "/" + diagnostics.samplingPatternName()
                             + "  rate=" + Math.round(diagnostics.sampleRate() * 10.0F) / 10.0F
                             + " sample/s"
                             + "  settle=" + diagnostics.settlingRemainingMillis() + "ms"

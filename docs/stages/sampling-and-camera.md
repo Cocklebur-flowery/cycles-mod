@@ -1,6 +1,6 @@
 # Cycles 采样模式与物理相机（P12）
 
-状态：P12a 已完成；P12b Native 核心已通过自动验证，Java/F9/F10 接入待开始
+状态：P12a/P12b 已完成自动验证；P12c 待开始
 目标平台：Blender Cycles 5.2 / Minecraft 26.2 相机 / OptiX
 
 ## 1. 目标与保持不变的默认行为
@@ -77,3 +77,10 @@ Native smoke 依次覆盖：
 6. 只改相机参数增加 Camera revision，不增加 Scene revision/Section 上传计数。
 
 游戏内人工验收使用同一固定位置截图，比较原版、默认 Cycles、物理镜头和景深四种状态；同时观察 F10 actual sample 是否在相机稳定后继续累计。
+
+## 7. P12b 实施记录
+
+- ABI v17 将 208 字节设置结构的首个保留槽定义为 `sampling_pattern`，其余布局和总大小不变；诊断结构只在尾部追加 Native 实际模式。
+- F9 可选择五种 Cycles 5.2 原生模式并显示 seed；F10 显示 `configured/native`，用于发现配置未生效或枚举映射错误。
+- 默认值为 `BLUE_NOISE_FIRST`。模式/seed 变化只触发 accumulation reset；Scene、Section、Pass ID 和 OCIO 资源契约保持不变。
+- Native smoke 遍历 ID `0..4`、拒绝 ID `5`，并在实际 OptiX 出帧后断言 Native 诊断仍为 `BLUE_NOISE_FIRST`。

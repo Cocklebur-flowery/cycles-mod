@@ -125,6 +125,10 @@ public final class CyclesSettingsScreen extends Screen {
         lines.add(Component.translatable(
                 "screen.cyclesrenderer.settings.color_pipeline",
                 settings.viewTransform().getTranslatedName()));
+        lines.add(Component.translatable(
+                "screen.cyclesrenderer.settings.sampling_pattern",
+                settings.samplingPattern().getTranslatedName(),
+                settings.seed()));
         if (!NativeBridge.isReady()) {
             lines.add(Component.translatable("screen.cyclesrenderer.settings.native_not_loaded"));
             return lines;

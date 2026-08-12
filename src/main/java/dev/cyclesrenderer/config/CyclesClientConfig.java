@@ -27,6 +27,7 @@ public final class CyclesClientConfig {
     private static final ModConfigSpec.DoubleValue NOISE_THRESHOLD;
     private static final ModConfigSpec.IntValue INTERACTIVE_TIME_LIMIT;
     private static final ModConfigSpec.IntValue STILL_TIME_LIMIT;
+    private static final ModConfigSpec.EnumValue<CyclesRenderSettings.SamplingPattern> SAMPLING_PATTERN;
     private static final ModConfigSpec.IntValue MINIMUM_BOUNCE;
     private static final ModConfigSpec.IntValue MAXIMUM_BOUNCE;
     private static final ModConfigSpec.IntValue DIFFUSE_BOUNCES;
@@ -108,6 +109,9 @@ public final class CyclesClientConfig {
         STILL_TIME_LIMIT = builder.translation("config.cyclesrenderer.sampling.stillTimeLimit")
                 .comment("Milliseconds; zero disables the limit.")
                 .defineInRange("stillTimeLimitMillis", 0, 0, 600000);
+        SAMPLING_PATTERN = builder.translation("config.cyclesrenderer.sampling.pattern")
+                .comment("Native Cycles 5.2 sampling sequence; blue-noise scrambling is performed by Cycles.")
+                .defineEnum("pattern", CyclesRenderSettings.SamplingPattern.BLUE_NOISE_FIRST);
         builder.pop();
 
         builder.push("lightPaths");
@@ -200,6 +204,7 @@ public final class CyclesClientConfig {
                 CLAMP_INDIRECT.get().floatValue(), FILTER_GLOSSY.get().floatValue(),
                 REFLECTIVE_CAUSTICS.get(), REFRACTIVE_CAUSTICS.get(),
                 PIXEL_FILTER.get(), FILTER_WIDTH.get().floatValue(), SEED.get(),
+                SAMPLING_PATTERN.get(),
                 DENOISER_MODE.get(), DENOISER_START_SAMPLE.get(), DENOISER_INPUT.get(),
                 DENOISER_PREFILTER.get(), DENOISER_QUALITY.get(), DENOISER_USE_GPU.get(),
                 EXPOSURE_EV.get().floatValue(), GAMMA.get().floatValue(), VIEW_TRANSFORM.get(),

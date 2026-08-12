@@ -23,7 +23,7 @@ import static java.lang.foreign.ValueLayout.JAVA_INT;
 import static java.lang.foreign.ValueLayout.JAVA_LONG;
 
 public final class NativeBridge {
-    public static final int ABI_VERSION = 16;
+    public static final int ABI_VERSION = 17;
     public static final int PIXEL_FORMAT_RGBA16_FLOAT = 2;
     public static final int PIXEL_FORMAT_RGBA32_FLOAT = 3;
 
@@ -160,7 +160,8 @@ public final class NativeBridge {
             JAVA_INT.withName("dynamic_resolution"),
             JAVA_INT.withName("interactive_resolution_percentage"),
             JAVA_INT.withName("pass_cache_megabytes"),
-            MemoryLayout.sequenceLayout(6, JAVA_INT).withName("reserved"));
+            JAVA_INT.withName("sampling_pattern"),
+            MemoryLayout.sequenceLayout(5, JAVA_INT).withName("reserved"));
     private static final MemoryLayout PASS_DESCRIPTOR_LAYOUT = MemoryLayout.structLayout(
             JAVA_INT.withName("struct_size"),
             JAVA_INT.withName("struct_version"),
@@ -268,7 +269,9 @@ public final class NativeBridge {
             JAVA_INT.withName("effective_denoiser_start_sample"),
             JAVA_INT.withName("denoiser_schedule_reason"),
             JAVA_INT.withName("denoiser_schedule_run_count"),
-            JAVA_INT.withName("denoiser_schedule_skip_count"));
+            JAVA_INT.withName("denoiser_schedule_skip_count"),
+            JAVA_INT.withName("sampling_pattern"),
+            JAVA_INT.withName("reserved"));
     private static final MemoryLayout VERTEX_LAYOUT = MemoryLayout.structLayout(
             JAVA_FLOAT.withName("position_x"),
             JAVA_FLOAT.withName("position_y"),
@@ -316,7 +319,7 @@ public final class NativeBridge {
                 || PASS_DESCRIPTOR_LAYOUT.byteSize() != 64L
                 || CAPABILITIES_LAYOUT.byteSize() != 64L
                 || COLOR_LUT_DESCRIPTOR_LAYOUT.byteSize() != 64L
-                || DIAGNOSTICS_LAYOUT.byteSize() != 328L
+                || DIAGNOSTICS_LAYOUT.byteSize() != 336L
                 || VERTEX_LAYOUT.byteSize() != 40L
                 || TRIANGLE_LAYOUT.byteSize() != 16L
                 || MATERIAL_LAYOUT.byteSize() != 32L
@@ -885,6 +888,7 @@ public final class NativeBridge {
             settingsSegment.set(
                     JAVA_INT, 176L, settings.interactiveResolutionPercentage());
             settingsSegment.set(JAVA_INT, 180L, settings.passCacheMegabytes());
+            settingsSegment.set(JAVA_INT, 184L, settings.samplingPattern().nativeId());
             checkRendererStatus(
                     (int) applySettings.invokeExact(renderer, settingsSegment),
                     "settings update");
@@ -1065,7 +1069,8 @@ public final class NativeBridge {
                     diagnosticsSegment.get(JAVA_INT, 312L),
                     diagnosticsSegment.get(JAVA_INT, 316L),
                     diagnosticsSegment.get(JAVA_INT, 320L),
-                    diagnosticsSegment.get(JAVA_INT, 324L));
+                    diagnosticsSegment.get(JAVA_INT, 324L),
+                    diagnosticsSegment.get(JAVA_INT, 328L));
         }
 
         private RenderedFrame renderFrame(
@@ -1624,7 +1629,8 @@ public final class NativeBridge {
             int effectiveDenoiserStartSample,
             int denoiserScheduleReason,
             int denoiserScheduleRunCount,
-            int denoiserScheduleSkipCount) {
+            int denoiserScheduleSkipCount,
+            int samplingPattern) {
         public String stateName() {
             return switch (stateCode) {
                 case 1 -> "scene-staging";
@@ -1688,6 +1694,17 @@ public final class NativeBridge {
                 case 2 -> "settling";
                 case 3 -> "still";
                 default -> "idle";
+            };
+        }
+
+        public String samplingPatternName() {
+            return switch (samplingPattern) {
+                case 0 -> "SOBOL_BURLEY";
+                case 1 -> "TABULATED_SOBOL";
+                case 2 -> "BLUE_NOISE_PURE";
+                case 3 -> "BLUE_NOISE_FIRST";
+                case 4 -> "BLUE_NOISE_ROUND";
+                default -> "UNKNOWN(" + samplingPattern + ")";
             };
         }
 
