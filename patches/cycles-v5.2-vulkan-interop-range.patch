@@ -1,0 +1,126 @@
+diff --git a/src/device/cuda/graphics_interop.cpp b/src/device/cuda/graphics_interop.cpp
+index 86712d9..b973d80 100644
+--- a/src/device/cuda/graphics_interop.cpp
++++ b/src/device/cuda/graphics_interop.cpp
+@@ -40,6 +40,8 @@ void CUDADeviceGraphicsInterop::set_buffer(GraphicsInteropBuffer &interop_buffer
+   }
+ 
+   need_zero_ |= interop_buffer.take_zero();
++  buffer_offset_ = interop_buffer.get_offset();
++  buffer_range_size_ = interop_buffer.get_range_size();
+ 
+   if (!interop_buffer.has_new_handle()) {
+     return;
+@@ -130,11 +132,12 @@ device_ptr CUDADeviceGraphicsInterop::map()
+   }
+   else {
+     /* Vulkan buffer is always mapped. */
+-    cu_buffer = cu_external_memory_ptr_;
++    cu_buffer = cu_external_memory_ptr_ + buffer_offset_;
+   }
+ 
+   if (cu_buffer && need_zero_) {
+-    cuda_device_assert(device_, cuMemsetD8Async(cu_buffer, 0, buffer_size_, queue_->stream()));
++    cuda_device_assert(
++        device_, cuMemsetD8Async(cu_buffer, 0, buffer_range_size_, queue_->stream()));
+ 
+     need_zero_ = false;
+   }
+@@ -177,6 +180,8 @@ void CUDADeviceGraphicsInterop::free()
+ #  endif
+ 
+   buffer_size_ = 0;
++  buffer_offset_ = 0;
++  buffer_range_size_ = 0;
+ 
+   need_zero_ = false;
+ }
+diff --git a/src/device/cuda/graphics_interop.h b/src/device/cuda/graphics_interop.h
+index db60f61..1ccdb76 100644
+--- a/src/device/cuda/graphics_interop.h
++++ b/src/device/cuda/graphics_interop.h
+@@ -41,6 +41,10 @@ class CUDADeviceGraphicsInterop : public DeviceGraphicsInterop {
+ 
+   /* Size of the buffer in bytes. */
+   size_t buffer_size_ = 0;
++  /* Byte offset used by the current display update. */
++  size_t buffer_offset_ = 0;
++  /* Byte size used by the current display update. */
++  size_t buffer_range_size_ = 0;
+ 
+   /* The destination was requested to be cleared. */
+   bool need_zero_ = false;
+diff --git a/src/session/display_driver.cpp b/src/session/display_driver.cpp
+index 8340fe7..3827509 100644
+--- a/src/session/display_driver.cpp
++++ b/src/session/display_driver.cpp
+@@ -25,6 +25,8 @@ void GraphicsInteropBuffer::assign(GraphicsInteropDevice::Type type, int64_t han
+   handle_ = handle;
+   own_handle_ = true;
+   size_ = size;
++  offset_ = 0;
++  range_size_ = size;
+ }
+ 
+ bool GraphicsInteropBuffer::is_empty() const
+@@ -50,6 +52,8 @@ void GraphicsInteropBuffer::clear()
+   type_ = GraphicsInteropDevice::NONE;
+   handle_ = 0;
+   size_ = 0;
++  offset_ = 0;
++  range_size_ = 0;
+   need_zero_ = false;
+   own_handle_ = false;
+ }
+@@ -64,6 +68,23 @@ size_t GraphicsInteropBuffer::get_size() const
+   return size_;
+ }
+ 
++void GraphicsInteropBuffer::set_range(const size_t offset, const size_t size)
++{
++  assert(offset <= size_ && size <= size_ - offset);
++  offset_ = offset;
++  range_size_ = size;
++}
++
++size_t GraphicsInteropBuffer::get_offset() const
++{
++  return offset_;
++}
++
++size_t GraphicsInteropBuffer::get_range_size() const
++{
++  return range_size_;
++}
++
+ bool GraphicsInteropBuffer::has_new_handle() const
+ {
+   return own_handle_;
+diff --git a/src/session/display_driver.h b/src/session/display_driver.h
+index da7f7f5..c3844a1 100644
+--- a/src/session/display_driver.h
++++ b/src/session/display_driver.h
+@@ -59,6 +59,12 @@ class GraphicsInteropBuffer {
+   GraphicsInteropDevice::Type get_type() const;
+   /* Get size of buffer. */
+   size_t get_size() const;
++  /* Set byte range used for the current display update. */
++  void set_range(size_t offset, size_t size);
++  /* Get byte offset used for the current display update. */
++  size_t get_offset() const;
++  /* Get byte size used for the current display update. */
++  size_t get_range_size() const;
+ 
+   /* Is there a new handle to take ownership of? */
+   bool has_new_handle() const;
+@@ -80,6 +86,10 @@ class GraphicsInteropBuffer {
+ 
+   /* Actual size of the memory, which must be `>= width * height * sizeof(half4)`. */
+   size_t size_ = 0;
++  /* Byte offset of the current frame inside the shared allocation. */
++  size_t offset_ = 0;
++  /* Byte size of the current frame slot. */
++  size_t range_size_ = 0;
+ 
+   /* Clear the entire buffer before doing partial write to it. */
+   bool need_zero_ = false;

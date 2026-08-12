@@ -26,7 +26,8 @@ $blenderSource = Join-Path $dependencyRoot 'blender'
 $colorManagementSource = Join-Path $blenderSource 'release\datafiles\colormanagement'
 $colorManagementInstall = Join-Path $cyclesInstall 'color\ocio'
 $cyclesPatches = @(
-    (Join-Path $projectRoot 'patches\cycles-v5.2-vulkan-interop-sync.patch')
+    (Join-Path $projectRoot 'patches\cycles-v5.2-vulkan-interop-sync.patch'),
+    (Join-Path $projectRoot 'patches\cycles-v5.2-vulkan-interop-range.patch')
 )
 $requiredLibraryDirectories = @(
     'OpenImageIO',
