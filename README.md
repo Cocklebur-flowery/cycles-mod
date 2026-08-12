@@ -6,7 +6,7 @@
 
 ## 当前阶段
 
-- Cycles 5.2 已通过 C ABI v23 接入 Java Foreign Function & Memory API；默认路径保留 RGBA16F FrameStore/FFM 回退，实验性 P15 路径让 OptiX/CUDA 直接写入 Vulkan 外部 buffer，并以单缓冲 acquire/release 握手复制到 Minecraft RGBA16F 图像。
+- Cycles 5.2 已通过 C ABI v25 接入 Java Foreign Function & Memory API；默认路径保留 RGBA16F FrameStore/FFM 回退，P16 路径让 OptiX/CUDA 直接写入三槽 Vulkan 外部 buffer，并用两条 Win32 timeline semaphore 与 Minecraft Vulkan 复制建立 GPU 端握手。
 - 近景不再扫描固定 `64 × 32 × 64` 方块盒，而是直接复制 Minecraft `SectionCompiler` 生成的 16³ Section 网格。
 - 活跃 Section 范围跟随游戏的“有效渲染距离”；水平判定复用原版区块距离规则，垂直范围复用原版渲染器的 Section 范围和世界高度边界。
 - 方块放置/破坏、光照更新、区块装卸和视距移动触发原版 Section 重编译后，会以稳定 Section ID 增量替换或移除 Native 几何。
@@ -25,7 +25,7 @@
 
 当前 Native DisplayDriver、类型化 Pass cache 与 Minecraft 上传纹理均保持 scene-linear RGBA16F。`Standard` 和调试用 `Raw` 已生效，EV/Gamma 在 GPU 显示 shader 中应用；`AgX` 与 `Khronos PBR Neutral` 的配置 ID 已预留，但在 Blender OCIO 配置/LUT 正式部署前按 `Standard` 显示，不能视为 Blender 色彩管理已经完成。暂未实现正确的玻璃/水折射材质、方块实体、实体、天空系统、动态光源、LabPBR 和跨平台打包。
 
-P16 开始会在驱动支持时默认为 Minecraft Vulkan 设备请求 Win32 外部内存与 semaphore 扩展。故障排查时可在启动前加入 JVM 参数 `-Dcyclesrenderer.experimentalVulkanInterop=false`，或设置环境变量 `CYCLESRENDERER_VULKAN_INTEROP=false` 来显式关闭；该选择必须在创建 Vulkan 设备前确定，因此修改后需要重启客户端。当前显示数据面仍是 P15 的固定 `480×270 RGBA16F` 单缓冲原型；真实分辨率、三槽并行和跨 API external semaphore 属于后续 P16 子阶段。
+P16 会在驱动支持时默认为 Minecraft Vulkan 设备请求 Win32 external memory/semaphore 扩展。故障排查时可在启动前加入 JVM 参数 `-Dcyclesrenderer.experimentalVulkanInterop=false`，或设置环境变量 `CYCLESRENDERER_VULKAN_INTEROP=false` 来显式关闭；该选择必须在创建 Vulkan 设备前确定，因此修改后需要重启客户端。共享分配容量跟随 F9 输出设置，内部由三个等距 RGBA16F 槽组成；CUDA 与 Vulkan 分别通过 ready/release timeline semaphore 等待对方，不再依赖逐帧 CUDA 主机同步或 Vulkan fence 等待来保证像素可见性。
 
 普通 Section 修改已经下沉到现有 Cycles Scene；但几何规模变化以及 Section 增删仍会让 Cycles 更新设备几何和加速结构，不能视为零成本局部 BVH 更新。共享图集、场景原点或设备变化仍会重建 Session。
 
@@ -96,7 +96,7 @@ run-client.cmd runClient
 
 `buildNative` 会构建 native DLL 和冒烟程序，并把 `.deps/cycles-install` 中的通用运行时 DLL、OIDN 主库/core/CPU/CUDA 插件与 `lib/kernel_*.zst` 自动部署到 `build/native/bin/`。不需要手工复制 JAR、DLL 或 GPU 内核；面向 NVIDIA 的构建不会部署 OIDN HIP/SYCL 插件。
 
-`runNativeSmoke` 会构造一个带 UV、彩色纹理与 Alpha Clip 的小型网格场景，验证 ABI v23 的 RGBA16F DisplayDriver、CPU 帧租约、Vulkan interop 描述/所有权状态、独立相机更新、能力/诊断、实际/目标 sample、Interactive/Settling/Still、动态分辨率尺寸跃迁、全部 7 个 Pass descriptor/按需注册、Raw/Denoised Pass cache、OptiX 与 OIDN 各自的 Interactive Raw/Still Denoised 调度，以及 Section 创建、修改和删除，然后输出实际后端、设备、分辨率和帧校验和。真正的 CUDA/Vulkan 外部内存复制仍需在 Minecraft 中实机验收。
+`runNativeSmoke` 会构造一个带 UV、彩色纹理与 Alpha Clip 的小型网格场景，验证 ABI v25 的 RGBA16F DisplayDriver、CPU 帧租约、三槽 Vulkan interop 描述与三个 Win32 HANDLE 的所有权状态、独立相机更新、能力/诊断、实际/目标 sample、Interactive/Settling/Still、动态分辨率尺寸跃迁、全部 7 个 Pass descriptor/按需注册、Raw/Denoised Pass cache、OptiX 与 OIDN 各自的 Interactive Raw/Still Denoised 调度，以及 Section 创建、修改和删除，然后输出实际后端、设备、分辨率和帧校验和。真正的 CUDA/Vulkan timeline wait/signal 与图像复制仍需在 Minecraft 中实机验收。
 
 `runClient` 只会为启动出的 Minecraft 进程把 `build/native/bin/` 加入 `PATH`，使 Windows 能找到 Cycles 的二级 DLL 依赖；它不会修改系统或用户环境变量。修改 native 运行时文件后必须重新启动客户端。
 
@@ -107,7 +107,7 @@ Minecraft SectionCompiler（16³ Section、流体、NeoForge 追加几何）
   -> SectionCompilerMixin 在 MeshData 关闭前复制 CPU 顶点
   -> SectionGeometryCollector（按 Section ID 合并最新重编译结果）
   -> SectionSceneManager（原版视距、装卸、资源代次、批量提交）
-  -> NativeBridge（ABI v23：Section 流送 + RGBA16F DisplayDriver + CPU 帧租约/实验性 Vulkan interop + Pass cache/registry + 降噪调度）
+  -> NativeBridge（ABI v25：Section 流送 + RGBA16F DisplayDriver + CPU 帧租约/三槽 Vulkan timeline interop + Pass cache/registry + 降噪调度）
   -> CyclesEngine 后台场景请求
   -> 现有 Cycles Session 内按 Section ID 新建、原地更新或删除 Mesh/Object
   -> 共享图集与 Opaque/Cutout/Blend 材质
@@ -148,7 +148,7 @@ DH Provider 代码仍隔离保留，但本阶段不再把其低模高度场合�
 
 ## ABI 与运行时约束
 
-ABI v23 保留旧的整场景入口、v5 Section 布局和 v6 设置/能力字段；`CyclesBridgeRenderSettings` 固定 232 字节、`CyclesBridgeCapabilities` 固定 64 字节、`CyclesBridgePassDescriptor` 固定 64 字节。v7-v15 依次加入实际采样、帧/场景遥测、异步相机、RGBA16F 帧租约、Pass cache/registry 与降噪调度；v16-v19 加入 OCIO、采样模式和物理相机；v20 加入 CUDA UUID，v21-v22 加入 Vulkan HANDLE 与 Cycles DisplayDriver interop，v23 加入 interop frame acquire/release。CPU 租约持有期间对应槽位不会被 Cycles 覆写；interop 帧在 Vulkan fence 完成前也不会被 CUDA 重写。Java 与 DLL 的 ABI 版本不一致时会在启用前拒绝运行。
+ABI v25 保留旧的整场景入口、v5 Section 布局和 v6 设置/能力字段；`CyclesBridgeRenderSettings` 固定 232 字节、`CyclesBridgeCapabilities` 固定 64 字节、`CyclesBridgePassDescriptor` 固定 64 字节。v7-v15 依次加入实际采样、帧/场景遥测、异步相机、RGBA16F 帧租约、Pass cache/registry 与降噪调度；v16-v19 加入 OCIO、采样模式和物理相机；v20 加入 CUDA UUID，v21-v22 加入 Vulkan HANDLE 与 Cycles DisplayDriver interop，v23 加入 interop frame acquire/release，v24 加入三槽范围和槽状态，v25 加入 ready/release timeline semaphore HANDLE。CPU 租约持有期间对应槽位不会被 Cycles 覆写；interop 槽只有在 Vulkan release timeline 达到对应 generation 后才允许 CUDA 重写。Java 与 DLL 的 ABI 版本不一致时会在启用前拒绝运行。
 
 Cycles 的 GPU 内核通过 `path_init()` 相对于 `cyclesrenderer_native.dll` 查找。因此以下布局是运行时契约：
 

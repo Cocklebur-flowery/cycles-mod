@@ -182,21 +182,26 @@ P15c2/c3 保守同步复制与 Native ABI v23：
 - P16d3 把 Java/Vulkan 资源切换为一块连续的三槽分配。每槽大小等于配置的单帧 RGBA16F 容量；Native/Cycles 用 `slot_index × slot_stride_bytes` 选择 CUDA 写入范围，Vulkan copy 使用相同 offset 读取。F10 展示单槽/总分配 MiB、最新显示槽、ready 槽数与生产者等待次数。
 - F8 和游戏退出先排空未完成 Vulkan copy，再销毁 Renderer/CUDA external-memory import，最后销毁 `TextureTarget`、`VkBuffer` 与 `VkDeviceMemory`。任何 session-attached 状态下直接释放 Vulkan 内存的请求都会被拒绝。
 - F10 报告 Native interop `active/ready/acquired`、generation、实际 sample、CUDA 同步时间，以及 Vulkan copy pending/display generation、提交次数、generation gaps 与 CPU enqueue 时间。旧 `upload` 指标在 interop 活动时应停止增长；它仍用于验证 CPU FrameStore 回退。
-- P15 的固定 `480×270 RGBA16F` 限制已由 P16c2 移除；单缓冲握手仍会限制生产/消费重叠。三槽重叠与 external semaphore 留给后续 P16 子阶段。
+- P15 的固定 `480×270 RGBA16F` 限制已由 P16c2 移除；P16d3 已用一块连续 allocation 中的三个槽允许生产与消费重叠。
+- P16e1 用 `cycles-v5.2-cuew-external-semaphore.patch` 补齐 Cycles 5.2 内置 CUEW 缺少的 CUDA external semaphore 声明和动态符号；该补丁只扩展固定 Cycles 源码，不引入另一份 CUDA SDK 运行时依赖。
+- P16e2 将契约升级为 ABI v25。80 字节 `CyclesBridgeVulkanInteropBuffer` 在 memory HANDLE 后同时转移 ready/release 两个 timeline semaphore HANDLE；Native 对成功、重复绑定、UUID 拒绝和异常路径都承担三个 HANDLE 的关闭责任。72 字节 state 保持布局不变，并用 `TIMELINE_SYNC` flag 报告正式同步是否生效。
+- 跨 API 同步使用两条单向 timeline，而不是让 CUDA/Vulkan 交替 signal 同一条 timeline。CUDA 在重用槽前等待 `release[generation]`，完成 film convert 后 signal `ready[generation]`；Minecraft `VulkanCommandEncoder` 在 copy 前等待 ready，执行 buffer-to-image copy 后 signal release。两条 timeline 各自只有一个 signal 方，保证值始终单调递增。
+- Native 可以立即发布已排入 CUDA stream 的 ready 槽；Minecraft 的 Vulkan wait 负责真正的执行与内存可见性。Java 跳过旧 ready 帧时把旧槽的下一次 release wait 合并到最新 generation；若 copy 记录失败，也会提交无 copy 的 ready-wait/release-signal，避免槽永久阻塞。
+- Cycles 的逐帧 `queue_->synchronize()` 只在 timeline 不可用的兼容路径保留。timeline 生效时 F10 的 `sync us` 主要表示 CUDA wait/signal 入队耗时，不再代表 GPU 完成等待；`interop state ... timeline=true` 才是正式路径已建立的判据。
 
-P15 游戏内验收：
+P15/P16 游戏内验收：
 
 1. **必须重新启动客户端**；P16a 默认请求所需设备扩展，F9 不能热启用或关闭设备扩展。若显式设置过关闭开关，应先移除或改为 `true`。
-2. 进入世界后按 F8。F10 应显示 `allocated/bound=true/true`、`active=true`，随后 `copy count` 与 displayed generation 持续推进；画面仍经现有显示 shader 输出。
+2. 进入世界后按 F8。F10 应显示 `allocated/bound=true/true`、`active=true`、`timeline=true`、`slots=.../3`，随后 `copy count` 与 displayed generation 持续推进；画面仍经现有显示 shader 输出。
 3. 观察 CPU 回退指标：interop 活动后 Presenter `upload count/MiB` 不应继续增长，`interop vk copy count` 应增长。若 UUID、扩展或 CUDA import 不满足，原有 FrameStore/FFM 路径仍应出图。
-4. 再按 F8：允许为排空当前 Vulkan copy 发生一次短暂同步，但必须恢复原版、不卡死、不黑屏、不触发 device lost。重新按 F8 应能重新建立资源。
-5. 测试窗口缩放、移动相机、放置/破坏方块和 F9 Pass/降噪切换。P15 仍固定内部 480×270；这些操作不得破坏资源生命周期，但性能和最终分辨率不作为本阶段验收条件。
+4. 再按 F8：允许为排空当前 Vulkan copy 发生一次短暂同步，但必须恢复原版、不卡死、不黑屏、不触发 device lost。重新按 F8 应能重新建立三槽资源和两条 timeline。
+5. 测试窗口缩放、移动相机、放置/破坏方块和 F9 Pass/降噪切换；再测试 Fixed `1920×1080@100%` 和动态分辨率。画面不得撕裂、间歇黑屏或复现读取尚未完成 CUDA 写入的紫色/噪声帧。
 
-### P16：互操作环与正式同步
+### P16：互操作环与正式同步（代码完成，等待游戏内验收）
 
-- 建立至少三槽 external buffer 生命周期与 resize 规则。
-- 实现 CUDA/Vulkan semaphore 所有权和 wait/signal。
-- 恢复 1080p、动态分辨率、Pass 切换、OptiX/OIDN 和 F8 回退测试。
+- 已建立三槽 external buffer 生命周期、容量热重建和安全销毁顺序。
+- 已实现 CUDA/Vulkan 双 timeline semaphore 所有权与 GPU wait/signal，并保留无法启用 interop 时的 CPU FrameStore 回退。
+- 已通过 Java 编译、Native smoke、完整 Cycles Release 构建及四补丁干净重放；1080p、动态分辨率、Pass、OptiX/OIDN、F8 往返和长时间移动仍需游戏内人工验收。
 
 ### P17：HDR swapchain 原型
 
