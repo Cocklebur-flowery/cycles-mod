@@ -242,21 +242,31 @@ class ColorManagement::Impl final {
             throw std::runtime_error("unknown OCIO view transform");
         }
         OCIO::GroupTransformRcPtr transforms = OCIO::GroupTransform::Create();
+        const char* source_color_space = OCIO::ROLE_SCENE_LINEAR;
+        bool bypass_display_look = false;
         if (color_look != CYCLES_BRIDGE_COLOR_LOOK_NONE) {
             const char* look = look_name(color_look);
             if (look == nullptr) {
                 throw std::runtime_error("unknown OCIO look");
             }
+            const char* look_output = OCIO::LookTransform::GetLooksResultColorSpace(
+                config_, config_->getCurrentContext(), look);
+            if (look_output == nullptr || look_output[0] == '\0') {
+                throw std::runtime_error("OCIO look does not declare an output color space");
+            }
             OCIO::LookTransformRcPtr look_transform = OCIO::LookTransform::Create();
-            look_transform->setSrc(OCIO::ROLE_SCENE_LINEAR);
-            look_transform->setDst(OCIO::ROLE_SCENE_LINEAR);
+            look_transform->setSrc(source_color_space);
+            look_transform->setDst(look_output);
             look_transform->setLooks(look);
             transforms->appendTransform(look_transform);
+            source_color_space = look_output;
+            bypass_display_look = true;
         }
         OCIO::DisplayViewTransformRcPtr display = OCIO::DisplayViewTransform::Create();
-        display->setSrc(OCIO::ROLE_SCENE_LINEAR);
+        display->setSrc(source_color_space);
         display->setDisplay("sRGB");
         display->setView(view);
+        display->setLooksBypass(bypass_display_look);
         transforms->appendTransform(display);
         processors_.emplace(
             pipeline_key(view_transform, color_look),
