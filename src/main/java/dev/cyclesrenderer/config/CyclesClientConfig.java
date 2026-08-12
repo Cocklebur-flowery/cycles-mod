@@ -79,6 +79,9 @@ public final class CyclesClientConfig {
     private static final ModConfigSpec.DoubleValue GAMMA;
     private static final ModConfigSpec.EnumValue<CyclesRenderSettings.ViewTransform> VIEW_TRANSFORM;
     private static final ModConfigSpec.EnumValue<CyclesRenderSettings.ColorLook> COLOR_LOOK;
+    private static final ModConfigSpec.BooleanValue WHITE_BALANCE;
+    private static final ModConfigSpec.DoubleValue WHITE_BALANCE_TEMPERATURE;
+    private static final ModConfigSpec.DoubleValue WHITE_BALANCE_TINT;
     private static final ModConfigSpec.EnumValue<CyclesRenderSettings.PassView> ACTIVE_PASS;
     private static final ModConfigSpec.BooleanValue DEBUG_OVERLAY;
 
@@ -276,6 +279,12 @@ public final class CyclesClientConfig {
         COLOR_LOOK = builder.translation("config.cyclesrenderer.color.look")
                 .comment("AgX looks come directly from Blender's packaged OCIO configuration.")
                 .defineEnum("look", CyclesRenderSettings.ColorLook.AGX_PUNCHY);
+        WHITE_BALANCE = builder.translation("config.cyclesrenderer.color.whiteBalance")
+                .define("whiteBalance", false);
+        WHITE_BALANCE_TEMPERATURE = builder.translation("config.cyclesrenderer.color.temperature")
+                .defineInRange("temperature", 6500.0D, 1800.0D, 100000.0D);
+        WHITE_BALANCE_TINT = builder.translation("config.cyclesrenderer.color.tint")
+                .defineInRange("tint", 10.0D, -150.0D, 150.0D);
         builder.pop();
 
         builder.push("diagnostics");
@@ -331,6 +340,8 @@ public final class CyclesClientConfig {
                 DENOISER_PREFILTER.get(), DENOISER_QUALITY.get(), DENOISER_USE_GPU.get(),
                 EXPOSURE_EV.get().floatValue(), GAMMA.get().floatValue(), VIEW_TRANSFORM.get(),
                 COLOR_LOOK.get(),
+                WHITE_BALANCE.get(), WHITE_BALANCE_TEMPERATURE.get().floatValue(),
+                WHITE_BALANCE_TINT.get().floatValue(),
                 ACTIVE_PASS.get(), DEBUG_OVERLAY.get());
     }
 

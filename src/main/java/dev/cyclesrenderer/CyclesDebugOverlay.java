@@ -334,6 +334,11 @@ final class CyclesDebugOverlay {
                             + "  working=Linear Rec.709  output=sRGB SDR",
                     COLOR_STATIC);
             out.line(
+                    "white balance=" + (settings.whiteBalance() ? "on" : "off")
+                            + "  temperature/tint=" + settings.whiteBalanceTemperature()
+                            + "K/" + settings.whiteBalanceTint(),
+                    COLOR_STATIC);
+            out.line(
                     "resolution config=" + settings.resolutionPercentage() + "%"
                             + "  interactive=" + settings.interactiveResolutionPercentage() + "%"
                             + "  dynamic=" + settings.dynamicResolution()

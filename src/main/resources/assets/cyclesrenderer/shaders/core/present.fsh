@@ -7,6 +7,9 @@ layout(std140) uniform CyclesDisplay {
     vec4 DisplayParams;
     ivec4 DisplayModes;
     vec4 ColorLutParams;
+    vec4 WhiteBalanceRow0;
+    vec4 WhiteBalanceRow1;
+    vec4 WhiteBalanceRow2;
 };
 
 in vec2 texCoord;
@@ -61,6 +64,10 @@ void main() {
     } else if (activePass == 6) {
         display /= DisplayParams.w;
     } else if (activePass != 5) {
+        display = vec3(
+            dot(WhiteBalanceRow0.xyz, display),
+            dot(WhiteBalanceRow1.xyz, display),
+            dot(WhiteBalanceRow2.xyz, display));
         display *= DisplayParams.x;
         if (DisplayModes.y == 0) {
             display = linearToSrgb(display);

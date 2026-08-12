@@ -40,7 +40,7 @@ public final class CyclesFramePresenter {
     private long emaColorLutUploadMicros;
     private long maxColorLutUploadMicros;
     private GpuBuffer displayUniformBuffer;
-    private final ByteBuffer displayUniformData = ByteBuffer.allocateDirect(48)
+    private final ByteBuffer displayUniformData = ByteBuffer.allocateDirect(96)
             .order(ByteOrder.nativeOrder());
     private long displaySettingsRevision = Long.MIN_VALUE;
     private int displayDepthFarBits;
@@ -354,7 +354,7 @@ public final class CyclesFramePresenter {
             displayUniformBuffer = RenderSystem.getDevice().createBuffer(
                     () -> "Cycles display settings",
                     GpuBuffer.USAGE_COPY_DST | GpuBuffer.USAGE_UNIFORM,
-                    48L);
+                    96L);
         }
         displayUniformData.clear();
         displayUniformData.putFloat((float) Math.pow(2.0, settings.exposureEv()));
@@ -377,6 +377,16 @@ public final class CyclesFramePresenter {
             displayUniformData.putFloat(0.0F);
             displayUniformData.putFloat(1.0F);
             displayUniformData.putFloat(1.0F);
+        }
+        float[] whiteBalance = WhiteBalanceTransform.matrix(
+                settings.whiteBalance(),
+                settings.whiteBalanceTemperature(),
+                settings.whiteBalanceTint());
+        for (int row = 0; row < 3; row++) {
+            displayUniformData.putFloat(whiteBalance[row * 3]);
+            displayUniformData.putFloat(whiteBalance[row * 3 + 1]);
+            displayUniformData.putFloat(whiteBalance[row * 3 + 2]);
+            displayUniformData.putFloat(0.0F);
         }
         displayUniformData.flip();
         RenderSystem.getDevice().createCommandEncoder().writeToBuffer(

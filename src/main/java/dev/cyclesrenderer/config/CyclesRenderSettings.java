@@ -75,6 +75,9 @@ public record CyclesRenderSettings(
         float gamma,
         ViewTransform viewTransform,
         ColorLook colorLook,
+        boolean whiteBalance,
+        float whiteBalanceTemperature,
+        float whiteBalanceTint,
         PassView activePass,
         boolean debugOverlay) {
 
