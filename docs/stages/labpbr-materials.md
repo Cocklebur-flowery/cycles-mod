@@ -86,8 +86,10 @@ specular_ior_level = F0 / 0.08
 3. `Cycles Material atlas`：线性数据纹理，通道预解码为：
    - R：Principled Roughness 输入；
    - G：Metalness；
-   - B：Specular IOR Level；
+   - B：线性介电 F0；
    - A：归一化逐像素 Emission。
+
+Material atlas 第一版使用 RGBA8。介电 F0 的有效范围可高于 0.08，换算后的 Specular IOR Level 也会高于 1，不能直接编码进 UNORM 通道。因此 B 保存原始线性 F0，Cycles 节点图采样后再执行 `F0 / 0.08`。这不会改变上一节定义的 Principled 换算关系。
 
 Normal 与 Material 图集不是对原始 `_n`/`_s` 文件的无损复制，而是当前 Cycles shader 的稳定输入契约。这样避免每次采样重复执行格式分支，也避免把 `_n.B` 的 AO 错当法线 Z。
 
