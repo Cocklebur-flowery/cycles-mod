@@ -1,6 +1,6 @@
 # LabPBR 1.3 材质桥（PBR-0）
 
-状态：PBR-0 至 PBR-3 已完成；PBR-4 至 PBR-6 待实现
+状态：PBR-0 至 PBR-4 已完成；PBR-5 至 PBR-6 待实现
 目标资源包：`run/resourcepacks/SPBR-21.zip`
 目标格式：ShaderLABS LabPBR 1.3
 

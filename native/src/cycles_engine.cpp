@@ -1410,13 +1410,15 @@ class MemoryImageLoader final : public ccl::ImageLoader {
         std::uint32_t height,
         std::shared_ptr<const SceneResourcesData> resources,
         std::uint32_t pixel_offset,
-        std::uint32_t pixel_size)
+        std::uint32_t pixel_size,
+        std::uint32_t role)
         : name_(std::move(name)),
           width_(width),
           height_(height),
           resources_(std::move(resources)),
           pixel_offset_(pixel_offset),
-          pixel_size_(pixel_size) {}
+          pixel_size_(pixel_size),
+          role_(role) {}
 
     bool load_metadata(
         ccl::ImageMetaData& metadata,
@@ -1426,7 +1428,8 @@ class MemoryImageLoader final : public ccl::ImageLoader {
         metadata.height = height_;
         metadata.channels = 4;
         metadata.type = ccl::IMAGE_DATA_TYPE_BYTE4;
-        metadata.is_compressible_as_srgb = true;
+        metadata.is_compressible_as_srgb =
+            role_ == CYCLES_BRIDGE_TEXTURE_COLOR_SRGB;
         return true;
     }
 
@@ -1458,18 +1461,13 @@ class MemoryImageLoader final : public ccl::ImageLoader {
     std::shared_ptr<const SceneResourcesData> resources_;
     std::uint32_t pixel_offset_;
     std::uint32_t pixel_size_;
+    std::uint32_t role_;
 };
 
 std::vector<ccl::ImageHandle> create_images(
     ccl::Scene* scene,
     const SceneRequest& request) {
     const SceneResourcesData& resources = *request.resources;
-    ccl::ImageParams params;
-    params.colorspace = ccl::u_colorspace_scene_linear_srgb;
-    params.alpha_type = ccl::IMAGE_ALPHA_UNASSOCIATED;
-    params.interpolation = ccl::INTERPOLATION_CLOSEST;
-    params.extension = ccl::EXTENSION_REPEAT;
-
     std::vector<ccl::ImageHandle> images;
     images.reserve(resources.textures.size());
     for (std::size_t index = 0; index < resources.textures.size(); ++index) {
@@ -1480,7 +1478,15 @@ std::vector<ccl::ImageHandle> create_images(
             texture.height,
             request.resources,
             texture.pixel_offset,
-            texture.pixel_size);
+            texture.pixel_size,
+            texture.role);
+        ccl::ImageParams params;
+        params.colorspace = texture.role == CYCLES_BRIDGE_TEXTURE_DATA_LINEAR
+            ? ccl::u_colorspace_data
+            : ccl::u_colorspace_scene_linear_srgb;
+        params.alpha_type = ccl::IMAGE_ALPHA_UNASSOCIATED;
+        params.interpolation = ccl::INTERPOLATION_CLOSEST;
+        params.extension = ccl::EXTENSION_REPEAT;
         images.push_back(scene->image_manager->add_image(std::move(loader), params));
     }
     return images;
@@ -1489,13 +1495,13 @@ std::vector<ccl::ImageHandle> create_images(
 ccl::Shader* create_material_shader(
     ccl::Scene* scene,
     const CyclesBridgeMaterial& material,
-    const ccl::ImageHandle& image,
+    const std::vector<ccl::ImageHandle>& images,
     std::size_t index) {
     auto graph = ccl::make_unique<ccl::ShaderGraph>();
     ccl::TextureCoordinateNode* coordinates =
         graph->create_node<ccl::TextureCoordinateNode>();
     ccl::ImageTextureNode* texture = graph->create_node<ccl::ImageTextureNode>();
-    texture->handle = image;
+    texture->handle = images[material.texture_index];
     texture->set_colorspace(ccl::u_colorspace_scene_linear_srgb);
     texture->set_alpha_type(ccl::IMAGE_ALPHA_UNASSOCIATED);
     texture->set_interpolation(ccl::INTERPOLATION_CLOSEST);
@@ -1508,20 +1514,63 @@ ccl::Shader* create_material_shader(
     graph->connect(texture->output("Color"), multiply->input("Vector1"));
     graph->connect(vertex_color->output("Color"), multiply->input("Vector2"));
 
-    ccl::DiffuseBsdfNode* diffuse = graph->create_node<ccl::DiffuseBsdfNode>();
-    diffuse->set_roughness(0.8F);
-    graph->connect(multiply->output("Vector"), diffuse->input("Color"));
-    ccl::ShaderOutput* opaque_closure = diffuse->output("BSDF");
+    ccl::PrincipledBsdfNode* principled =
+        graph->create_node<ccl::PrincipledBsdfNode>();
+    principled->set_roughness(0.8F);
+    graph->connect(multiply->output("Vector"), principled->input("Base Color"));
 
-    if (material.emission_strength > 0.0F) {
-        ccl::EmissionNode* emission = graph->create_node<ccl::EmissionNode>();
-        emission->set_strength(material.emission_strength);
-        graph->connect(multiply->output("Vector"), emission->input("Color"));
-        ccl::AddClosureNode* add = graph->create_node<ccl::AddClosureNode>();
-        graph->connect(opaque_closure, add->input("Closure1"));
-        graph->connect(emission->output("Emission"), add->input("Closure2"));
-        opaque_closure = add->output("Closure");
+    if (material.pbr_format == CYCLES_BRIDGE_PBR_LAB_1_3) {
+        ccl::ImageTextureNode* normal_texture =
+            graph->create_node<ccl::ImageTextureNode>();
+        normal_texture->handle = images[material.normal_texture_index];
+        normal_texture->set_colorspace(ccl::u_colorspace_data);
+        normal_texture->set_alpha_type(ccl::IMAGE_ALPHA_UNASSOCIATED);
+        normal_texture->set_interpolation(ccl::INTERPOLATION_CLOSEST);
+        normal_texture->set_extension(ccl::EXTENSION_REPEAT);
+        graph->connect(coordinates->output("UV"), normal_texture->input("Vector"));
+
+        ccl::NormalMapNode* normal_map = graph->create_node<ccl::NormalMapNode>();
+        normal_map->set_space(ccl::NODE_NORMAL_MAP_TANGENT);
+        normal_map->set_convention(ccl::NODE_NORMAL_MAP_CONVENTION_DIRECTX);
+        normal_map->set_strength(1.0F);
+        graph->connect(normal_texture->output("Color"), normal_map->input("Color"));
+        graph->connect(normal_map->output("Normal"), principled->input("Normal"));
+
+        ccl::ImageTextureNode* material_texture =
+            graph->create_node<ccl::ImageTextureNode>();
+        material_texture->handle = images[material.material_texture_index];
+        material_texture->set_colorspace(ccl::u_colorspace_data);
+        material_texture->set_alpha_type(ccl::IMAGE_ALPHA_UNASSOCIATED);
+        material_texture->set_interpolation(ccl::INTERPOLATION_CLOSEST);
+        material_texture->set_extension(ccl::EXTENSION_REPEAT);
+        graph->connect(coordinates->output("UV"), material_texture->input("Vector"));
+
+        ccl::SeparateColorNode* material_channels =
+            graph->create_node<ccl::SeparateColorNode>();
+        material_channels->set_color_type(ccl::NODE_COMBSEP_COLOR_RGB);
+        graph->connect(
+            material_texture->output("Color"), material_channels->input("Color"));
+        graph->connect(
+            material_channels->output("Red"), principled->input("Roughness"));
+        graph->connect(
+            material_channels->output("Green"), principled->input("Metallic"));
+
+        ccl::MathNode* f0_to_specular = graph->create_node<ccl::MathNode>();
+        f0_to_specular->set_math_type(ccl::NODE_MATH_MULTIPLY);
+        f0_to_specular->set_value2(12.5F);
+        graph->connect(
+            material_channels->output("Blue"), f0_to_specular->input("Value1"));
+        graph->connect(
+            f0_to_specular->output("Value"), principled->input("Specular IOR Level"));
+
+        graph->connect(multiply->output("Vector"), principled->input("Emission Color"));
+        graph->connect(
+            material_texture->output("Alpha"), principled->input("Emission Strength"));
+    } else if (material.emission_strength > 0.0F) {
+        principled->set_emission_strength(material.emission_strength);
+        graph->connect(multiply->output("Vector"), principled->input("Emission Color"));
     }
+    ccl::ShaderOutput* opaque_closure = principled->output("BSDF");
 
     ccl::ShaderOutput* surface = opaque_closure;
     if ((material.flags & CYCLES_BRIDGE_MATERIAL_BLEND) != 0U) {
@@ -1715,7 +1764,7 @@ void build_scene(
     for (std::size_t index = 0; index < resources.materials.size(); ++index) {
         const CyclesBridgeMaterial& material = resources.materials[index];
         runtime.shaders[index] = create_material_shader(
-            scene, material, images[material.texture_index], index);
+            scene, material, images, index);
     }
 
     for (const auto& entry : request.sections) {

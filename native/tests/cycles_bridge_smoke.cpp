@@ -712,24 +712,34 @@ int main(int argc, char** argv) {
          CYCLES_BRIDGE_MATERIAL_CUTOUT,
          0.0F,
          0.5F,
-         CYCLES_BRIDGE_TEXTURE_INDEX_INVALID,
-         CYCLES_BRIDGE_TEXTURE_INDEX_INVALID,
-         CYCLES_BRIDGE_PBR_NONE,
+         1U,
+         2U,
+         CYCLES_BRIDGE_PBR_LAB_1_3,
          0U},
     }};
-    const std::array<std::uint8_t, 16> texture_pixels = {{
+    const std::array<std::uint8_t, 48> texture_pixels = {{
         255U, 64U, 32U, 255U,
         32U, 255U, 64U, 255U,
         32U, 64U, 255U, 255U,
         255U, 255U, 32U, 0U,
+        128U, 128U, 255U, 255U,
+        128U, 128U, 255U, 255U,
+        128U, 128U, 255U, 255U,
+        128U, 128U, 255U, 255U,
+        204U, 0U, 10U, 0U,
+        128U, 0U, 10U, 0U,
+        64U, 255U, 10U, 0U,
+        204U, 0U, 10U, 0U,
     }};
-    const std::array<CyclesBridgeTexture, 1> textures = {{
+    const std::array<CyclesBridgeTexture, 3> textures = {{
         {2U,
          2U,
          0U,
-         static_cast<std::uint32_t>(texture_pixels.size()),
+         16U,
          CYCLES_BRIDGE_TEXTURE_COLOR_SRGB,
          {0U, 0U, 0U}},
+        {2U, 2U, 16U, 16U, CYCLES_BRIDGE_TEXTURE_DATA_LINEAR, {0U, 0U, 0U}},
+        {2U, 2U, 32U, 16U, CYCLES_BRIDGE_TEXTURE_DATA_LINEAR, {0U, 0U, 0U}},
     }};
     CyclesBridgeSceneResources resources{};
     resources.struct_size = sizeof(resources);
@@ -738,7 +748,7 @@ int main(int argc, char** argv) {
     resources.texture_count = static_cast<std::uint32_t>(textures.size());
     resources.texture_byte_count = static_cast<std::uint32_t>(texture_pixels.size());
     auto invalid_materials = materials;
-    invalid_materials[0].pbr_format = CYCLES_BRIDGE_PBR_LAB_1_3;
+    invalid_materials[0].normal_texture_index = CYCLES_BRIDGE_TEXTURE_INDEX_INVALID;
     if (cycles_bridge_reset_scene(
             renderer,
             &resources,
