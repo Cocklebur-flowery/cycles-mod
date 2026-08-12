@@ -1,9 +1,14 @@
 #include "scene_update.h"
 
+#include <Windows.h>
+
+#include <array>
 #include <cstdint>
+#include <cstring>
 #include <iostream>
 #include <memory>
 #include <utility>
+#include <vector>
 
 namespace {
 
@@ -98,12 +103,21 @@ bool run_scene_update_tests() {
         return false;
     }
 
+    accumulator.upsert(make_section(44, 64));
+    const auto update_after_ack = accumulator.commit(4);
+    if (!require(update_after_ack->mutations.size() == 1,
+                 "commit copied acknowledged resident sections")) {
+        return false;
+    }
+    cyclesrenderer::scene::apply_scene_update(snapshot, *update_after_ack);
+    accumulator.acknowledge(*update_after_ack);
+
     const auto replacement_resources = make_resources(128);
     const auto replacement_section = make_section(33, 128);
     SectionMap replacement_sections;
     replacement_sections.emplace(33, replacement_section);
     accumulator.replace(replacement_resources, std::move(replacement_sections));
-    const auto update_4 = accumulator.commit(4);
+    const auto update_4 = accumulator.commit(5);
     accumulator.acknowledge(*update_3);
     if (!require(update_4->replace_all, "new epoch must replace the snapshot")
         || !require(accumulator.pending_count() == 1,
@@ -119,4 +133,196 @@ bool run_scene_update_tests() {
                    "replacement sections were not applied")
         && require(accumulator.pending_count() == 0,
                    "replacement acknowledgement left pending state");
+}
+
+namespace {
+
+constexpr std::uint32_t kWidth = 160;
+constexpr std::uint32_t kHeight = 90;
+
+bool require_ok(std::uint32_t status, const char* operation) {
+    if (status == CYCLES_BRIDGE_STATUS_OK) {
+        return true;
+    }
+    std::cerr << operation << " failed with status " << status << '\n';
+    return false;
+}
+
+std::uint64_t checksum(const std::vector<std::uint8_t>& pixels) {
+    std::uint64_t result = 1469598103934665603ULL;
+    for (const std::uint8_t value : pixels) {
+        result ^= value;
+        result *= 1099511628211ULL;
+    }
+    return result;
+}
+
+bool wait_for_changed_frame(
+    CyclesBridgeRenderer* renderer,
+    CyclesBridgeCamera& camera,
+    CyclesBridgeFrame& frame,
+    std::vector<std::uint8_t>& pixels,
+    std::uint64_t previous_checksum,
+    std::uint32_t expected_section_count,
+    std::uint64_t minimum_commit_count) {
+    for (int attempt = 0; attempt < 400; ++attempt) {
+        camera.frame_id++;
+        if (!require_ok(
+                cycles_bridge_render_frame(
+                    renderer, &camera, &frame, pixels.data(), pixels.size()),
+                "scene update frame")) {
+            return false;
+        }
+        CyclesBridgeDiagnostics diagnostics{};
+        diagnostics.struct_size = sizeof(diagnostics);
+        diagnostics.struct_version = 1;
+        if (!require_ok(
+                cycles_bridge_query_diagnostics(renderer, &diagnostics),
+                "scene update diagnostics")) {
+            return false;
+        }
+        if ((frame.flags & CYCLES_BRIDGE_FRAME_UPDATED) != 0U
+            && checksum(pixels) != previous_checksum
+            && diagnostics.section_count == expected_section_count
+            && diagnostics.scene_commit_count >= minimum_commit_count) {
+            return true;
+        }
+        Sleep(10);
+    }
+    std::cerr << "scene update did not produce the expected frame\n";
+    return false;
+}
+
+}  // namespace
+
+bool run_scene_update_integration_test() {
+    CyclesBridgeRenderer* renderer = nullptr;
+    if (!require_ok(
+            cycles_bridge_create_renderer(&renderer), "scene update renderer creation")
+        || renderer == nullptr) {
+        return false;
+    }
+
+    const std::array<CyclesBridgeVertex, 4> vertices = {{
+        {-2.0F, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F, 0.0F, 0xFFFFFFFFU, 0U},
+        {2.0F, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F, 1.0F, 0.0F, 0xFFFFFFFFU, 0U},
+        {2.0F, 4.0F, 0.0F, 0.0F, 0.0F, 1.0F, 1.0F, 1.0F, 0xFFFFFFFFU, 0U},
+        {-2.0F, 4.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F, 1.0F, 0xFFFFFFFFU, 0U},
+    }};
+    const std::array<CyclesBridgeTriangle, 2> triangles = {{
+        {0U, 1U, 2U, 0U},
+        {0U, 2U, 3U, 0U},
+    }};
+    const std::array<CyclesBridgeMaterial, 1> materials = {{
+        {0U, 0U, 0.0F, 0.5F, {0U, 0U, 0U, 0U}},
+    }};
+    const std::array<std::uint8_t, 4> texture_pixels = {{255U, 255U, 255U, 255U}};
+    const std::array<CyclesBridgeTexture, 1> textures = {{
+        {1U, 1U, 0U, 4U, {0U, 0U, 0U, 0U}},
+    }};
+    CyclesBridgeSceneResources resources{};
+    resources.struct_size = sizeof(resources);
+    resources.struct_version = 1;
+    resources.material_count = 1;
+    resources.texture_count = 1;
+    resources.texture_byte_count = 4;
+    CyclesBridgeSection section{};
+    section.struct_size = sizeof(section);
+    section.struct_version = 1;
+    section.section_id = 42;
+    section.vertex_count = static_cast<std::uint32_t>(vertices.size());
+    section.triangle_count = static_cast<std::uint32_t>(triangles.size());
+
+    if (!require_ok(
+            cycles_bridge_reset_scene(
+                renderer,
+                &resources,
+                materials.data(),
+                textures.data(),
+                texture_pixels.data()),
+            "scene update reset")
+        || !require_ok(
+            cycles_bridge_upsert_section(
+                renderer, &section, vertices.data(), triangles.data()),
+            "scene update initial upsert")
+        || !require_ok(
+            cycles_bridge_commit_scene(renderer), "scene update initial commit")) {
+        cycles_bridge_destroy_renderer(renderer);
+        return false;
+    }
+
+    CyclesBridgeCamera camera{};
+    camera.struct_size = sizeof(camera);
+    camera.struct_version = 1;
+    camera.viewport_width = kWidth;
+    camera.viewport_height = kHeight;
+    camera.position_y = 2.0;
+    camera.position_z = 8.0;
+    camera.rotation_w = 1.0F;
+    camera.vertical_fov_radians = 1.04719755F;
+    camera.depth_far = 100.0F;
+    CyclesBridgeFrame frame{};
+    frame.struct_size = sizeof(frame);
+    frame.struct_version = 1;
+    std::vector<std::uint8_t> pixels(
+        static_cast<std::size_t>(kWidth) * kHeight * 4U);
+    if (!wait_for_changed_frame(
+            renderer, camera, frame, pixels, 0U, 1U, 1U)) {
+        cycles_bridge_destroy_renderer(renderer);
+        return false;
+    }
+    const std::uint64_t initial_checksum = checksum(pixels);
+
+    std::vector<CyclesBridgeVertex> expanded_vertices(vertices.begin(), vertices.end());
+    expanded_vertices.insert(expanded_vertices.end(), vertices.begin(), vertices.end());
+    for (std::size_t index = vertices.size(); index < expanded_vertices.size(); ++index) {
+        expanded_vertices[index].position_x += 3.0F;
+    }
+    std::vector<CyclesBridgeTriangle> expanded_triangles(triangles.begin(), triangles.end());
+    expanded_triangles.push_back({4U, 5U, 6U, 0U});
+    expanded_triangles.push_back({4U, 6U, 7U, 0U});
+    CyclesBridgeSection expanded = section;
+    expanded.vertex_count = static_cast<std::uint32_t>(expanded_vertices.size());
+    expanded.triangle_count = static_cast<std::uint32_t>(expanded_triangles.size());
+
+    if (!require_ok(
+            cycles_bridge_upsert_section(
+                renderer, &expanded, expanded_vertices.data(), expanded_triangles.data()),
+            "rapid update")
+        || !require_ok(cycles_bridge_commit_scene(renderer), "rapid update commit")
+        || !require_ok(
+            cycles_bridge_remove_section(renderer, section.section_id), "rapid removal")
+        || !require_ok(cycles_bridge_commit_scene(renderer), "rapid removal commit")
+        || !require_ok(
+            cycles_bridge_upsert_section(
+                renderer, &expanded, expanded_vertices.data(), expanded_triangles.data()),
+            "rapid final update")
+        || !require_ok(cycles_bridge_commit_scene(renderer), "rapid final commit")
+        || !wait_for_changed_frame(
+            renderer, camera, frame, pixels, initial_checksum, 1U, 4U)) {
+        cycles_bridge_destroy_renderer(renderer);
+        return false;
+    }
+
+    const std::uint64_t expanded_checksum = checksum(pixels);
+    const bool removed = require_ok(
+            cycles_bridge_remove_section(renderer, section.section_id), "final removal")
+        && require_ok(cycles_bridge_commit_scene(renderer), "final removal commit")
+        && wait_for_changed_frame(
+            renderer, camera, frame, pixels, expanded_checksum, 0U, 5U);
+    cycles_bridge_destroy_renderer(renderer);
+    return removed;
+}
+
+int main() {
+    std::cerr << "[scene-update] Accumulator semantics\n";
+    if (!run_scene_update_tests()) {
+        return 1;
+    }
+    std::cerr << "[scene-update] Public ABI integration\n";
+    if (!run_scene_update_integration_test()) {
+        return 1;
+    }
+    std::cerr << "[scene-update] Complete\n";
+    return 0;
 }
