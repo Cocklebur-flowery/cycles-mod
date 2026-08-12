@@ -176,6 +176,7 @@ P15c2/c3 保守同步复制与 Native ABI v23：
 - P16b 将 CUDA queue 完成屏障作为项目内补丁 `patches/cycles-v5.2-vulkan-interop-sync.patch` 固定下来。`setup-cycles.ps1` 在校验 Cycles 5.2 commit 后幂等应用；补丁已存在时只验证，固定源码发生漂移时停止构建，不会静默修改未知版本。
 - P16c1 保持 ABI v23 布局不变，但把互操作描述符的宽高定义为容量诊断值；`allocation_byte_count` 是权威容量。Cycles 不再被固定描述符强制成 `480×270`，每帧实际尺寸由 render settings 与 viewport 计算，并在 state 中报告；超出共享容量时该帧自动走 CPU FrameStore 回退。
 - P16c2 在 F8 启用时按 `renderWidth × renderHeight × resolutionPercentage` 分配共享 RGBA16F 容量；例如 `1920×1080@100%` 的逻辑容量约为 15.8 MiB。Java 复制路径使用 Native state 报告的每帧实际宽高创建或缩放目标图像，因此 FIT_INSIDE、窗口缩放和交互/静止动态分辨率可以在同一容量内切换，不再固定为 `480×270`。F10 分别报告容量尺寸与当前已显示尺寸。
+- P16c3 在 F9 应用设置时比较所需逻辑字节数与当前共享容量。容量内的分辨率变化只交给 Cycles reset；超出容量时按 `排空 Vulkan copy -> 关闭 Renderer/CUDA import -> 释放旧 Vulkan memory -> 重新 probe/apply/bind -> 重建场景` 的顺序热重建，避免越界、悬挂 HANDLE 或静默回退到大体积 CPU 上传。
 - F8 和游戏退出先排空未完成 Vulkan copy，再销毁 Renderer/CUDA external-memory import，最后销毁 `TextureTarget`、`VkBuffer` 与 `VkDeviceMemory`。任何 session-attached 状态下直接释放 Vulkan 内存的请求都会被拒绝。
 - F10 报告 Native interop `active/ready/acquired`、generation、实际 sample、CUDA 同步时间，以及 Vulkan copy pending/display generation、提交次数、generation gaps 与 CPU enqueue 时间。旧 `upload` 指标在 interop 活动时应停止增长；它仍用于验证 CPU FrameStore 回退。
 - P15 的固定 `480×270 RGBA16F` 限制已由 P16c2 移除；单缓冲握手仍会限制生产/消费重叠。三槽重叠与 external semaphore 留给后续 P16 子阶段。

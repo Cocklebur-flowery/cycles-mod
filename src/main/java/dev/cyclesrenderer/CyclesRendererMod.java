@@ -188,6 +188,10 @@ public final class CyclesRendererMod {
             return;
         }
         try {
+            if (testFrameEnabled && INTEROP_BUFFER.requiresLargerCapacity(settings)) {
+                rebuildInteropForSettings(settings);
+                return;
+            }
             NativeBridge.applySettings(settings);
             appliedSettingsRevision = settings.revision();
         } catch (RuntimeException error) {
@@ -199,6 +203,38 @@ public final class CyclesRendererMod {
             nativeBridgeReady = false;
             appliedSettingsRevision = -1L;
         }
+    }
+
+    private static void rebuildInteropForSettings(CyclesRenderSettings settings) {
+        VulkanExternalBufferPrototype.Telemetry previous = INTEROP_BUFFER.telemetry();
+        LOGGER.info(
+                "Rebuilding Vulkan interop capacity from {}x{} for output {}x{}@{}%",
+                previous.capacityWidth(),
+                previous.capacityHeight(),
+                settings.renderWidth(),
+                settings.renderHeight(),
+                settings.resolutionPercentage());
+
+        INTEROP_BUFFER.drainPendingCopy();
+        NativeBridge.close();
+        nativeBridgeReady = false;
+        appliedSettingsRevision = -1L;
+        INTEROP_BUFFER.close();
+
+        NativeBridge.ProbeResult probe = NativeBridge.probe();
+        if (!probe.success()) {
+            throw new IllegalStateException(
+                    "native renderer bridge probe failed after interop resize: "
+                            + probe.message());
+        }
+        nativeBridgeReady = true;
+        NativeBridge.applySettings(settings);
+        appliedSettingsRevision = settings.revision();
+        INTEROP_BUFFER.initialize(Minecraft.getInstance(), settings);
+        SCENE_MANAGER.reset();
+        FRAME_PRESENTER.reset();
+        DistantHorizonsSceneProvider.reset();
+        nativeFrameId = 0L;
     }
 
     private static void onConfigLoading(ModConfigEvent.Loading event) {

@@ -149,6 +149,10 @@ public final class VulkanExternalBufferPrototype implements AutoCloseable {
         return allocationBytes;
     }
 
+    public boolean requiresLargerCapacity(CyclesRenderSettings settings) {
+        return nativeBound && Capacity.from(settings).logicalBytes() > logicalBytes;
+    }
+
     public void pollCompletedFrame() {
         RenderSystem.assertOnRenderThread();
         finishPendingCopy(false);
