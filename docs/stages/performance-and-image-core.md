@@ -101,7 +101,7 @@ F10 叠加层采用“当前值 + 最近窗口统计”，不把目标值伪装�
 | P10 | `feat: schedule cycles denoisers` | OptiX/OIDN 能力、调度与 OIDN 构建 | 已完成（P10a/P10b/P10c，待游戏内人工验收） |
 | P11 | `feat: integrate ocio color management` | OCIO Vulkan、AgX、ACES 2、工作/显示空间 | P11a-P11d 已完成自动验证；P11c/P11d 待游戏内验收 |
 | P12 | `feat: expose sampling and physical camera controls` | 原生蓝噪声、镜头、裁剪、景深 | P12a-P12d 已完成自动验证；待游戏内验收 |
-| P13 | `spike: evaluate hdr and vulkan interop` | Windows HDR 与 CUDA/Vulkan 互操作报告 | 待开始 |
+| P13 | `spike: evaluate hdr and vulkan interop` | Windows HDR 与 CUDA/Vulkan 互操作报告 | 已完成；实现拆分为 P14-P17 |
 
 ## 5. 稳定契约和保持不动的范围
 
