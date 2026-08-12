@@ -208,44 +208,45 @@ public final class VulkanExternalBufferPrototype implements AutoCloseable {
             throw new IllegalStateException("interop copy target is not a Vulkan texture");
         }
         VulkanCommandEncoder encoder = vulkanDevice.createCommandEncoder();
-        VkCommandBuffer commandBuffer = encoder.allocateAndBeginTransientCommandBuffer();
-        try (MemoryStack stack = MemoryStack.stackPush()) {
-            pipelineBarrier(
-                    commandBuffer,
-                    stack,
-                    VK13.VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
-                    VK13.VK_ACCESS_2_MEMORY_WRITE_BIT,
-                    VK13.VK_PIPELINE_STAGE_2_COPY_BIT,
-                    VK13.VK_ACCESS_2_TRANSFER_READ_BIT);
-            VkBufferImageCopy.Buffer region = VkBufferImageCopy.calloc(1, stack);
-            region.bufferOffset(0L);
-            region.bufferRowLength(WIDTH);
-            region.bufferImageHeight(HEIGHT);
-            VkImageSubresourceLayers subresource = region.imageSubresource();
-            subresource.aspectMask(VK10.VK_IMAGE_ASPECT_COLOR_BIT);
-            subresource.mipLevel(0);
-            subresource.baseArrayLayer(0);
-            subresource.layerCount(1);
-            region.imageOffset().set(0, 0, 0);
-            region.imageExtent().set(WIDTH, HEIGHT, 1);
-            VK12.vkCmdCopyBufferToImage(
-                    commandBuffer,
-                    buffer,
-                    destination.vkImage(),
-                    VK10.VK_IMAGE_LAYOUT_GENERAL,
-                    region);
-            pipelineBarrier(
-                    commandBuffer,
-                    stack,
-                    VK13.VK_PIPELINE_STAGE_2_COPY_BIT,
-                    VK13.VK_ACCESS_2_TRANSFER_WRITE_BIT,
-                    VK13.VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
-                    VK13.VK_ACCESS_2_SHADER_SAMPLED_READ_BIT);
-            check(VK10.vkEndCommandBuffer(commandBuffer), "end interop copy command");
-        }
-        encoder.execute(commandBuffer);
         GpuFence nextFence = encoder.createFence();
+        VkCommandBuffer commandBuffer = encoder.allocateAndBeginTransientCommandBuffer();
         try {
+            try (MemoryStack stack = MemoryStack.stackPush()) {
+                pipelineBarrier(
+                        commandBuffer,
+                        stack,
+                        VK13.VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
+                        VK13.VK_ACCESS_2_MEMORY_WRITE_BIT,
+                        VK13.VK_PIPELINE_STAGE_2_COPY_BIT,
+                        VK13.VK_ACCESS_2_TRANSFER_READ_BIT);
+                VkBufferImageCopy.Buffer region = VkBufferImageCopy.calloc(1, stack);
+                region.bufferOffset(0L);
+                region.bufferRowLength(WIDTH);
+                region.bufferImageHeight(HEIGHT);
+                VkImageSubresourceLayers subresource = region.imageSubresource();
+                subresource.aspectMask(VK10.VK_IMAGE_ASPECT_COLOR_BIT);
+                subresource.mipLevel(0);
+                subresource.baseArrayLayer(0);
+                subresource.layerCount(1);
+                region.imageOffset().set(0, 0, 0);
+                region.imageExtent().set(WIDTH, HEIGHT, 1);
+                VK12.vkCmdCopyBufferToImage(
+                        commandBuffer,
+                        buffer,
+                        destination.vkImage(),
+                        VK10.VK_IMAGE_LAYOUT_GENERAL,
+                        region);
+                pipelineBarrier(
+                        commandBuffer,
+                        stack,
+                        VK13.VK_PIPELINE_STAGE_2_COPY_BIT,
+                        VK13.VK_ACCESS_2_TRANSFER_WRITE_BIT,
+                        VK13.VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
+                        VK13.VK_ACCESS_2_SHADER_SAMPLED_READ_BIT);
+                check(VK10.vkEndCommandBuffer(commandBuffer),
+                        "end interop copy command");
+            }
+            encoder.execute(commandBuffer);
             encoder.submit();
             pendingCopyFence = nextFence;
         } catch (RuntimeException | LinkageError error) {
