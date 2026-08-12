@@ -15,6 +15,7 @@
   "screen.cyclesrenderer.settings.sampling_pattern": "Sampling: %s — seed %s",
   "screen.cyclesrenderer.settings.camera": "Camera: %s — %s mm / %s mm — DOF %s",
   "screen.cyclesrenderer.settings.atmosphere": "Atmosphere: sun %s° elevation / %s° rotation — intensity %s",
+  "screen.cyclesrenderer.settings.pbr": "PBR: %s — normal %s / emission %s — fallback roughness %s / F0 %s",
   "screen.cyclesrenderer.settings.native_not_loaded": "Native bridge not loaded; detection is safe before enabling F8.",
   "screen.cyclesrenderer.settings.diagnostics_failed": "Diagnostics unavailable: %s",
   "cyclesrenderer.configuration.title": "%s — Cycles Settings",

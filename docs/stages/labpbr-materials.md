@@ -1,6 +1,6 @@
 # LabPBR 1.3 材质桥（PBR-0）
 
-状态：PBR-0 至 PBR-4 已完成；PBR-5 至 PBR-6 待实现
+状态：PBR-0 至 PBR-5 已完成；PBR-6 待游戏内验收
 目标资源包：`run/resourcepacks/SPBR-21.zip`
 目标格式：ShaderLABS LabPBR 1.3
 
@@ -155,7 +155,7 @@ F10 按动态诊断区显示：
 - PBR-2：同布局 Normal/Material 数据图集与缺失默认值。
 - PBR-3：Java/FFM/C ABI 纹理角色和材质索引。
 - PBR-4：Cycles Principled、DirectX Normal、Roughness、F0/Metal 和 Emission。
-- PBR-5：F9 设置与 F10 PBR 诊断。
+- PBR-5：F9 材质设置、ABI 29 着色倍率与 F10 PBR 诊断。
 - PBR-6：自动和游戏内验收、文档收口。
 
 每个子阶段独立提交，只暂存该子阶段自己的文件或可精确隔离的 hunk。不得带入其他线程的性能、BVH、场景时序或互操作改动。

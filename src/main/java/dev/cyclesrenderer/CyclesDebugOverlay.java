@@ -8,6 +8,8 @@ import dev.cyclesrenderer.render.VulkanCapabilityProbe;
 import dev.cyclesrenderer.render.VulkanExternalBufferPrototype;
 import dev.cyclesrenderer.scene.SectionGeometryCollector;
 import dev.cyclesrenderer.scene.SectionSceneManager;
+import dev.cyclesrenderer.scene.LabPbrAtlasBuilder;
+import dev.cyclesrenderer.scene.LabPbrResources;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
 
@@ -19,6 +21,7 @@ final class CyclesDebugOverlay {
     private static final int COLOR_FRAME = 0xFF7DD3FC;
     private static final int COLOR_TIMING = 0xFFFFD166;
     private static final int COLOR_STATE = 0xFFC4A7FF;
+    private static final int COLOR_PBR = 0xFFFF9BD5;
     private static final int COLOR_STATIC = 0xFFB8C0CC;
     private static final int COLOR_WARNING = 0xFFFFAA55;
     private static final int COLOR_ERROR = 0xFFFF5555;
@@ -242,6 +245,49 @@ final class CyclesDebugOverlay {
                             + presentation.colorLutViewTransform(),
                     COLOR_STATE);
 
+            LabPbrResources.Discovery pbr = sceneManager.pbrDiscovery();
+            LabPbrAtlasBuilder.Atlases pbrAtlases = sceneManager.pbrAtlases();
+            out.section("[ PBR RESOURCE PACK ]", COLOR_PBR);
+            out.line(
+                    "requested/effective=" + settings.pbrMode().name() + "/"
+                            + pbr.format().name()
+                            + "  declaration=" + valueOrDash(pbr.rawFormat())
+                            + "  pack=" + valueOrDash(pbr.declarationSourcePackId()),
+                    pbr.format() == LabPbrResources.Format.UNSUPPORTED
+                            ? COLOR_WARNING : COLOR_PBR);
+            out.line(
+                    "atlas sprites=" + pbr.spriteCount()
+                            + "  normal=" + pbr.normalCount() + " ("
+                            + percent(pbr.normalCoverage()) + "%)"
+                            + "  specular=" + pbr.specularCount() + " ("
+                            + percent(pbr.specularCoverage()) + "%)",
+                    COLOR_PBR);
+            out.line(
+                    "decoded normal/specular=" + pbrAtlases.decodedNormals() + "/"
+                            + pbrAtlases.decodedSpeculars()
+                            + "  atlas=" + pbrAtlases.width() + "x" + pbrAtlases.height()
+                            + " x2  MiB=" + mebibytes(pbrAtlases.byteSize()),
+                    COLOR_PBR);
+            int pbrErrorCount = pbr.discoveryErrors()
+                    + pbrAtlases.sizeMismatches() + pbrAtlases.decodeErrors();
+            out.line(
+                    "errors discovery/size/decode=" + pbr.discoveryErrors() + "/"
+                            + pbrAtlases.sizeMismatches() + "/" + pbrAtlases.decodeErrors()
+                            + "  declarationError=" + valueOrDash(pbr.declarationError()),
+                    pbrErrorCount > 0 ? COLOR_WARNING : COLOR_PBR);
+            out.line(
+                    "channels normal(DX)/roughness/metal/F0/emission="
+                            + (pbrAtlases.decodedNormals() > 0) + "/"
+                            + (pbrAtlases.decodedSpeculars() > 0) + "/"
+                            + (pbrAtlases.decodedSpeculars() > 0) + "/"
+                            + (pbrAtlases.decodedSpeculars() > 0) + "/"
+                            + (pbrAtlases.decodedSpeculars() > 0)
+                            + "  strength/emission=" + settings.pbrNormalStrength() + "/"
+                            + settings.pbrEmissionScale()
+                            + "  fallback roughness/F0=" + settings.pbrFallbackRoughness()
+                            + "/" + settings.pbrFallbackF0(),
+                    COLOR_PBR);
+
             out.section("[ FIXED CAPABILITIES / CURRENT CONFIG ]", COLOR_STATIC);
             out.line(
                     "Cycles ABI=" + NativeBridge.ABI_VERSION
@@ -322,6 +368,14 @@ final class CyclesDebugOverlay {
 
     private static double degrees(float radians) {
         return Math.round(Math.toDegrees(radians) * 10.0D) / 10.0D;
+    }
+
+    private static int percent(float value) {
+        return Math.round(Math.clamp(value, 0.0F, 1.0F) * 100.0F);
+    }
+
+    private static String valueOrDash(String value) {
+        return value == null || value.isBlank() ? "-" : value;
     }
 
     private static int sampleProgressPercent(NativeBridge.Diagnostics diagnostics) {

@@ -140,6 +140,13 @@ public final class CyclesSettingsScreen extends Screen {
                 settings.atmosphereSunElevationDegrees(),
                 settings.atmosphereSunRotationDegrees(),
                 settings.atmosphereSunIntensity()));
+        lines.add(Component.translatable(
+                "screen.cyclesrenderer.settings.pbr",
+                settings.pbrMode().getTranslatedName(),
+                settings.pbrNormalStrength(),
+                settings.pbrEmissionScale(),
+                settings.pbrFallbackRoughness(),
+                settings.pbrFallbackF0()));
         if (!NativeBridge.isReady()) {
             lines.add(Component.translatable("screen.cyclesrenderer.settings.native_not_loaded"));
             return lines;
