@@ -138,6 +138,14 @@ Cycles/OptiX
 - 首先使用保守同步证明正确性；F10 对比 CPU copied bytes、upload bytes 和 interop copy 时间。
 - 任一条件失败立即回退 FrameStore/FFM 路径。
 
+P15a 设备扩展开关：
+
+- 设备创建早于 NeoForge 客户端配置加载，因此该开关不能在 F9 中热切换。
+- 启动前设置 JVM 属性 `-Dcyclesrenderer.experimentalVulkanInterop=true`，或环境变量 `CYCLESRENDERER_VULKAN_INTEROP=1`。默认关闭。
+- Mixin 在 Minecraft 已选定物理设备、尚未创建逻辑设备的边界检查两个 Win32 扩展。仅两者都可用时才把它们加入设备扩展集。
+- F10 `interop bootstrap` 报告开关请求、注入是否执行及未启用原因；现有 `available/enabled` 行仍从实际 Vulkan 设备诊断读取。
+- P15a 只启用后续创建可导出 buffer 的前置扩展，尚未创建共享资源，`active` 仍必须为 `false`。
+
 ### P16：互操作环与正式同步
 
 - 建立至少三槽 external buffer 生命周期与 resize 规则。

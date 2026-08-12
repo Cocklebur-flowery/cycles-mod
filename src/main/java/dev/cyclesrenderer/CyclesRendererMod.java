@@ -456,6 +456,14 @@ public final class CyclesRendererMod {
                 y += 10;
                 graphics.text(
                         minecraft.font,
+                        "interop bootstrap "
+                                + VulkanCapabilityProbe.interopBootstrap().summary(),
+                        6, y, VulkanCapabilityProbe.interopBootstrap().extensionsRequested()
+                                ? 0xFFE0E0E0
+                                : 0xFFFFDD88);
+                y += 10;
+                graphics.text(
+                        minecraft.font,
                         "surface formats=" + vulkan.surfaceFormats().size()
                                 + " hdrCandidates=" + vulkan.hdrSurfaceFormatCount()
                                 + " " + vulkan.surfaceFormatSummary(),

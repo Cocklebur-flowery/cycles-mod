@@ -22,6 +22,7 @@ import org.lwjgl.vulkan.VkSurfaceFormatKHR;
 import java.nio.ByteBuffer;
 import java.nio.IntBuffer;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
@@ -34,10 +35,52 @@ public final class VulkanCapabilityProbe {
     private static final String EXTERNAL_MEMORY_WIN32 = "VK_KHR_external_memory_win32";
     private static final String EXTERNAL_SEMAPHORE_WIN32 = "VK_KHR_external_semaphore_win32";
     private static final String HDR_METADATA = "VK_EXT_hdr_metadata";
+    private static final String INTEROP_PROPERTY =
+            "cyclesrenderer.experimentalVulkanInterop";
+    private static final String INTEROP_ENVIRONMENT =
+            "CYCLESRENDERER_VULKAN_INTEROP";
+    private static final boolean INTEROP_REQUESTED = interopRequested();
 
     private static volatile Snapshot cached;
+    private static volatile InteropBootstrap interopBootstrap =
+            new InteropBootstrap(INTEROP_REQUESTED, false, false, false, false,
+                    INTEROP_REQUESTED ? "awaiting device creation" : "disabled");
 
     private VulkanCapabilityProbe() {
+    }
+
+    public static Collection<String> withRequestedInteropExtensions(
+            Collection<String> requestedExtensions,
+            com.mojang.blaze3d.vulkan.VulkanPhysicalDevice physicalDevice) {
+        boolean memoryAvailable = physicalDevice.hasDeviceExtension(EXTERNAL_MEMORY_WIN32);
+        boolean semaphoreAvailable =
+                physicalDevice.hasDeviceExtension(EXTERNAL_SEMAPHORE_WIN32);
+        if (!INTEROP_REQUESTED) {
+            interopBootstrap = new InteropBootstrap(
+                    false, true, memoryAvailable, semaphoreAvailable, false, "disabled");
+            return requestedExtensions;
+        }
+        if (!memoryAvailable || !semaphoreAvailable) {
+            String reason = !memoryAvailable && !semaphoreAvailable
+                    ? "memory and semaphore extensions unavailable"
+                    : !memoryAvailable
+                            ? "memory extension unavailable"
+                            : "semaphore extension unavailable";
+            interopBootstrap = new InteropBootstrap(
+                    true, true, memoryAvailable, semaphoreAvailable, false, reason);
+            return requestedExtensions;
+        }
+
+        Set<String> extensions = new HashSet<>(requestedExtensions);
+        extensions.add(EXTERNAL_MEMORY_WIN32);
+        extensions.add(EXTERNAL_SEMAPHORE_WIN32);
+        interopBootstrap = new InteropBootstrap(
+                true, true, true, true, true, "extensions requested");
+        return extensions;
+    }
+
+    public static InteropBootstrap interopBootstrap() {
+        return interopBootstrap;
     }
 
     public static Snapshot snapshot(Minecraft minecraft) {
@@ -95,6 +138,15 @@ public final class VulkanCapabilityProbe {
             return Snapshot.unavailable(error.getClass().getSimpleName() + ": "
                     + String.valueOf(error.getMessage()));
         }
+    }
+
+    private static boolean interopRequested() {
+        String property = System.getProperty(INTEROP_PROPERTY);
+        if (property != null) {
+            return Boolean.parseBoolean(property);
+        }
+        String environment = System.getenv(INTEROP_ENVIRONMENT);
+        return "1".equals(environment) || Boolean.parseBoolean(environment);
     }
 
     private static Set<String> supportedInstanceExtensions() {
@@ -221,6 +273,21 @@ public final class VulkanCapabilityProbe {
         public String summary() {
             return (available ? "available" : "missing") + "/"
                     + (enabled ? "enabled" : "disabled");
+        }
+    }
+
+    public record InteropBootstrap(
+            boolean requested,
+            boolean attempted,
+            boolean memoryAvailable,
+            boolean semaphoreAvailable,
+            boolean extensionsRequested,
+            String reason) {
+        public String summary() {
+            return "request=" + requested
+                    + " attempted=" + attempted
+                    + " injected=" + extensionsRequested
+                    + " reason=" + reason;
         }
     }
 
