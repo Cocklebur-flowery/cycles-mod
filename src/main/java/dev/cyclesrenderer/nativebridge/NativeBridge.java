@@ -24,7 +24,7 @@ import static java.lang.foreign.ValueLayout.JAVA_INT;
 import static java.lang.foreign.ValueLayout.JAVA_LONG;
 
 public final class NativeBridge {
-    public static final int ABI_VERSION = 20;
+    public static final int ABI_VERSION = 21;
     public static final int PIXEL_FORMAT_RGBA16_FLOAT = 2;
     public static final int PIXEL_FORMAT_RGBA32_FLOAT = 3;
 
@@ -296,6 +296,19 @@ public final class NativeBridge {
             JAVA_INT.withName("device_uuid_valid"),
             MemoryLayout.sequenceLayout(16, JAVA_BYTE).withName("device_uuid"),
             JAVA_INT.withName("reserved"));
+    private static final MemoryLayout VULKAN_INTEROP_BUFFER_LAYOUT =
+            MemoryLayout.structLayout(
+                    JAVA_INT.withName("struct_size"),
+                    JAVA_INT.withName("struct_version"),
+                    JAVA_INT.withName("width"),
+                    JAVA_INT.withName("height"),
+                    JAVA_INT.withName("pixel_format"),
+                    JAVA_INT.withName("flags"),
+                    JAVA_LONG.withName("allocation_byte_count"),
+                    JAVA_LONG.withName("memory_handle"),
+                    MemoryLayout.sequenceLayout(16, JAVA_BYTE).withName("device_uuid"),
+                    JAVA_INT.withName("reserved_0"),
+                    JAVA_INT.withName("reserved_1"));
     private static final MemoryLayout VERTEX_LAYOUT = MemoryLayout.structLayout(
             JAVA_FLOAT.withName("position_x"),
             JAVA_FLOAT.withName("position_y"),
@@ -344,6 +357,7 @@ public final class NativeBridge {
                 || CAPABILITIES_LAYOUT.byteSize() != 64L
                 || COLOR_LUT_DESCRIPTOR_LAYOUT.byteSize() != 64L
                 || DIAGNOSTICS_LAYOUT.byteSize() != 400L
+                || VULKAN_INTEROP_BUFFER_LAYOUT.byteSize() != 64L
                 || VERTEX_LAYOUT.byteSize() != 40L
                 || TRIANGLE_LAYOUT.byteSize() != 16L
                 || MATERIAL_LAYOUT.byteSize() != 32L
@@ -492,6 +506,27 @@ public final class NativeBridge {
         }
     }
 
+    public static void bindVulkanInteropBuffer(
+            int width,
+            int height,
+            long allocationBytes,
+            long memoryHandle,
+            String deviceUuid) {
+        BridgeState state = requireState();
+        try {
+            state.bindVulkanInteropBuffer(
+                    width, height, allocationBytes, memoryHandle, deviceUuid);
+        } catch (Throwable error) {
+            rethrowFatalError(error);
+            throw new IllegalStateException(
+                    "native Vulkan interop bind failed: " + describe(error), error);
+        }
+    }
+
+    public static void unbindVulkanInteropBuffer() {
+        invoke("native Vulkan interop unbind", BridgeState::unbindVulkanInteropBuffer);
+    }
+
     public static PassDescriptor passDescriptor(int passId) {
         BridgeState state = requireState();
         try {
@@ -585,6 +620,9 @@ public final class NativeBridge {
         private final MethodHandle queryPassDescriptor;
         private final MethodHandle applySettings;
         private final MethodHandle queryDiagnostics;
+        private final MethodHandle bindVulkanInteropBuffer;
+        private final MethodHandle unbindVulkanInteropBuffer;
+        private final MethodHandle closeWin32Handle;
         private final MethodHandle resetScene;
         private final MethodHandle upsertSection;
         private final MethodHandle removeSection;
@@ -620,6 +658,9 @@ public final class NativeBridge {
                 MethodHandle queryPassDescriptor,
                 MethodHandle applySettings,
                 MethodHandle queryDiagnostics,
+                MethodHandle bindVulkanInteropBuffer,
+                MethodHandle unbindVulkanInteropBuffer,
+                MethodHandle closeWin32Handle,
                 MethodHandle resetScene,
                 MethodHandle upsertSection,
                 MethodHandle removeSection,
@@ -640,6 +681,9 @@ public final class NativeBridge {
             this.queryPassDescriptor = queryPassDescriptor;
             this.applySettings = applySettings;
             this.queryDiagnostics = queryDiagnostics;
+            this.bindVulkanInteropBuffer = bindVulkanInteropBuffer;
+            this.unbindVulkanInteropBuffer = unbindVulkanInteropBuffer;
+            this.closeWin32Handle = closeWin32Handle;
             this.resetScene = resetScene;
             this.upsertSection = upsertSection;
             this.removeSection = removeSection;
@@ -704,6 +748,21 @@ public final class NativeBridge {
                 MethodHandle queryDiagnostics = downcall(linker, symbols,
                         "cycles_bridge_query_diagnostics",
                         FunctionDescriptor.of(JAVA_INT, ADDRESS, ADDRESS));
+                MethodHandle bindVulkanInteropBuffer = downcall(
+                        linker,
+                        symbols,
+                        "cycles_bridge_bind_vulkan_interop_buffer",
+                        FunctionDescriptor.of(JAVA_INT, ADDRESS, ADDRESS));
+                MethodHandle unbindVulkanInteropBuffer = downcall(
+                        linker,
+                        symbols,
+                        "cycles_bridge_unbind_vulkan_interop_buffer",
+                        FunctionDescriptor.of(JAVA_INT, ADDRESS));
+                MethodHandle closeWin32Handle = downcall(
+                        linker,
+                        symbols,
+                        "cycles_bridge_close_win32_handle",
+                        FunctionDescriptor.ofVoid(JAVA_LONG));
                 MethodHandle resetScene = downcall(linker, symbols,
                         "cycles_bridge_reset_scene",
                         FunctionDescriptor.of(
@@ -767,6 +826,9 @@ public final class NativeBridge {
                         queryPassDescriptor,
                         applySettings,
                         queryDiagnostics,
+                        bindVulkanInteropBuffer,
+                        unbindVulkanInteropBuffer,
+                        closeWin32Handle,
                         resetScene,
                         upsertSection,
                         removeSection,
@@ -819,6 +881,69 @@ public final class NativeBridge {
                 checkRendererStatus(status, "scene reset");
                 generation = 0L;
             }
+        }
+
+        private void bindVulkanInteropBuffer(
+                int width,
+                int height,
+                long allocationBytes,
+                long memoryHandle,
+                String deviceUuid) throws Throwable {
+            boolean nativeCalled = false;
+            try (Arena arena = Arena.ofConfined()) {
+                if (width <= 0 || height <= 0 || allocationBytes <= 0L
+                        || memoryHandle == 0L) {
+                    throw new IllegalArgumentException(
+                            "invalid Vulkan interop buffer descriptor");
+                }
+                byte[] uuid = parseDeviceUuid(deviceUuid);
+                MemorySegment descriptor = arena.allocate(VULKAN_INTEROP_BUFFER_LAYOUT);
+                descriptor.set(
+                        JAVA_INT, 0L,
+                        Math.toIntExact(VULKAN_INTEROP_BUFFER_LAYOUT.byteSize()));
+                descriptor.set(JAVA_INT, 4L, STRUCT_VERSION);
+                descriptor.set(JAVA_INT, 8L, width);
+                descriptor.set(JAVA_INT, 12L, height);
+                descriptor.set(JAVA_INT, 16L, PIXEL_FORMAT_RGBA16_FLOAT);
+                descriptor.set(JAVA_INT, 20L, 1);
+                descriptor.set(JAVA_LONG, 24L, allocationBytes);
+                descriptor.set(JAVA_LONG, 32L, memoryHandle);
+                for (int index = 0; index < uuid.length; index++) {
+                    descriptor.set(JAVA_BYTE, 40L + index, uuid[index]);
+                }
+                nativeCalled = true;
+                int status = (int) bindVulkanInteropBuffer.invokeExact(
+                        renderer, descriptor);
+                checkRendererStatus(status, "Vulkan interop buffer bind");
+            } catch (Throwable error) {
+                if (!nativeCalled) {
+                    closeWin32Handle.invokeExact(memoryHandle);
+                }
+                throw error;
+            }
+        }
+
+        private void unbindVulkanInteropBuffer() throws Throwable {
+            checkRendererStatus(
+                    (int) unbindVulkanInteropBuffer.invokeExact(renderer),
+                    "Vulkan interop buffer unbind");
+        }
+
+        private static byte[] parseDeviceUuid(String value) {
+            if (value == null || value.length() != 32) {
+                throw new IllegalArgumentException("invalid Vulkan device UUID: " + value);
+            }
+            byte[] result = new byte[16];
+            for (int index = 0; index < result.length; index++) {
+                int high = Character.digit(value.charAt(index * 2), 16);
+                int low = Character.digit(value.charAt(index * 2 + 1), 16);
+                if (high < 0 || low < 0) {
+                    throw new IllegalArgumentException(
+                            "invalid Vulkan device UUID: " + value);
+                }
+                result[index] = (byte) ((high << 4) | low);
+            }
+            return result;
         }
 
         private void upsertSection(SectionGeometrySnapshot snapshot) throws Throwable {

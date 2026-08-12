@@ -57,6 +57,13 @@ class CyclesEngine final {
 
     void query_diagnostics(CyclesBridgeDiagnostics& diagnostics) const;
 
+    bool bind_vulkan_interop_buffer(
+        const CyclesBridgeVulkanInteropBuffer& descriptor,
+        std::uint64_t memory_handle,
+        std::string& error);
+
+    void unbind_vulkan_interop_buffer();
+
     bool render(
         const CyclesBridgeCamera& camera,
         std::uint8_t* rgba,

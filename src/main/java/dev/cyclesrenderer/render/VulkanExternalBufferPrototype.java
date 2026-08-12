@@ -4,8 +4,11 @@ import com.mojang.blaze3d.systems.GpuDeviceBackend;
 import com.mojang.blaze3d.systems.RenderSystem;
 import com.mojang.blaze3d.vulkan.VulkanDevice;
 import dev.cyclesrenderer.mixin.GpuDeviceAccessor;
+import dev.cyclesrenderer.nativebridge.NativeBridge;
 import net.minecraft.client.Minecraft;
+import org.lwjgl.PointerBuffer;
 import org.lwjgl.system.MemoryStack;
+import org.lwjgl.vulkan.KHRExternalMemoryWin32;
 import org.lwjgl.vulkan.VK10;
 import org.lwjgl.vulkan.VK11;
 import org.lwjgl.vulkan.VkBufferCreateInfo;
@@ -15,6 +18,7 @@ import org.lwjgl.vulkan.VkExternalBufferProperties;
 import org.lwjgl.vulkan.VkExternalMemoryBufferCreateInfo;
 import org.lwjgl.vulkan.VkMemoryAllocateInfo;
 import org.lwjgl.vulkan.VkMemoryDedicatedAllocateInfo;
+import org.lwjgl.vulkan.VkMemoryGetWin32HandleInfoKHR;
 import org.lwjgl.vulkan.VkMemoryRequirements;
 import org.lwjgl.vulkan.VkPhysicalDevice;
 import org.lwjgl.vulkan.VkPhysicalDeviceExternalBufferInfo;
@@ -37,6 +41,7 @@ public final class VulkanExternalBufferPrototype implements AutoCloseable {
     private long buffer;
     private long memory;
     private long allocationBytes;
+    private boolean nativeBound;
     private Telemetry telemetry = Telemetry.inactive("not initialized");
 
     public void initialize(Minecraft minecraft) {
@@ -66,8 +71,17 @@ public final class VulkanExternalBufferPrototype implements AutoCloseable {
                 return;
             }
             allocate(vulkanDevice);
+            long exportedHandle = exportMemoryHandle();
+            NativeBridge.bindVulkanInteropBuffer(
+                    WIDTH,
+                    HEIGHT,
+                    allocationBytes,
+                    exportedHandle,
+                    capabilities.physicalDeviceUuid());
+            nativeBound = true;
             telemetry = new Telemetry(
-                    true, true, LOGICAL_BYTES, allocationBytes, "allocated");
+                    true, true, true, LOGICAL_BYTES, allocationBytes,
+                    "bound-native");
         } catch (RuntimeException | LinkageError error) {
             releaseHandles();
             telemetry = Telemetry.inactive(
@@ -89,6 +103,26 @@ public final class VulkanExternalBufferPrototype implements AutoCloseable {
 
     public long allocationBytes() {
         return allocationBytes;
+    }
+
+    private long exportMemoryHandle() {
+        try (MemoryStack stack = MemoryStack.stackPush()) {
+            VkMemoryGetWin32HandleInfoKHR handleInfo =
+                    VkMemoryGetWin32HandleInfoKHR.calloc(stack)
+                            .sType$Default()
+                            .memory(memory)
+                            .handleType(HANDLE_TYPE);
+            PointerBuffer output = stack.callocPointer(1);
+            check(KHRExternalMemoryWin32.vkGetMemoryWin32HandleKHR(
+                            device, handleInfo, output),
+                    "export Win32 memory handle");
+            long handle = output.get(0);
+            if (handle == 0L) {
+                throw new IllegalStateException(
+                        "export Win32 memory handle returned null");
+            }
+            return handle;
+        }
     }
 
     private void allocate(VulkanDevice vulkanDevice) {
@@ -209,8 +243,15 @@ public final class VulkanExternalBufferPrototype implements AutoCloseable {
         if (device != null) {
             RenderSystem.assertOnRenderThread();
         }
-        releaseHandles();
-        telemetry = Telemetry.inactive("released");
+        try {
+            if (nativeBound && NativeBridge.isReady()) {
+                NativeBridge.unbindVulkanInteropBuffer();
+            }
+        } finally {
+            nativeBound = false;
+            releaseHandles();
+            telemetry = Telemetry.inactive("released");
+        }
     }
 
     private void releaseHandles() {
@@ -229,11 +270,12 @@ public final class VulkanExternalBufferPrototype implements AutoCloseable {
     public record Telemetry(
             boolean requested,
             boolean allocated,
+            boolean nativeBound,
             long logicalBytes,
             long allocationBytes,
             String state) {
         private static Telemetry inactive(String state) {
-            return new Telemetry(false, false, 0L, 0L, state);
+            return new Telemetry(false, false, false, 0L, 0L, state);
         }
     }
 }

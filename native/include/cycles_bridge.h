@@ -152,6 +152,10 @@ enum CyclesBridgeProjectionMode : std::uint32_t {
     CYCLES_BRIDGE_PROJECTION_PHYSICAL_LENS = 1,
 };
 
+enum CyclesBridgeVulkanInteropFlags : std::uint32_t {
+    CYCLES_BRIDGE_VULKAN_INTEROP_OWNERSHIP_TRANSFER = 1U << 0U,
+};
+
 struct CyclesBridgeCamera {
     std::uint32_t struct_size;
     std::uint32_t struct_version;
@@ -425,6 +429,19 @@ struct CyclesBridgeDiagnostics {
     std::uint32_t reserved;
 };
 
+struct CyclesBridgeVulkanInteropBuffer {
+    std::uint32_t struct_size;
+    std::uint32_t struct_version;
+    std::uint32_t width;
+    std::uint32_t height;
+    std::uint32_t pixel_format;
+    std::uint32_t flags;
+    std::uint64_t allocation_byte_count;
+    std::uint64_t memory_handle;
+    std::uint8_t device_uuid[16];
+    std::uint32_t reserved[2];
+};
+
 struct CyclesBridgeVertex {
     float position_x;
     float position_y;
@@ -513,6 +530,18 @@ CYCLES_BRIDGE_API std::uint32_t cycles_bridge_apply_settings(
 CYCLES_BRIDGE_API std::uint32_t cycles_bridge_query_diagnostics(
     const CyclesBridgeRenderer* renderer,
     CyclesBridgeDiagnostics* diagnostics);
+
+// The native bridge takes ownership of descriptor->memory_handle whenever
+// descriptor is non-null and the handle is non-zero, including error returns.
+CYCLES_BRIDGE_API std::uint32_t cycles_bridge_bind_vulkan_interop_buffer(
+    CyclesBridgeRenderer* renderer,
+    const CyclesBridgeVulkanInteropBuffer* descriptor);
+
+CYCLES_BRIDGE_API std::uint32_t cycles_bridge_unbind_vulkan_interop_buffer(
+    CyclesBridgeRenderer* renderer);
+
+CYCLES_BRIDGE_API void cycles_bridge_close_win32_handle(
+    std::uint64_t handle);
 
 CYCLES_BRIDGE_API std::uint32_t cycles_bridge_upload_scene(
     CyclesBridgeRenderer* renderer,

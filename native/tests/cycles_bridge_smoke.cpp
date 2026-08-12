@@ -392,7 +392,7 @@ bool verify_progressive_sampling(
 int main(int argc, char** argv) {
     const bool require_optix = argc > 1 && std::strcmp(argv[1], "--require-optix") == 0;
     std::cerr << "[smoke] ABI check\n";
-    if (cycles_bridge_abi_version() != 20U) {
+    if (cycles_bridge_abi_version() != 21U) {
         std::cerr << "unexpected native ABI " << cycles_bridge_abi_version() << '\n';
         return 1;
     }
@@ -426,6 +426,67 @@ int main(int argc, char** argv) {
     capabilities.struct_size = sizeof(capabilities);
     capabilities.struct_version = 1;
     CyclesBridgeRenderSettings settings = default_settings();
+    CyclesBridgeDiagnostics initial_diagnostics{};
+    initial_diagnostics.struct_size = sizeof(initial_diagnostics);
+    initial_diagnostics.struct_version = 1;
+    if (!require_ok(
+            cycles_bridge_query_diagnostics(renderer, &initial_diagnostics),
+            "initial diagnostics")) {
+        cycles_bridge_destroy_renderer(renderer);
+        return 1;
+    }
+    CyclesBridgeVulkanInteropBuffer interop{};
+    interop.struct_size = sizeof(interop);
+    interop.struct_version = 1;
+    interop.width = 480U;
+    interop.height = 270U;
+    interop.pixel_format = CYCLES_BRIDGE_PIXEL_FORMAT_RGBA16_FLOAT;
+    interop.flags = CYCLES_BRIDGE_VULKAN_INTEROP_OWNERSHIP_TRANSFER;
+    interop.allocation_byte_count = 480ULL * 270ULL * 8ULL;
+    std::memcpy(
+        interop.device_uuid,
+        initial_diagnostics.device_uuid,
+        sizeof(interop.device_uuid));
+    HANDLE accepted_handle = CreateEventW(nullptr, FALSE, FALSE, nullptr);
+    if (accepted_handle == nullptr) {
+        cycles_bridge_destroy_renderer(renderer);
+        return 1;
+    }
+    interop.memory_handle = static_cast<std::uint64_t>(
+        reinterpret_cast<std::uintptr_t>(accepted_handle));
+    const std::uint32_t bind_status =
+        cycles_bridge_bind_vulkan_interop_buffer(renderer, &interop);
+    if (initial_diagnostics.device_uuid_valid != 0U) {
+        if (!require_ok(bind_status, "interop handle bind")
+            || !require_ok(
+                cycles_bridge_unbind_vulkan_interop_buffer(renderer),
+                "interop handle unbind")
+            || CloseHandle(accepted_handle) != FALSE) {
+            std::cerr << "interop handle ownership was not transferred and closed\n";
+            cycles_bridge_destroy_renderer(renderer);
+            return 1;
+        }
+        HANDLE rejected_handle = CreateEventW(nullptr, FALSE, FALSE, nullptr);
+        if (rejected_handle == nullptr) {
+            cycles_bridge_destroy_renderer(renderer);
+            return 1;
+        }
+        interop.device_uuid[0] ^= 0xFFU;
+        interop.memory_handle = static_cast<std::uint64_t>(
+            reinterpret_cast<std::uintptr_t>(rejected_handle));
+        if (cycles_bridge_bind_vulkan_interop_buffer(renderer, &interop)
+                != CYCLES_BRIDGE_STATUS_RENDER_ERROR
+            || CloseHandle(rejected_handle) != FALSE) {
+            std::cerr << "UUID-mismatched interop handle was not rejected and closed\n";
+            cycles_bridge_destroy_renderer(renderer);
+            return 1;
+        }
+    } else if (bind_status != CYCLES_BRIDGE_STATUS_RENDER_ERROR
+               || CloseHandle(accepted_handle) != FALSE) {
+        std::cerr << "UUID-less interop handle was not rejected and closed\n";
+        cycles_bridge_destroy_renderer(renderer);
+        return 1;
+    }
     if (!require_ok(
             cycles_bridge_query_capabilities(renderer, &capabilities),
             "capability query")

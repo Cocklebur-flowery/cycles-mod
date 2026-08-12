@@ -154,6 +154,13 @@ P15b1 Vulkan 资源所有者：
 - 本子阶段尚未调用 `vkGetMemoryWin32HandleKHR`，因此没有未交付 HANDLE 的泄漏或双重关闭风险。Cycles 仍只使用 FrameStore。
 - F10 报告固定逻辑字节数、Vulkan 实际 allocation 字节数和失败原因。
 
+P15b2 HANDLE 描述与 Native ABI v21：
+
+- Java 通过 `vkGetMemoryWin32HandleKHR` 导出 `OPAQUE_WIN32` memory HANDLE，并与尺寸、RGBA16F、实际 allocation 字节数和 Vulkan UUID 一起交给 Native。
+- `cycles_bridge_bind_vulkan_interop_buffer` 采用“调用即转移 HANDLE 所有权”契约：描述无效或 UUID 不匹配时 Native 也必须关闭 HANDLE；成功时持有到 unbind 或 Renderer 销毁。
+- Native 再次比较 Vulkan UUID 与当前 Cycles CUDA/OptiX UUID。CPU 或 UUID 不可用时拒绝绑定。
+- F8 关闭顺序为 Native unbind/CloseHandle，然后销毁 Vulkan buffer/memory。这一子阶段仍不调用 CUDA external-memory import，不改变 FrameStore 出图。
+
 ### P16：互操作环与正式同步
 
 - 建立至少三槽 external buffer 生命周期与 resize 规则。

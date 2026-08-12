@@ -478,6 +478,8 @@ public final class CyclesRendererMod {
                 graphics.text(
                         minecraft.font,
                         "interop buffer=" + interopBuffer.state()
+                                + " allocated/bound=" + interopBuffer.allocated()
+                                + "/" + interopBuffer.nativeBound()
                                 + " size=" + VulkanExternalBufferPrototype.WIDTH
                                 + "x" + VulkanExternalBufferPrototype.HEIGHT
                                 + " logical/alloc MiB="

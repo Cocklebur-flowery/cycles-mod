@@ -1603,6 +1603,45 @@ class CyclesEngine::Impl final {
         if (worker_.joinable()) {
             worker_.join();
         }
+        unbind_vulkan_interop_buffer();
+    }
+
+    bool bind_vulkan_interop_buffer(
+        const CyclesBridgeVulkanInteropBuffer& descriptor,
+        std::uint64_t memory_handle,
+        std::string& error) {
+        {
+            std::lock_guard lock(state_mutex_);
+            if (!selected_device_uuid_.has_value()) {
+                error = "selected Cycles device has no CUDA UUID";
+                return false;
+            }
+            if (std::memcmp(
+                    descriptor.device_uuid,
+                    selected_device_uuid_->data(),
+                    selected_device_uuid_->size()) != 0) {
+                error = "Vulkan and Cycles device UUIDs do not match";
+                return false;
+            }
+        }
+        std::lock_guard lock(interop_mutex_);
+        if (interop_memory_handle_ != nullptr) {
+            CloseHandle(interop_memory_handle_);
+        }
+        interop_memory_handle_ = reinterpret_cast<HANDLE>(
+            static_cast<std::uintptr_t>(memory_handle));
+        interop_descriptor_ = descriptor;
+        interop_descriptor_.memory_handle = 0U;
+        return true;
+    }
+
+    void unbind_vulkan_interop_buffer() {
+        std::lock_guard lock(interop_mutex_);
+        if (interop_memory_handle_ != nullptr) {
+            CloseHandle(interop_memory_handle_);
+            interop_memory_handle_ = nullptr;
+        }
+        interop_descriptor_ = {};
     }
 
     bool upload(
@@ -2749,6 +2788,9 @@ class CyclesEngine::Impl final {
     std::unique_ptr<ColorManagement> color_management_;
     FrameStore frames_;
     std::thread worker_;
+    mutable std::mutex interop_mutex_;
+    HANDLE interop_memory_handle_ = nullptr;
+    CyclesBridgeVulkanInteropBuffer interop_descriptor_{};
 };
 
 CyclesEngine::CyclesEngine() : impl_(std::make_unique<Impl>()) {}
@@ -2818,6 +2860,17 @@ bool CyclesEngine::query_color_lut(
 
 void CyclesEngine::query_diagnostics(CyclesBridgeDiagnostics& diagnostics) const {
     impl_->query_diagnostics(diagnostics);
+}
+
+bool CyclesEngine::bind_vulkan_interop_buffer(
+    const CyclesBridgeVulkanInteropBuffer& descriptor,
+    std::uint64_t memory_handle,
+    std::string& error) {
+    return impl_->bind_vulkan_interop_buffer(descriptor, memory_handle, error);
+}
+
+void CyclesEngine::unbind_vulkan_interop_buffer() {
+    impl_->unbind_vulkan_interop_buffer();
 }
 
 bool CyclesEngine::render(

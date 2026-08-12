@@ -2,6 +2,8 @@
 
 #include "cycles_engine.h"
 
+#include <Windows.h>
+
 #include <cstddef>
 #include <cmath>
 #include <cstring>
@@ -16,9 +18,9 @@ struct CyclesBridgeRenderer {
 
 namespace {
 
-constexpr std::uint32_t kAbiVersion = 20;
+constexpr std::uint32_t kAbiVersion = 21;
 constexpr std::uint32_t kStructVersion = 1;
-constexpr char kBuildInfo[] = "cyclesrenderer-native/cycles-5.2;abi=20";
+constexpr char kBuildInfo[] = "cyclesrenderer-native/cycles-5.2;abi=21";
 
 static_assert(sizeof(CyclesBridgeCamera) == 80);
 static_assert(offsetof(CyclesBridgeCamera, frame_id) == 8);
@@ -42,6 +44,10 @@ static_assert(offsetof(CyclesBridgeColorLutDescriptor, pixel_byte_count) == 32);
 static_assert(sizeof(CyclesBridgeDiagnostics) == 400);
 static_assert(offsetof(CyclesBridgeDiagnostics, device_uuid_valid) == 376);
 static_assert(offsetof(CyclesBridgeDiagnostics, device_uuid) == 380);
+static_assert(sizeof(CyclesBridgeVulkanInteropBuffer) == 64);
+static_assert(offsetof(CyclesBridgeVulkanInteropBuffer, allocation_byte_count) == 24);
+static_assert(offsetof(CyclesBridgeVulkanInteropBuffer, memory_handle) == 32);
+static_assert(offsetof(CyclesBridgeVulkanInteropBuffer, device_uuid) == 40);
 static_assert(sizeof(CyclesBridgeVertex) == 40);
 static_assert(offsetof(CyclesBridgeVertex, packed_rgba) == 32);
 static_assert(sizeof(CyclesBridgeTriangle) == 16);
@@ -258,6 +264,47 @@ bool valid_settings(const CyclesBridgeRenderSettings& settings) {
         && valid_bool(settings.debug_overlay);
 }
 
+class OwnedWin32Handle final {
+ public:
+    explicit OwnedWin32Handle(std::uint64_t value)
+        : handle_(reinterpret_cast<HANDLE>(
+              static_cast<std::uintptr_t>(value))) {}
+
+    ~OwnedWin32Handle() {
+        if (handle_ != nullptr) {
+            CloseHandle(handle_);
+        }
+    }
+
+    OwnedWin32Handle(const OwnedWin32Handle&) = delete;
+    OwnedWin32Handle& operator=(const OwnedWin32Handle&) = delete;
+
+    std::uint64_t release() {
+        const auto value = reinterpret_cast<std::uintptr_t>(handle_);
+        handle_ = nullptr;
+        return static_cast<std::uint64_t>(value);
+    }
+
+ private:
+    HANDLE handle_ = nullptr;
+};
+
+bool valid_vulkan_interop_buffer(
+    const CyclesBridgeVulkanInteropBuffer& descriptor) {
+    if (descriptor.struct_size < sizeof(CyclesBridgeVulkanInteropBuffer)
+        || descriptor.struct_version != kStructVersion
+        || descriptor.width == 0U || descriptor.height == 0U
+        || descriptor.pixel_format != CYCLES_BRIDGE_PIXEL_FORMAT_RGBA16_FLOAT
+        || descriptor.flags != CYCLES_BRIDGE_VULKAN_INTEROP_OWNERSHIP_TRANSFER
+        || descriptor.memory_handle == 0U) {
+        return false;
+    }
+    const std::uint64_t pixel_count =
+        static_cast<std::uint64_t>(descriptor.width) * descriptor.height;
+    return pixel_count <= std::numeric_limits<std::uint64_t>::max() / 8U
+        && descriptor.allocation_byte_count >= pixel_count * 8U;
+}
+
 }  // namespace
 
 std::uint32_t cycles_bridge_abi_version() {
@@ -447,6 +494,44 @@ std::uint32_t cycles_bridge_query_diagnostics(
         return CYCLES_BRIDGE_STATUS_OK;
     } catch (...) {
         return CYCLES_BRIDGE_STATUS_RENDER_ERROR;
+    }
+}
+
+std::uint32_t cycles_bridge_bind_vulkan_interop_buffer(
+    CyclesBridgeRenderer* renderer,
+    const CyclesBridgeVulkanInteropBuffer* descriptor) {
+    OwnedWin32Handle owned(descriptor != nullptr ? descriptor->memory_handle : 0U);
+    if (renderer == nullptr || renderer->engine == nullptr || descriptor == nullptr
+        || !valid_vulkan_interop_buffer(*descriptor)) {
+        return CYCLES_BRIDGE_STATUS_INVALID_ARGUMENT;
+    }
+    try {
+        std::string error;
+        const std::uint64_t handle = descriptor->memory_handle;
+        if (!renderer->engine->bind_vulkan_interop_buffer(
+                *descriptor, handle, error)) {
+            return CYCLES_BRIDGE_STATUS_RENDER_ERROR;
+        }
+        owned.release();
+        return CYCLES_BRIDGE_STATUS_OK;
+    } catch (...) {
+        return CYCLES_BRIDGE_STATUS_RENDER_ERROR;
+    }
+}
+
+std::uint32_t cycles_bridge_unbind_vulkan_interop_buffer(
+    CyclesBridgeRenderer* renderer) {
+    if (renderer == nullptr || renderer->engine == nullptr) {
+        return CYCLES_BRIDGE_STATUS_INVALID_ARGUMENT;
+    }
+    renderer->engine->unbind_vulkan_interop_buffer();
+    return CYCLES_BRIDGE_STATUS_OK;
+}
+
+void cycles_bridge_close_win32_handle(std::uint64_t handle) {
+    if (handle != 0U) {
+        CloseHandle(reinterpret_cast<HANDLE>(
+            static_cast<std::uintptr_t>(handle)));
     }
 }
 
