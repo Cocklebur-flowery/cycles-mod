@@ -91,9 +91,11 @@ public final class VulkanCapabilityProbe {
             return requestedExtensions;
         }
 
-        Set<String> extensions = new HashSet<>(requestedExtensions);
-        extensions.add(EXTERNAL_MEMORY_WIN32);
-        extensions.add(EXTERNAL_SEMAPHORE_WIN32);
+        // Keep the caller-owned set in sync with the collection passed to
+        // vkCreateDevice. Minecraft later reuses that same set to populate
+        // DeviceInfo, which is also our post-creation source of truth.
+        requestedExtensions.add(EXTERNAL_MEMORY_WIN32);
+        requestedExtensions.add(EXTERNAL_SEMAPHORE_WIN32);
         interopBootstrap = new InteropBootstrap(
                 true,
                 INTEROP_REQUEST.source(),
@@ -102,7 +104,7 @@ public final class VulkanCapabilityProbe {
                 true,
                 true,
                 "extensions requested");
-        return extensions;
+        return requestedExtensions;
     }
 
     public static InteropBootstrap interopBootstrap() {
