@@ -115,12 +115,21 @@ Cycles/OptiX
 
 ## 5. 后续实现拆分
 
-### P14：只读能力探针
+### P14：只读能力探针（已完成）
 
-- 在 Vulkan 设备创建前报告 external memory/semaphore、swapchain colorspace、HDR metadata 可用性。
+- 从已创建的活动 Vulkan instance/device 只读报告 external memory/semaphore、swapchain colorspace、HDR metadata 的驱动可用性与 Minecraft 启用状态。
 - 在 surface 创建后报告所有 format/color-space 组合。
 - 报告 Vulkan UUID 与 Cycles/OptiX UUID 是否一致。
 - 不改变设备扩展、swapchain 或当前上传路径。
+
+实现结果：
+
+- Java 侧从活动 Minecraft `VulkanDevice` 和窗口 surface 只读枚举 instance/device extensions、完整 surface format/color-space 对和 Vulkan 设备 UUID；F10 区分 `available` 与 `enabled`。
+- Native ABI v20 在活动 OptiX/CUDA 设备选中或回退时缓存 CUDA UUID；CPU 后端明确返回 `unavailable`，不会把 PCI 字符串当 UUID。
+- F10 比较 Vulkan/Cycles UUID，并分别给出互操作扩展 available/enabled/prerequisites/active 与 HDR colorspace extension/surface advertised/negotiate/active。前置条件满足也不会被标成互操作已经 active。
+- 当 `VK_EXT_swapchain_colorspace` 未在 instance 创建时启用，当前 surface 查询可能不会暴露扩展色彩空间；因此零个 HDR candidates 只能表示“当前 instance 下未枚举到”，不能断言显示器或驱动不支持 HDR。
+- 当前仍未修改 Minecraft extension 集合、Cycles `headless`、surface 选择或 FrameStore 上传，因此 P14 不宣称 interop/HDR 已启用。
+- 自动验证：Java 编译、Mixin 资源 JSON、native ABI/布局、RTX 5080 OptiX smoke 均通过；游戏内实际 surface 枚举仍需人工查看 F10。
 
 ### P15：外部 buffer 单帧原型
 

@@ -255,6 +255,29 @@ public final class VulkanCapabilityProbe {
             return surfaceFormats.stream().filter(SurfaceFormat::hdrCandidate).count();
         }
 
+        public boolean uuidMatches(String cyclesDeviceUuid) {
+            return physicalDeviceUuid.length() == 32
+                    && physicalDeviceUuid.equalsIgnoreCase(cyclesDeviceUuid);
+        }
+
+        public boolean interopExtensionsAvailable() {
+            return externalMemoryWin32.available()
+                    && externalSemaphoreWin32.available();
+        }
+
+        public boolean interopExtensionsEnabled() {
+            return externalMemoryWin32.enabled()
+                    && externalSemaphoreWin32.enabled();
+        }
+
+        public boolean hdrSurfaceAdvertised() {
+            return hdrSurfaceFormatCount() > 0;
+        }
+
+        public boolean hdrNegotiationEnabled() {
+            return swapchainColorspace.enabled() && hdrSurfaceFormatCount() > 0;
+        }
+
         public String surfaceFormatSummary() {
             if (surfaceFormats.isEmpty()) {
                 return "none";

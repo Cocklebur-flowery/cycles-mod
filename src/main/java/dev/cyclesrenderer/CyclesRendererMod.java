@@ -461,6 +461,31 @@ public final class CyclesRendererMod {
                                 + " " + vulkan.surfaceFormatSummary(),
                         6, y, 0xFFE0E0E0);
                 y += 10;
+                boolean uuidMatch = vulkan.uuidMatches(diagnostics.deviceUuid());
+                boolean interopPrerequisites =
+                        uuidMatch && vulkan.interopExtensionsEnabled();
+                graphics.text(
+                        minecraft.font,
+                        "interop uuid cycles=" + diagnostics.deviceUuid()
+                                + " match=" + uuidMatch,
+                        6, y, uuidMatch ? 0xFFE0E0E0 : 0xFFFFAA55);
+                y += 10;
+                graphics.text(
+                        minecraft.font,
+                        "interop available=" + vulkan.interopExtensionsAvailable()
+                                + " enabled=" + vulkan.interopExtensionsEnabled()
+                                + " prerequisites=" + interopPrerequisites
+                                + " active=false",
+                        6, y, 0xFFFFDD88);
+                y += 10;
+                graphics.text(
+                        minecraft.font,
+                        "hdr colorspace ext=" + vulkan.swapchainColorspace().summary()
+                                + " surfaceAdvertised=" + vulkan.hdrSurfaceAdvertised()
+                                + " negotiate=" + vulkan.hdrNegotiationEnabled()
+                                + " active=false",
+                        6, y, 0xFFFFDD88);
+                y += 10;
             }
             graphics.text(
                     minecraft.font,

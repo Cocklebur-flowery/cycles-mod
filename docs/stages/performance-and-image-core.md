@@ -102,6 +102,10 @@ F10 叠加层采用“当前值 + 最近窗口统计”，不把目标值伪装�
 | P11 | `feat: integrate ocio color management` | OCIO Vulkan、AgX、ACES 2、工作/显示空间 | P11a-P11d 已完成自动验证；P11c/P11d 待游戏内验收 |
 | P12 | `feat: expose sampling and physical camera controls` | 原生蓝噪声、镜头、裁剪、景深 | P12a-P12d 已完成自动验证；待游戏内验收 |
 | P13 | `spike: evaluate hdr and vulkan interop` | Windows HDR 与 CUDA/Vulkan 互操作报告 | 已完成；实现拆分为 P14-P17 |
+| P14 | `feat: probe vulkan interop capabilities` | Vulkan/Cycles UUID、扩展与 HDR surface 只读探针 | 已完成自动验证；待游戏内 F10 验收 |
+| P15 | `feat: prototype external vulkan buffer` | 固定尺寸外部 buffer 与保守同步原型 | 待开始 |
+| P16 | `feat: synchronize vulkan interop ring` | 三槽生命周期与 CUDA/Vulkan 正式同步 | 待开始 |
+| P17 | `feat: prototype hdr swapchain` | Windows HDR surface 与输出 shader 原型 | 待开始 |
 
 ## 5. 稳定契约和保持不动的范围
 
