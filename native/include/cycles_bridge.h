@@ -139,6 +139,14 @@ enum CyclesBridgeSamplingState : std::uint32_t {
     CYCLES_BRIDGE_SAMPLING_STILL = 3,
 };
 
+enum CyclesBridgeSamplingPattern : std::uint32_t {
+    CYCLES_BRIDGE_SAMPLING_PATTERN_SOBOL_BURLEY = 0,
+    CYCLES_BRIDGE_SAMPLING_PATTERN_TABULATED_SOBOL = 1,
+    CYCLES_BRIDGE_SAMPLING_PATTERN_BLUE_NOISE_PURE = 2,
+    CYCLES_BRIDGE_SAMPLING_PATTERN_BLUE_NOISE_FIRST = 3,
+    CYCLES_BRIDGE_SAMPLING_PATTERN_BLUE_NOISE_ROUND = 4,
+};
+
 struct CyclesBridgeCamera {
     std::uint32_t struct_size;
     std::uint32_t struct_version;
@@ -268,7 +276,8 @@ struct CyclesBridgeRenderSettings {
     std::uint32_t dynamic_resolution;
     std::uint32_t interactive_resolution_percentage;
     std::uint32_t pass_cache_megabytes;
-    std::uint32_t reserved[6];
+    std::uint32_t sampling_pattern;
+    std::uint32_t reserved[5];
 };
 
 struct CyclesBridgePassDescriptor {
@@ -384,6 +393,8 @@ struct CyclesBridgeDiagnostics {
     std::uint32_t denoiser_schedule_reason;
     std::uint32_t denoiser_schedule_run_count;
     std::uint32_t denoiser_schedule_skip_count;
+    std::uint32_t sampling_pattern;
+    std::uint32_t reserved;
 };
 
 struct CyclesBridgeVertex {

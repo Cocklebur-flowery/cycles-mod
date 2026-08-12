@@ -228,6 +228,7 @@ CyclesBridgeRenderSettings default_settings() {
     settings.resolution_percentage = 100;
     settings.interactive_resolution_percentage = 50;
     settings.pass_cache_megabytes = 256;
+    settings.sampling_pattern = CYCLES_BRIDGE_SAMPLING_PATTERN_BLUE_NOISE_FIRST;
     settings.interactive_samples = 1;
     settings.still_samples = 1;
     settings.stationary_delay_millis = 150;
@@ -380,7 +381,7 @@ bool verify_progressive_sampling(
 int main(int argc, char** argv) {
     const bool require_optix = argc > 1 && std::strcmp(argv[1], "--require-optix") == 0;
     std::cerr << "[smoke] ABI check\n";
-    if (cycles_bridge_abi_version() != 16U) {
+    if (cycles_bridge_abi_version() != 17U) {
         std::cerr << "unexpected native ABI " << cycles_bridge_abi_version() << '\n';
         return 1;
     }
@@ -432,6 +433,37 @@ int main(int argc, char** argv) {
         || !require_ok(
             cycles_bridge_apply_settings(renderer, &settings),
             "initial settings")) {
+        cycles_bridge_destroy_renderer(renderer);
+        return 1;
+    }
+
+    for (std::uint32_t pattern = CYCLES_BRIDGE_SAMPLING_PATTERN_SOBOL_BURLEY;
+         pattern <= CYCLES_BRIDGE_SAMPLING_PATTERN_BLUE_NOISE_ROUND;
+         ++pattern) {
+        settings.sampling_pattern = pattern;
+        settings.revision++;
+        if (!require_ok(
+                cycles_bridge_apply_settings(renderer, &settings),
+                "sampling pattern settings")) {
+            cycles_bridge_destroy_renderer(renderer);
+            return 1;
+        }
+    }
+    CyclesBridgeRenderSettings invalid_sampling = settings;
+    invalid_sampling.sampling_pattern =
+        CYCLES_BRIDGE_SAMPLING_PATTERN_BLUE_NOISE_ROUND + 1U;
+    invalid_sampling.revision++;
+    if (cycles_bridge_apply_settings(renderer, &invalid_sampling)
+        != CYCLES_BRIDGE_STATUS_INVALID_ARGUMENT) {
+        std::cerr << "invalid sampling pattern was accepted\n";
+        cycles_bridge_destroy_renderer(renderer);
+        return 1;
+    }
+    settings.sampling_pattern = CYCLES_BRIDGE_SAMPLING_PATTERN_BLUE_NOISE_FIRST;
+    settings.revision++;
+    if (!require_ok(
+            cycles_bridge_apply_settings(renderer, &settings),
+            "Blue Noise First settings")) {
         cycles_bridge_destroy_renderer(renderer);
         return 1;
     }
@@ -645,7 +677,9 @@ int main(int argc, char** argv) {
         return 1;
     }
     const std::uint64_t all_passes_mask = (1ULL << CYCLES_BRIDGE_PASS_COUNT) - 1ULL;
-    if (diagnostics.cached_raw_pass_mask != all_passes_mask
+    if (diagnostics.sampling_pattern
+            != CYCLES_BRIDGE_SAMPLING_PATTERN_BLUE_NOISE_FIRST
+        || diagnostics.cached_raw_pass_mask != all_passes_mask
         || diagnostics.cached_denoised_pass_mask != 0U
         || diagnostics.pass_cache_entry_count < CYCLES_BRIDGE_PASS_COUNT
         || diagnostics.pass_cache_bytes == 0U
@@ -656,8 +690,9 @@ int main(int argc, char** argv) {
             < CYCLES_BRIDGE_PASS_COUNT - 1U
         || diagnostics.pass_registry_hit_count == 0U
         || diagnostics.active_frame_variant != CYCLES_BRIDGE_FRAME_VARIANT_RAW) {
-        std::cerr << "unexpected raw pass cache state: raw="
-                  << diagnostics.cached_raw_pass_mask
+        std::cerr << "unexpected raw pass cache state: sampling-pattern="
+                  << diagnostics.sampling_pattern
+                  << ";raw=" << diagnostics.cached_raw_pass_mask
                   << ";denoised=" << diagnostics.cached_denoised_pass_mask
                   << ";entries=" << diagnostics.pass_cache_entry_count
                   << ";bytes=" << diagnostics.pass_cache_bytes

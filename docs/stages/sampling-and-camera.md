@@ -1,6 +1,6 @@
 # Cycles 采样模式与物理相机（P12）
 
-状态：规划冻结，按可独立验证的子阶段实施  
+状态：P12a 已完成；P12b Native 核心已通过自动验证，Java/F9/F10 接入待开始
 目标平台：Blender Cycles 5.2 / Minecraft 26.2 相机 / OptiX
 
 ## 1. 目标与保持不变的默认行为

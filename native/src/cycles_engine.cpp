@@ -71,6 +71,7 @@ CyclesBridgeRenderSettings default_settings() {
     settings.dynamic_resolution = 0;
     settings.interactive_resolution_percentage = 50;
     settings.pass_cache_megabytes = 256;
+    settings.sampling_pattern = CYCLES_BRIDGE_SAMPLING_PATTERN_BLUE_NOISE_FIRST;
     settings.interactive_samples = 1;
     settings.still_samples = 8;
     settings.stationary_delay_millis = 150;
@@ -1423,6 +1424,8 @@ DenoiserSchedule configure_scene_settings(
     integrator->set_caustics_reflective(settings.reflective_caustics != 0U);
     integrator->set_caustics_refractive(settings.refractive_caustics != 0U);
     integrator->set_seed(settings.seed);
+    integrator->set_sampling_pattern(
+        static_cast<ccl::SamplingPattern>(settings.sampling_pattern));
     integrator->set_use_adaptive_sampling(settings.adaptive_sampling != 0U);
     integrator->set_adaptive_min_samples(static_cast<int>(settings.minimum_samples));
     integrator->set_adaptive_threshold(settings.noise_threshold);
@@ -1909,6 +1912,7 @@ class CyclesEngine::Impl final {
             diagnostics.denoiser_schedule_reason = denoiser_schedule_reason_;
             diagnostics.denoiser_schedule_run_count = denoiser_schedule_run_count_;
             diagnostics.denoiser_schedule_skip_count = denoiser_schedule_skip_count_;
+            diagnostics.sampling_pattern = sampling_pattern_diagnostic_;
         }
         frames_.fill_diagnostics(diagnostics);
     }
@@ -2454,6 +2458,7 @@ class CyclesEngine::Impl final {
                         std::lock_guard lock(state_mutex_);
                         active_settings_revision_diagnostic_ = active_settings_revision;
                         active_pass_diagnostic_ = active_settings.active_pass;
+                        sampling_pattern_diagnostic_ = active_settings.sampling_pattern;
                         registered_pass_mask_diagnostic_ = registered_pass_mask;
                     }
                 }
@@ -2598,6 +2603,8 @@ class CyclesEngine::Impl final {
         CYCLES_BRIDGE_DENOISER_SCHEDULE_DISABLED;
     std::uint32_t denoiser_schedule_run_count_ = 0;
     std::uint32_t denoiser_schedule_skip_count_ = 0;
+    std::uint32_t sampling_pattern_diagnostic_ =
+        CYCLES_BRIDGE_SAMPLING_PATTERN_BLUE_NOISE_FIRST;
     std::string state_;
     std::string terminal_error_;
 
