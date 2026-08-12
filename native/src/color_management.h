@@ -21,6 +21,7 @@ class ColorManagement final {
 
     bool query_lut(
         std::uint32_t view_transform,
+        std::uint32_t color_look,
         CyclesBridgeColorLutDescriptor& descriptor,
         float* rgba,
         std::uint64_t rgba_capacity,

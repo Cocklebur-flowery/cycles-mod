@@ -326,7 +326,8 @@ final class CyclesDebugOverlay {
                             : "Vulkan probe unavailable: " + vulkan.error(),
                     vulkan.vulkan() ? COLOR_STATIC : COLOR_WARNING);
             out.line(
-                    "color view=" + settings.viewTransform().name()
+                    "color view/look=" + settings.viewTransform().name()
+                            + "/" + settings.colorLook().name()
                             + " supported="
                             + capabilities.supportsViewTransform(settings.viewTransform())
                             + "  OCIO=" + capabilities.colorConfigStateName()

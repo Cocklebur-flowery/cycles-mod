@@ -18,7 +18,7 @@ struct CyclesBridgeRenderer {
 
 namespace {
 
-constexpr std::uint32_t kAbiVersion = 29;
+constexpr std::uint32_t kAbiVersion = 30;
 constexpr std::uint32_t kStructVersion = 1;
 constexpr char kBuildInfo[] = "cyclesrenderer-native/cycles-5.2;abi=29";
 
@@ -455,6 +455,7 @@ std::uint32_t cycles_bridge_write_color_management_info(
 std::uint32_t cycles_bridge_query_color_lut(
     const CyclesBridgeRenderer* renderer,
     std::uint32_t view_transform,
+    std::uint32_t color_look,
     CyclesBridgeColorLutDescriptor* descriptor,
     float* rgba,
     std::uint64_t rgba_capacity) {
@@ -468,7 +469,7 @@ std::uint32_t cycles_bridge_query_color_lut(
         CyclesBridgeColorLutDescriptor result{};
         std::string error;
         if (!renderer->engine->query_color_lut(
-                view_transform, result, nullptr, 0U, error)) {
+                view_transform, color_look, result, nullptr, 0U, error)) {
             return CYCLES_BRIDGE_STATUS_RENDER_ERROR;
         }
         *descriptor = result;
@@ -479,7 +480,7 @@ std::uint32_t cycles_bridge_query_color_lut(
             return CYCLES_BRIDGE_STATUS_BUFFER_TOO_SMALL;
         }
         return renderer->engine->query_color_lut(
-                   view_transform, result, rgba, rgba_capacity, error)
+                   view_transform, color_look, result, rgba, rgba_capacity, error)
             ? CYCLES_BRIDGE_STATUS_OK
             : CYCLES_BRIDGE_STATUS_RENDER_ERROR;
     } catch (const std::bad_alloc&) {

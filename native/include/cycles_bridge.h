@@ -62,6 +62,19 @@ enum CyclesBridgeViewTransform : std::uint32_t {
     CYCLES_BRIDGE_VIEW_TRANSFORM_ACES_2 = 4,
 };
 
+enum CyclesBridgeColorLook : std::uint32_t {
+    CYCLES_BRIDGE_COLOR_LOOK_NONE = 0,
+    CYCLES_BRIDGE_COLOR_LOOK_AGX_PUNCHY = 1,
+    CYCLES_BRIDGE_COLOR_LOOK_AGX_VERY_HIGH_CONTRAST = 2,
+    CYCLES_BRIDGE_COLOR_LOOK_AGX_HIGH_CONTRAST = 3,
+    CYCLES_BRIDGE_COLOR_LOOK_AGX_MEDIUM_HIGH_CONTRAST = 4,
+    CYCLES_BRIDGE_COLOR_LOOK_AGX_BASE_CONTRAST = 5,
+    CYCLES_BRIDGE_COLOR_LOOK_AGX_MEDIUM_LOW_CONTRAST = 6,
+    CYCLES_BRIDGE_COLOR_LOOK_AGX_LOW_CONTRAST = 7,
+    CYCLES_BRIDGE_COLOR_LOOK_AGX_VERY_LOW_CONTRAST = 8,
+    CYCLES_BRIDGE_COLOR_LOOK_AGX_GREYSCALE = 9,
+};
+
 enum CyclesBridgeColorConfigState : std::uint32_t {
     CYCLES_BRIDGE_COLOR_CONFIG_UNAVAILABLE = 0,
     CYCLES_BRIDGE_COLOR_CONFIG_READY = 1,
@@ -378,7 +391,8 @@ struct CyclesBridgeColorLutDescriptor {
     float shaper_log2_max;
     float shaper_epsilon;
     std::uint32_t interpolation;
-    std::uint32_t reserved[2];
+    std::uint32_t color_look;
+    std::uint32_t reserved;
 };
 
 struct CyclesBridgeDiagnostics {
@@ -600,6 +614,7 @@ CYCLES_BRIDGE_API std::uint32_t cycles_bridge_write_color_management_info(
 CYCLES_BRIDGE_API std::uint32_t cycles_bridge_query_color_lut(
     const CyclesBridgeRenderer* renderer,
     std::uint32_t view_transform,
+    std::uint32_t color_look,
     CyclesBridgeColorLutDescriptor* descriptor,
     float* rgba,
     std::uint64_t rgba_capacity);

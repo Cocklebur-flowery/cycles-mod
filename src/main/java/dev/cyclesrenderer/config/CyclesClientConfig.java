@@ -78,6 +78,7 @@ public final class CyclesClientConfig {
     private static final ModConfigSpec.DoubleValue EXPOSURE_EV;
     private static final ModConfigSpec.DoubleValue GAMMA;
     private static final ModConfigSpec.EnumValue<CyclesRenderSettings.ViewTransform> VIEW_TRANSFORM;
+    private static final ModConfigSpec.EnumValue<CyclesRenderSettings.ColorLook> COLOR_LOOK;
     private static final ModConfigSpec.EnumValue<CyclesRenderSettings.PassView> ACTIVE_PASS;
     private static final ModConfigSpec.BooleanValue DEBUG_OVERLAY;
 
@@ -271,7 +272,10 @@ public final class CyclesClientConfig {
                 .defineInRange("gamma", 1.0D, 0.1D, 5.0D);
         VIEW_TRANSFORM = builder.translation("config.cyclesrenderer.color.viewTransform")
                 .comment("AgX and Khronos PBR Neutral require the packaged OCIO display pipeline.")
-                .defineEnum("viewTransform", CyclesRenderSettings.ViewTransform.STANDARD);
+                .defineEnum("viewTransform", CyclesRenderSettings.ViewTransform.AGX);
+        COLOR_LOOK = builder.translation("config.cyclesrenderer.color.look")
+                .comment("AgX looks come directly from Blender's packaged OCIO configuration.")
+                .defineEnum("look", CyclesRenderSettings.ColorLook.AGX_PUNCHY);
         builder.pop();
 
         builder.push("diagnostics");
@@ -326,6 +330,7 @@ public final class CyclesClientConfig {
                 DENOISER_MODE.get(), DENOISER_START_SAMPLE.get(), DENOISER_INPUT.get(),
                 DENOISER_PREFILTER.get(), DENOISER_QUALITY.get(), DENOISER_USE_GPU.get(),
                 EXPOSURE_EV.get().floatValue(), GAMMA.get().floatValue(), VIEW_TRANSFORM.get(),
+                COLOR_LOOK.get(),
                 ACTIVE_PASS.get(), DEBUG_OVERLAY.get());
     }
 

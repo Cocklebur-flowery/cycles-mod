@@ -74,6 +74,7 @@ public record CyclesRenderSettings(
         float exposureEv,
         float gamma,
         ViewTransform viewTransform,
+        ColorLook colorLook,
         PassView activePass,
         boolean debugOverlay) {
 
@@ -318,6 +319,39 @@ public record CyclesRenderSettings(
         @Override
         public String translationGroup() {
             return "view_transform";
+        }
+    }
+
+    public enum ColorLook implements NativeEnum, NamedEnum {
+        NONE(0),
+        AGX_PUNCHY(1),
+        AGX_VERY_HIGH_CONTRAST(2),
+        AGX_HIGH_CONTRAST(3),
+        AGX_MEDIUM_HIGH_CONTRAST(4),
+        AGX_BASE_CONTRAST(5),
+        AGX_MEDIUM_LOW_CONTRAST(6),
+        AGX_LOW_CONTRAST(7),
+        AGX_VERY_LOW_CONTRAST(8),
+        AGX_GREYSCALE(9);
+
+        private final int nativeId;
+
+        ColorLook(int nativeId) {
+            this.nativeId = nativeId;
+        }
+
+        @Override
+        public int nativeId() {
+            return nativeId;
+        }
+
+        @Override
+        public String translationGroup() {
+            return "color_look";
+        }
+
+        public int effectiveNativeId(ViewTransform viewTransform) {
+            return viewTransform == ViewTransform.AGX ? nativeId : NONE.nativeId;
         }
     }
 

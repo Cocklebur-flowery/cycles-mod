@@ -2572,12 +2572,13 @@ class CyclesEngine::Impl final {
 
     bool query_color_lut(
         std::uint32_t view_transform,
+        std::uint32_t color_look,
         CyclesBridgeColorLutDescriptor& descriptor,
         float* rgba,
         std::uint64_t rgba_capacity,
         std::string& error) const {
         return color_management_->query_lut(
-            view_transform, descriptor, rgba, rgba_capacity, error);
+            view_transform, color_look, descriptor, rgba, rgba_capacity, error);
     }
 
     void query_diagnostics(CyclesBridgeDiagnostics& diagnostics) const {
@@ -3645,12 +3646,13 @@ std::string CyclesEngine::color_management_info() const {
 
 bool CyclesEngine::query_color_lut(
     std::uint32_t view_transform,
+    std::uint32_t color_look,
     CyclesBridgeColorLutDescriptor& descriptor,
     float* rgba,
     std::uint64_t rgba_capacity,
     std::string& error) const {
     return impl_->query_color_lut(
-        view_transform, descriptor, rgba, rgba_capacity, error);
+        view_transform, color_look, descriptor, rgba, rgba_capacity, error);
 }
 
 void CyclesEngine::query_diagnostics(CyclesBridgeDiagnostics& diagnostics) const {

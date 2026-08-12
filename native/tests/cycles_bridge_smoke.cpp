@@ -414,7 +414,7 @@ bool verify_progressive_sampling(
 int main(int argc, char** argv) {
     const bool require_optix = argc > 1 && std::strcmp(argv[1], "--require-optix") == 0;
     std::cerr << "[smoke] ABI check\n";
-    if (cycles_bridge_abi_version() != 29U) {
+    if (cycles_bridge_abi_version() != 30U) {
         std::cerr << "unexpected native ABI " << cycles_bridge_abi_version() << '\n';
         return 1;
     }
@@ -651,6 +651,7 @@ int main(int argc, char** argv) {
             cycles_bridge_query_color_lut(
                 renderer,
                 CYCLES_BRIDGE_VIEW_TRANSFORM_AGX,
+                CYCLES_BRIDGE_COLOR_LOOK_AGX_PUNCHY,
                 &color_lut,
                 nullptr,
                 0U),
@@ -659,6 +660,7 @@ int main(int argc, char** argv) {
         || color_lut.width != color_lut.edge_length * color_lut.edge_length
         || color_lut.height != color_lut.edge_length
         || color_lut.pixel_format != CYCLES_BRIDGE_PIXEL_FORMAT_RGBA32_FLOAT
+        || color_lut.color_look != CYCLES_BRIDGE_COLOR_LOOK_AGX_PUNCHY
         || color_lut.pixel_byte_count
             != static_cast<std::uint64_t>(color_lut.width) * color_lut.height
                 * 4U * sizeof(float)) {
@@ -672,6 +674,7 @@ int main(int argc, char** argv) {
     if (cycles_bridge_query_color_lut(
             renderer,
             CYCLES_BRIDGE_VIEW_TRANSFORM_AGX,
+            CYCLES_BRIDGE_COLOR_LOOK_AGX_PUNCHY,
             &color_lut,
             color_lut_pixels.data(),
             sizeof(float)) != CYCLES_BRIDGE_STATUS_BUFFER_TOO_SMALL
@@ -679,6 +682,7 @@ int main(int argc, char** argv) {
             cycles_bridge_query_color_lut(
                 renderer,
                 CYCLES_BRIDGE_VIEW_TRANSFORM_AGX,
+                CYCLES_BRIDGE_COLOR_LOOK_AGX_PUNCHY,
                 &color_lut,
                 color_lut_pixels.data(),
                 color_lut.pixel_byte_count),
@@ -691,7 +695,7 @@ int main(int argc, char** argv) {
         + static_cast<std::size_t>(32U) * color_lut.edge_length
         + 32U) * 4U;
     if (!std::isfinite(color_lut_pixels[neutral_midpoint])
-        || std::abs(color_lut_pixels[neutral_midpoint] - 0.970145F) > 0.0001F
+        || std::abs(color_lut_pixels[neutral_midpoint] - 0.941668F) > 0.0001F
         || std::abs(color_lut_pixels[neutral_midpoint + 3U] - 1.0F) > 0.0001F) {
         std::cerr << "unexpected AgX LUT midpoint "
                   << color_lut_pixels[neutral_midpoint] << '\n';

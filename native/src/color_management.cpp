@@ -30,10 +30,27 @@ struct ViewDefinition final {
     const char* name;
 };
 
+struct LookDefinition final {
+    std::uint32_t id;
+    const char* name;
+};
+
 constexpr std::array<ViewDefinition, 3> kOcioViews = {{
     {CYCLES_BRIDGE_VIEW_TRANSFORM_AGX, "AgX"},
     {CYCLES_BRIDGE_VIEW_TRANSFORM_KHRONOS_PBR_NEUTRAL, "Khronos PBR Neutral"},
     {CYCLES_BRIDGE_VIEW_TRANSFORM_ACES_2, "ACES 2.0"},
+}};
+
+constexpr std::array<LookDefinition, 9> kAgxLooks = {{
+    {CYCLES_BRIDGE_COLOR_LOOK_AGX_PUNCHY, "AgX - Punchy"},
+    {CYCLES_BRIDGE_COLOR_LOOK_AGX_VERY_HIGH_CONTRAST, "AgX - Very High Contrast"},
+    {CYCLES_BRIDGE_COLOR_LOOK_AGX_HIGH_CONTRAST, "AgX - High Contrast"},
+    {CYCLES_BRIDGE_COLOR_LOOK_AGX_MEDIUM_HIGH_CONTRAST, "AgX - Medium High Contrast"},
+    {CYCLES_BRIDGE_COLOR_LOOK_AGX_BASE_CONTRAST, "AgX - Base Contrast"},
+    {CYCLES_BRIDGE_COLOR_LOOK_AGX_MEDIUM_LOW_CONTRAST, "AgX - Medium Low Contrast"},
+    {CYCLES_BRIDGE_COLOR_LOOK_AGX_LOW_CONTRAST, "AgX - Low Contrast"},
+    {CYCLES_BRIDGE_COLOR_LOOK_AGX_VERY_LOW_CONTRAST, "AgX - Very Low Contrast"},
+    {CYCLES_BRIDGE_COLOR_LOOK_AGX_GREYSCALE, "AgX - Greyscale"},
 }};
 
 std::string wide_to_utf8(const std::wstring& value) {
@@ -87,6 +104,22 @@ const char* view_name(std::uint32_t view_transform) {
     return nullptr;
 }
 
+const char* look_name(std::uint32_t color_look) {
+    if (color_look == CYCLES_BRIDGE_COLOR_LOOK_NONE) {
+        return nullptr;
+    }
+    for (const LookDefinition& look : kAgxLooks) {
+        if (look.id == color_look) {
+            return look.name;
+        }
+    }
+    return nullptr;
+}
+
+std::uint64_t pipeline_key(std::uint32_t view_transform, std::uint32_t color_look) {
+    return (static_cast<std::uint64_t>(view_transform) << 32U) | color_look;
+}
+
 float unshape(std::uint32_t index) {
     const float unit = static_cast<float>(index) / static_cast<float>(kLutEdgeLength - 1U);
     const float exponent = kShaperLog2Min + unit * (kShaperLog2Max - kShaperLog2Min);
@@ -104,14 +137,11 @@ class ColorManagement::Impl final {
             config_path_ = color_config_path();
             config_ = OCIO::Config::CreateFromFile(wide_to_utf8(config_path_.wstring()).c_str());
             for (const ViewDefinition& view : kOcioViews) {
-                processors_.emplace(
-                    view.id,
-                    config_->getProcessor(
-                        OCIO::ROLE_SCENE_LINEAR,
-                        "sRGB",
-                        view.name,
-                        OCIO::TRANSFORM_DIR_FORWARD)->getDefaultCPUProcessor());
+                build_processor(view.id, CYCLES_BRIDGE_COLOR_LOOK_NONE);
                 transform_mask_ |= 1U << view.id;
+            }
+            for (const LookDefinition& look : kAgxLooks) {
+                build_processor(CYCLES_BRIDGE_VIEW_TRANSFORM_AGX, look.id);
             }
             state_ = CYCLES_BRIDGE_COLOR_CONFIG_READY;
         } catch (const std::exception& exception) {
@@ -152,15 +182,23 @@ class ColorManagement::Impl final {
 
     bool query_lut(
         std::uint32_t view_transform,
+        std::uint32_t color_look,
         CyclesBridgeColorLutDescriptor& descriptor,
         float* rgba,
         std::uint64_t rgba_capacity,
         std::string& error) const {
-        const auto processor = processors_.find(view_transform);
+        if (view_transform != CYCLES_BRIDGE_VIEW_TRANSFORM_AGX) {
+            color_look = CYCLES_BRIDGE_COLOR_LOOK_NONE;
+        }
+        const std::uint64_t key = pipeline_key(view_transform, color_look);
+        const auto processor = processors_.find(key);
         if (processor == processors_.end()) {
             error = view_name(view_transform) == nullptr
                 ? "the requested view transform does not use an OCIO LUT"
-                : "the requested OCIO view transform is unavailable";
+                : (color_look != CYCLES_BRIDGE_COLOR_LOOK_NONE
+                        && look_name(color_look) == nullptr)
+                    ? "the requested OCIO look is unavailable"
+                    : "the requested OCIO view transform is unavailable";
             return false;
         }
 
@@ -181,6 +219,7 @@ class ColorManagement::Impl final {
         descriptor.shaper_log2_max = kShaperLog2Max;
         descriptor.shaper_epsilon = kShaperEpsilon;
         descriptor.interpolation = CYCLES_BRIDGE_COLOR_LUT_INTERPOLATION_TRILINEAR;
+        descriptor.color_look = color_look;
 
         if (rgba == nullptr) {
             return rgba_capacity == 0U;
@@ -191,16 +230,43 @@ class ColorManagement::Impl final {
         }
 
         std::lock_guard lock(cache_mutex_);
-        const std::vector<float>& pixels = cached_lut(view_transform, processor->second);
+        const std::vector<float>& pixels = cached_lut(key, processor->second);
         std::memcpy(rgba, pixels.data(), static_cast<std::size_t>(descriptor.pixel_byte_count));
         return true;
     }
 
  private:
+    void build_processor(std::uint32_t view_transform, std::uint32_t color_look) {
+        const char* view = view_name(view_transform);
+        if (view == nullptr) {
+            throw std::runtime_error("unknown OCIO view transform");
+        }
+        OCIO::GroupTransformRcPtr transforms = OCIO::GroupTransform::Create();
+        if (color_look != CYCLES_BRIDGE_COLOR_LOOK_NONE) {
+            const char* look = look_name(color_look);
+            if (look == nullptr) {
+                throw std::runtime_error("unknown OCIO look");
+            }
+            OCIO::LookTransformRcPtr look_transform = OCIO::LookTransform::Create();
+            look_transform->setSrc(OCIO::ROLE_SCENE_LINEAR);
+            look_transform->setDst(OCIO::ROLE_SCENE_LINEAR);
+            look_transform->setLooks(look);
+            transforms->appendTransform(look_transform);
+        }
+        OCIO::DisplayViewTransformRcPtr display = OCIO::DisplayViewTransform::Create();
+        display->setSrc(OCIO::ROLE_SCENE_LINEAR);
+        display->setDisplay("sRGB");
+        display->setView(view);
+        transforms->appendTransform(display);
+        processors_.emplace(
+            pipeline_key(view_transform, color_look),
+            config_->getProcessor(transforms)->getDefaultCPUProcessor());
+    }
+
     const std::vector<float>& cached_lut(
-        std::uint32_t view_transform,
+        std::uint64_t key,
         const OCIO::ConstCPUProcessorRcPtr& processor) const {
-        const auto cached = lut_cache_.find(view_transform);
+        const auto cached = lut_cache_.find(key);
         if (cached != lut_cache_.end()) {
             return cached->second;
         }
@@ -229,17 +295,17 @@ class ColorManagement::Impl final {
                 throw std::runtime_error("OpenColorIO generated a non-finite LUT value");
             }
         }
-        return lut_cache_.emplace(view_transform, std::move(pixels)).first->second;
+        return lut_cache_.emplace(key, std::move(pixels)).first->second;
     }
 
     std::filesystem::path config_path_;
     OCIO::ConstConfigRcPtr config_;
-    std::unordered_map<std::uint32_t, OCIO::ConstCPUProcessorRcPtr> processors_;
+    std::unordered_map<std::uint64_t, OCIO::ConstCPUProcessorRcPtr> processors_;
     std::uint32_t state_ = CYCLES_BRIDGE_COLOR_CONFIG_UNAVAILABLE;
     std::uint32_t transform_mask_ = 0;
     std::string error_;
     mutable std::mutex cache_mutex_;
-    mutable std::unordered_map<std::uint32_t, std::vector<float>> lut_cache_;
+    mutable std::unordered_map<std::uint64_t, std::vector<float>> lut_cache_;
 };
 
 ColorManagement::ColorManagement() : impl_(std::make_unique<Impl>()) {}
@@ -264,9 +330,11 @@ std::string ColorManagement::info() const {
 
 bool ColorManagement::query_lut(
     std::uint32_t view_transform,
+    std::uint32_t color_look,
     CyclesBridgeColorLutDescriptor& descriptor,
     float* rgba,
     std::uint64_t rgba_capacity,
     std::string& error) const {
-    return impl_->query_lut(view_transform, descriptor, rgba, rgba_capacity, error);
+    return impl_->query_lut(
+        view_transform, color_look, descriptor, rgba, rgba_capacity, error);
 }

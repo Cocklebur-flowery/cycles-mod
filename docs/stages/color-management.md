@@ -29,6 +29,7 @@ Minecraft 26.2 的图形封装目前不开放 3D 纹理，因此 P11 的 GPU LUT
 - P11b：增加色彩处理器能力/错误诊断与可复现的 GPU LUT 数据契约（已完成）。
 - P11c：Vulkan presenter 绑定扁平 LUT，使 AgX 和 Khronos PBR Neutral 真正生效（已实现，等待游戏内验收）。
 - P11d：增加 ACES 2.0 SDR 查看变换，并明确 Rec.2020/PQ/HLG 与真 HDR swapchain 的边界（已完成自动验证，等待游戏内验收）。
+- P17b1：把 Blender 5.2 OCIO 配置中的官方 AgX Looks 接入显示管线；默认使用 `AgX - Punchy`，并允许在 F9 独立切换（已完成原生构建与 LUT 基准验证，等待游戏内验收）。
 
 ## 4. 稳定边界
 
@@ -59,6 +60,7 @@ Minecraft 26.2 的图形封装目前不开放 3D 纹理，因此 P11 的 GPU LUT
 - scene-linear 输入使用固定 log2 shaper：范围 `[-10, 16]`，epsilon 为 `2^-10`。这覆盖零到约 65536 的 HDR 通道值；负值在显示端钳制为零，不会改变 scene-linear 帧缓存。
 - 原生能力结构保留 64 字节大小，并把原保留槽定义为色彩变换掩码、LUT 边长、像素格式和配置状态。`cycles_bridge_write_color_management_info` 返回实际配置路径、状态、显示设备、边长和错误原因。
 - LUT 按视图惰性生成并缓存。AgX、Khronos PBR Neutral 与 ACES 2.0 都调用固定 Blender 配置中的官方 OCIO CPU processor，不使用手写近似曲线。
+- P17b1 将缓存键扩展为 `View Transform + Look`。Look 只对 AgX 生效；非 AgX 查看变换会强制使用 `None`，避免把配置中仅为 AgX 定义的 Look 错套到其他处理器。Look 位于 scene-linear 输入与 display/view processor 之间，仍由同一份 Blender 5.2 OCIO 配置执行。
 - Java FFM 已同步 ABI v16，可取得能力掩码、配置状态、原生配置说明和只读 RGBA32F LUT。F10 显示当前 View Transform 是否受支持、OCIO 状态、LUT 规格和实际配置路径。
 
 ## 8. P11c Vulkan 显示绑定
