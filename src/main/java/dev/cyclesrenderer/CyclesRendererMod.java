@@ -7,6 +7,7 @@ import dev.cyclesrenderer.config.CyclesRenderSettings;
 import dev.cyclesrenderer.nativebridge.NativeBridge;
 import dev.cyclesrenderer.render.CyclesFramePresenter;
 import dev.cyclesrenderer.render.CyclesRenderPipelines;
+import dev.cyclesrenderer.render.VulkanCapabilityProbe;
 import dev.cyclesrenderer.scene.DistantHorizonsSceneProvider;
 import dev.cyclesrenderer.scene.SectionGeometryCollector;
 import dev.cyclesrenderer.scene.SectionSceneManager;
@@ -388,6 +389,8 @@ public final class CyclesRendererMod {
             NativeBridge.Capabilities capabilities = NativeBridge.capabilities();
             NativeBridge.PassDescriptor passDescriptor =
                     NativeBridge.passDescriptor(diagnostics.activePassId());
+            VulkanCapabilityProbe.Snapshot vulkan =
+                    VulkanCapabilityProbe.snapshot(minecraft);
             CyclesRenderSettings settings = CyclesClientConfig.snapshot();
             CyclesFramePresenter.Telemetry presentation = FRAME_PRESENTER.telemetry();
             SectionGeometryCollector.Telemetry capture = SectionGeometryCollector.telemetry();
@@ -429,6 +432,36 @@ public final class CyclesRendererMod {
                     "working=Linear Rec.709  output=sRGB SDR  HDR swapchain=false",
                     6, y, 0xFFE0E0E0);
             y += 10;
+            graphics.text(
+                    minecraft.font,
+                    vulkan.vulkan()
+                            ? "vulkan=" + vulkan.deviceName()
+                                    + " uuid=" + vulkan.physicalDeviceUuid()
+                            : "vulkan probe unavailable: " + vulkan.error(),
+                    6, y, vulkan.vulkan() ? 0xFFE0E0E0 : 0xFFFFAA55);
+            y += 10;
+            if (vulkan.vulkan()) {
+                graphics.text(
+                        minecraft.font,
+                        "vk ext colorspace=" + vulkan.swapchainColorspace().summary()
+                                + " hdrMetadata=" + vulkan.hdrMetadata().summary(),
+                        6, y, 0xFFE0E0E0);
+                y += 10;
+                graphics.text(
+                        minecraft.font,
+                        "vk ext memoryWin32=" + vulkan.externalMemoryWin32().summary()
+                                + " semaphoreWin32="
+                                + vulkan.externalSemaphoreWin32().summary(),
+                        6, y, 0xFFE0E0E0);
+                y += 10;
+                graphics.text(
+                        minecraft.font,
+                        "surface formats=" + vulkan.surfaceFormats().size()
+                                + " hdrCandidates=" + vulkan.hdrSurfaceFormatCount()
+                                + " " + vulkan.surfaceFormatSummary(),
+                        6, y, 0xFFE0E0E0);
+                y += 10;
+            }
             graphics.text(
                     minecraft.font,
                     "resolution=" + settings.resolutionPercentage() + "%"
