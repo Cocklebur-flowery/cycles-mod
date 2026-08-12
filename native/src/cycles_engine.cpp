@@ -1538,9 +1538,21 @@ ccl::Shader* create_material_shader(
 
 void configure_background(ccl::Scene* scene) {
     auto graph = ccl::make_unique<ccl::ShaderGraph>();
+    ccl::SkyTextureNode* sky = graph->create_node<ccl::SkyTextureNode>();
+    sky->set_sky_type(ccl::NODE_SKY_MULTIPLE_SCATTERING);
+    sky->set_sun_disc(true);
+    sky->set_sun_size(0.009512F);
+    sky->set_sun_intensity(1.0F);
+    sky->set_sun_elevation(0.785398163F);
+    sky->set_sun_rotation(0.610865238F);
+    sky->set_altitude(1000.0F);
+    sky->set_air_density(1.0F);
+    sky->set_aerosol_density(1.0F);
+    sky->set_ozone_density(2.0F);
+
     ccl::BackgroundNode* background = graph->create_node<ccl::BackgroundNode>();
-    background->set_color(ccl::make_float3(0.18F, 0.32F, 0.55F));
-    background->set_strength(0.8F);
+    background->set_strength(1.0F);
+    graph->connect(sky->output("Color"), background->input("Color"));
     graph->connect(background->output("Background"), graph->output()->input("Surface"));
     scene->default_background->set_graph(std::move(graph));
     scene->default_background->tag_update(scene);

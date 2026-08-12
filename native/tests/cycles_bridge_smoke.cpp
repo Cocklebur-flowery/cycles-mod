@@ -154,11 +154,12 @@ bool wait_for_checksum_change(
     return false;
 }
 
-bool wait_for_background_frame(
+bool wait_for_empty_scene_frame(
     CyclesBridgeRenderer* renderer,
     CyclesBridgeCamera& camera,
     CyclesBridgeFrame& frame,
     std::vector<std::uint8_t>& pixels,
+    std::uint64_t previous_generation,
     const char* stage,
     std::string& info) {
     for (int attempt = 0; attempt < 300; ++attempt) {
@@ -176,12 +177,22 @@ bool wait_for_background_frame(
             std::cerr << "[smoke] " << stage << ": " << info << '\n';
         }
         if ((frame.flags & CYCLES_BRIDGE_FRAME_UPDATED) != 0U
-            && !has_rgb_variation(pixels)) {
-            return true;
+            && frame.generation > previous_generation) {
+            CyclesBridgeDiagnostics diagnostics{};
+            diagnostics.struct_size = sizeof(CyclesBridgeDiagnostics);
+            diagnostics.struct_version = 1;
+            if (!require_ok(
+                    cycles_bridge_query_diagnostics(renderer, &diagnostics),
+                    "empty scene diagnostics")) {
+                return false;
+            }
+            if (diagnostics.section_count == 0U) {
+                return true;
+            }
         }
         Sleep(100);
     }
-    std::cerr << stage << " did not converge to the background frame\n";
+    std::cerr << stage << " did not produce an updated empty-scene frame\n";
     return false;
 }
 
@@ -1169,8 +1180,14 @@ int main(int argc, char** argv) {
             cycles_bridge_remove_section(renderer, section.section_id),
             "section removal")
         || !require_ok(cycles_bridge_commit_scene(renderer), "removed scene commit")
-        || !wait_for_background_frame(
-            renderer, camera, frame, pixels, "removed section", info)) {
+        || !wait_for_empty_scene_frame(
+            renderer,
+            camera,
+            frame,
+            pixels,
+            updated_generation,
+            "removed section",
+            info)) {
         cycles_bridge_destroy_renderer(renderer);
         return 1;
     }
