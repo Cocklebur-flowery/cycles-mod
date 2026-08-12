@@ -173,6 +173,7 @@ P15c2/c3 保守同步复制与 Native ABI v23：
 - ABI v23 为单个共享 buffer 增加 `ready -> acquired -> release` 所有权握手。Cycles 只在 buffer 既不 ready、也未被 Minecraft 获取时开始下一次显示写入；Java 只能获取比上次已显示 generation 更新的帧。
 - Minecraft 使用当前 `VulkanCommandEncoder` 记录 `vkCmdCopyBufferToImage`，把共享 RGBA16F buffer 复制进普通 `TextureTarget` 的 RGBA16F 图像；现有 OCIO/曝光显示 pipeline 直接采样该图像，不经过 FFM 像素视图或 `writeToTexture` 暂存上传。
 - 当前正确性边界是保守的主机握手：Cycles 在 `update_end` 前已经同步 CUDA film-convert stream；Minecraft 提交 Vulkan copy 并等待对应 fence 完成后，才通过 ABI release 允许 CUDA 重写。它不会并行读写同一个 buffer，但仍不是 P16 的外部 semaphore 正式实时方案。
+- P16b 将 CUDA queue 完成屏障作为项目内补丁 `patches/cycles-v5.2-vulkan-interop-sync.patch` 固定下来。`setup-cycles.ps1` 在校验 Cycles 5.2 commit 后幂等应用；补丁已存在时只验证，固定源码发生漂移时停止构建，不会静默修改未知版本。
 - F8 和游戏退出先排空未完成 Vulkan copy，再销毁 Renderer/CUDA external-memory import，最后销毁 `TextureTarget`、`VkBuffer` 与 `VkDeviceMemory`。任何 session-attached 状态下直接释放 Vulkan 内存的请求都会被拒绝。
 - F10 报告 Native interop `active/ready/acquired`、generation、实际 sample、CUDA 同步时间，以及 Vulkan copy pending/display generation、提交次数、generation gaps 与 CPU enqueue 时间。旧 `upload` 指标在 interop 活动时应停止增长；它仍用于验证 CPU FrameStore 回退。
 - P15 固定 `480×270 RGBA16F`，单缓冲握手会限制生产/消费重叠，因此只用于证明数据路径和生命周期正确。1080p、三槽重叠、动态分辨率与 external semaphore 留给 P16。

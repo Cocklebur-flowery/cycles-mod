@@ -25,6 +25,9 @@ $cyclesInstall = Join-Path $dependencyRoot 'cycles-install'
 $blenderSource = Join-Path $dependencyRoot 'blender'
 $colorManagementSource = Join-Path $blenderSource 'release\datafiles\colormanagement'
 $colorManagementInstall = Join-Path $cyclesInstall 'color\ocio'
+$cyclesPatches = @(
+    (Join-Path $projectRoot 'patches\cycles-v5.2-vulkan-interop-sync.patch')
+)
 $requiredLibraryDirectories = @(
     'OpenImageIO',
     'aom',
@@ -52,6 +55,30 @@ function Invoke-Checked {
     if ($LASTEXITCODE -ne 0) {
         throw "Command failed with exit code ${LASTEXITCODE}: $Executable $($Arguments -join ' ')"
     }
+}
+
+function Apply-CyclesPatch {
+    param(
+        [Parameter(Mandatory)]
+        [string]$PatchPath
+    )
+
+    if (-not (Test-Path -LiteralPath $PatchPath -PathType Leaf)) {
+        throw "Cycles patch is missing: $PatchPath"
+    }
+
+    & $git -C $cyclesSource apply --reverse --check -- $PatchPath 2>$null
+    if ($LASTEXITCODE -eq 0) {
+        Write-Host "[cycles] Patch already applied: $([System.IO.Path]::GetFileName($PatchPath))"
+        return
+    }
+
+    $checkOutput = & $git -C $cyclesSource apply --check -- $PatchPath 2>&1
+    if ($LASTEXITCODE -ne 0) {
+        throw "Cycles patch does not apply cleanly: $PatchPath`n$($checkOutput -join "`n")"
+    }
+    Invoke-Checked $git -C $cyclesSource apply -- $PatchPath
+    Write-Host "[cycles] Applied patch: $([System.IO.Path]::GetFileName($PatchPath))"
 }
 
 function Get-MissingLibraryObjects {
@@ -208,6 +235,10 @@ if ($missingObjects.Count -gt 0) {
     throw "Required Git LFS objects are still missing:`n$($missingObjects -join "`n")"
 }
 Write-Host "[cycles] Libraries: $cyclesLibraries ($cyclesLibrariesCommit)"
+
+foreach ($cyclesPatch in $cyclesPatches) {
+    Apply-CyclesPatch -PatchPath $cyclesPatch
+}
 
 if (-not (Test-Path -LiteralPath $blenderSource)) {
     Invoke-Checked $git clone --filter=blob:none --no-checkout --depth 1 --branch $blenderRevision $blenderRepository $blenderSource
