@@ -245,6 +245,6 @@ P1 至 P4 完成后进行一次 1080p 游戏人工里程碑：观察实际 sampl
 - 每个 Section mutation 带单调 sequence。工作线程确认旧 update 时，只清除 sequence 仍匹配的 pending 项，因此后到的同 Section 更新或删除不会被旧确认误删；多个未处理 commit 会自然合并为最终状态。
 - scene reset 和旧整场景 upload 启动新的 epoch，并把下一次发布标记为 full replacement。设备回退、Session 重建或资源变化仍从工作线程完整快照恢复，不依赖已经确认并释放的 mutation。
 - Native 独立测试覆盖同 Section 覆盖、删除、晚到确认、跨 epoch 确认和完整替换；公开 ABI 集成测试覆盖 `upsert -> commit -> remove -> commit -> upsert -> commit` 不等待工作线程的快速序列，以及最终删除和 Section 诊断计数。
-- 自动验证通过 `buildNative`、`cyclesrenderer_scene_update` CTest 和 Gradle `build`。完整 Native smoke 在本次首次运行通过；后续两次复跑被既有 OptiX/OIDN 异步帧 variant 断言波动阻断，未修改不属于 RT-P1 的降噪逻辑。
+- 自动验证通过 `buildNative`、`cyclesrenderer_scene_update` CTest 和 Gradle `build`。完整 Native smoke 在初版实现后曾完整通过；最终复跑被既有 OptiX/OIDN 异步帧 variant 断言波动阻断，未修改不属于 RT-P1 的降噪逻辑。
 
 游戏内验收使用相同世界、视距和 Section 常驻数，对比优化前后的 F10 `Scene commit last/EMA/max`：单方块修改时 commit 应不再随 resident Section 数明显增长。`Scene delta` 仍包含 Cycles Mesh/BVH 更新，本阶段不会降低该项，也不会改变 Section 捕获或 Java FFM upsert 时间。

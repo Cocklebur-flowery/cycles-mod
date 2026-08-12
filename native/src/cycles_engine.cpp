@@ -2487,8 +2487,9 @@ class CyclesEngine::Impl final {
             std::lock_guard lock(request_mutex_);
             diagnostics.scene_revision = requested_scene_ ? requested_scene_->revision : 0;
             diagnostics.camera_revision = requested_camera_ ? requested_camera_->revision : 0;
-            diagnostics.section_count =
-                static_cast<std::uint32_t>(scene_updates_.section_count());
+            diagnostics.section_count = requested_scene_
+                ? static_cast<std::uint32_t>(requested_scene_->section_count)
+                : 0U;
         }
         {
             std::lock_guard lock(state_mutex_);

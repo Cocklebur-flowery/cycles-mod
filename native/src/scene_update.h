@@ -62,7 +62,6 @@ class SceneUpdateAccumulator {
     void acknowledge(const SceneUpdate& update);
 
     [[nodiscard]] const std::shared_ptr<const ResourcesData>& resources() const;
-    [[nodiscard]] std::size_t section_count() const;
     [[nodiscard]] std::size_t pending_count() const;
     [[nodiscard]] bool replace_all_pending() const;
 

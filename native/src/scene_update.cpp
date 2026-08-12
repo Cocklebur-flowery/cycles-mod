@@ -82,10 +82,6 @@ const std::shared_ptr<const ResourcesData>& SceneUpdateAccumulator::resources() 
     return resources_;
 }
 
-std::size_t SceneUpdateAccumulator::section_count() const {
-    return sections_.size();
-}
-
 std::size_t SceneUpdateAccumulator::pending_count() const {
     return pending_.size();
 }
