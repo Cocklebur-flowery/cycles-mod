@@ -14,6 +14,7 @@
   "screen.cyclesrenderer.settings.color_pipeline": "线性 Rec.709 → %s → sRGB SDR — HDR 交换链未启用",
   "screen.cyclesrenderer.settings.sampling_pattern": "采样模式：%s — 种子 %s",
   "screen.cyclesrenderer.settings.camera": "相机：%s — %s mm / %s mm — 景深 %s",
+  "screen.cyclesrenderer.settings.atmosphere": "大气：太阳高度 %s° / 旋转 %s° — 强度 %s",
   "screen.cyclesrenderer.settings.native_not_loaded": "原生桥尚未加载；启用 F8 前也可以安全检测。",
   "screen.cyclesrenderer.settings.diagnostics_failed": "诊断不可用：%s",
   "cyclesrenderer.configuration.title": "%s — Cycles 设置",

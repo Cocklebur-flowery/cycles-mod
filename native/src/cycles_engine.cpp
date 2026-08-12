@@ -141,6 +141,22 @@ bool same_render_settings_except_cache_budget(
     return same_render_settings(first, second);
 }
 
+bool same_atmosphere_settings(
+    const CyclesBridgeRenderSettings& first,
+    const CyclesBridgeRenderSettings& second) {
+    return first.atmosphere_sun_disc == second.atmosphere_sun_disc
+        && first.atmosphere_sun_size_degrees == second.atmosphere_sun_size_degrees
+        && first.atmosphere_sun_intensity == second.atmosphere_sun_intensity
+        && first.atmosphere_sun_elevation_degrees
+            == second.atmosphere_sun_elevation_degrees
+        && first.atmosphere_sun_rotation_degrees
+            == second.atmosphere_sun_rotation_degrees
+        && first.atmosphere_altitude_meters == second.atmosphere_altitude_meters
+        && first.atmosphere_air_density == second.atmosphere_air_density
+        && first.atmosphere_aerosol_density == second.atmosphere_aerosol_density
+        && first.atmosphere_ozone_density == second.atmosphere_ozone_density;
+}
+
 const char* pass_name(std::uint32_t pass) {
     switch (pass) {
         case CYCLES_BRIDGE_PASS_DEPTH: return "depth";
@@ -1546,11 +1562,9 @@ ccl::Shader* create_material_shader(
     return shader;
 }
 
-void configure_background(
-    ccl::Scene* scene,
+void apply_atmosphere_settings(
+    ccl::SkyTextureNode* sky,
     const CyclesBridgeRenderSettings& settings) {
-    auto graph = ccl::make_unique<ccl::ShaderGraph>();
-    ccl::SkyTextureNode* sky = graph->create_node<ccl::SkyTextureNode>();
     sky->set_sky_type(ccl::NODE_SKY_MULTIPLE_SCATTERING);
     sky->set_sun_disc(settings.atmosphere_sun_disc != 0U);
     sky->set_sun_size(settings.atmosphere_sun_size_degrees * kDegreesToRadians);
@@ -1563,6 +1577,14 @@ void configure_background(
     sky->set_air_density(settings.atmosphere_air_density);
     sky->set_aerosol_density(settings.atmosphere_aerosol_density);
     sky->set_ozone_density(settings.atmosphere_ozone_density);
+}
+
+void configure_background(
+    ccl::Scene* scene,
+    const CyclesBridgeRenderSettings& settings) {
+    auto graph = ccl::make_unique<ccl::ShaderGraph>();
+    ccl::SkyTextureNode* sky = graph->create_node<ccl::SkyTextureNode>();
+    apply_atmosphere_settings(sky, settings);
 
     ccl::BackgroundNode* background = graph->create_node<ccl::BackgroundNode>();
     background->set_strength(1.0F);
@@ -2336,8 +2358,11 @@ class CyclesEngine::Impl final {
                         || settings.denoiser_input != requested_settings_.denoiser_input
                         || settings.denoiser_use_gpu
                             != requested_settings_.denoiser_use_gpu);
+                const bool atmosphere_changed = settings_revision_ > 0
+                    && !same_atmosphere_settings(settings, requested_settings_);
                 if (settings.device_policy != requested_settings_.device_policy
-                    || denoiser_topology_changed) {
+                    || denoiser_topology_changed
+                    || atmosphere_changed) {
                     reset_level = CYCLES_BRIDGE_RESET_SESSION;
                 } else if (settings.resolution_mode != requested_settings_.resolution_mode
                            || settings.render_width != requested_settings_.render_width

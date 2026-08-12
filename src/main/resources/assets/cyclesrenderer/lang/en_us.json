@@ -14,6 +14,7 @@
   "screen.cyclesrenderer.settings.color_pipeline": "Linear Rec.709 → %s → sRGB SDR — HDR swapchain inactive",
   "screen.cyclesrenderer.settings.sampling_pattern": "Sampling: %s — seed %s",
   "screen.cyclesrenderer.settings.camera": "Camera: %s — %s mm / %s mm — DOF %s",
+  "screen.cyclesrenderer.settings.atmosphere": "Atmosphere: sun %s° elevation / %s° rotation — intensity %s",
   "screen.cyclesrenderer.settings.native_not_loaded": "Native bridge not loaded; detection is safe before enabling F8.",
   "screen.cyclesrenderer.settings.diagnostics_failed": "Diagnostics unavailable: %s",
   "cyclesrenderer.configuration.title": "%s — Cycles Settings",

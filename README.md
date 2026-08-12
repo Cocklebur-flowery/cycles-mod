@@ -6,7 +6,7 @@
 
 ## 当前阶段
 
-- Cycles 5.2 已通过 C ABI v25 接入 Java Foreign Function & Memory API；默认路径保留 RGBA16F FrameStore/FFM 回退，P16 路径让 OptiX/CUDA 直接写入三槽 Vulkan 外部 buffer，并用两条 Win32 timeline semaphore 与 Minecraft Vulkan 复制建立 GPU 端握手。
+- Cycles 5.2 已通过 C ABI v26 接入 Java Foreign Function & Memory API；默认路径保留 RGBA16F FrameStore/FFM 回退，P16 路径让 OptiX/CUDA 直接写入三槽 Vulkan 外部 buffer，并用两条 Win32 timeline semaphore 与 Minecraft Vulkan 复制建立 GPU 端握手。
 - 近景不再扫描固定 `64 × 32 × 64` 方块盒，而是直接复制 Minecraft `SectionCompiler` 生成的 16³ Section 网格。
 - 活跃 Section 范围跟随游戏的“有效渲染距离”；水平判定复用原版区块距离规则，垂直范围复用原版渲染器的 Section 范围和世界高度边界。
 - 方块放置/破坏、光照更新、区块装卸和视距移动触发原版 Section 重编译后，会以稳定 Section ID 增量替换或移除 Native 几何。
@@ -16,14 +16,15 @@
 - Distant Horizons 3.2.1 / API 7 的可选 Provider 骨架仍保留，但当前活动 Section 流送路径不合并其高度场；可靠远景、接缝和质量留待后续兼容阶段。
 - Cycles 在自己的会话线程中渐进渲染；普通 Section 变化在现有 Session 内更新对应 Mesh/Object，并在更新期间继续显示上一张可用帧，不再主动回填蓝色测试帧。
 - NeoForge CLIENT 配置持久化到 `config/cyclesrenderer-client.toml`。默认仍为 Fit Inside `480 × 270`、移动 1 sample、静止 150 ms 后 8 samples；可以在 F9/模组配置页改成固定分辨率，最高 `3840 × 2160`，包括 `1920 × 1080`。可选动态分辨率默认关闭；开启后交互/Settling 阶段使用独立百分比，静止阶段恢复基础输出尺寸。
-- 设置页开放设备策略、分辨率、交互/静止采样、自适应采样、时间限制、光程反弹、Clamp、像素过滤、种子、降噪、EV、Gamma、查看变换、活动 Pass 和诊断开关。设置按 revision 异步提交给 Cycles 工作线程。
+- 设置页开放设备策略、分辨率、交互/静止采样、自适应采样、时间限制、光程反弹、Clamp、像素过滤、种子、相机、程序大气、降噪、EV、Gamma、查看变换、活动 Pass 和诊断开关。设置按 revision 异步提交给 Cycles 工作线程。
+- World 背景已使用 Cycles 原生 Multiple Scattering Sky Texture；F9 可调太阳圆盘、角直径、强度、高度、旋转、海拔和空气/气溶胶/臭氧密度，默认太阳高度为 45°。大气改参会受控重建 Native Cycles Session，但复用内存中的资源和 Section 快照，不重新触发 Minecraft 区块捕获。
 - Pass 查看器按需创建并显示 `Combined`、`Depth`、`Normal`、`Diffuse Color`、`Emission`、`Roughness` 和 `Sample Count`，不会同时把所有 Pass 复制到 Java/Vulkan。
 - Native 以 `(Pass ID, Raw/Denoised)` 缓存最近查看过的 RGBA16F Pass，默认 LRU 预算为 256 MiB；F10 显示条目、占用、命中、淘汰、注册表和活动 descriptor。Pass 只在首次访问时加入注册 mask；当前每次切换仍重建 Cycles Session，以规避 Cycles 5.2 DisplayDriver 原地切换停在 `0/1` sample 的问题。
 - 运行时能力查询会报告实际设备、可用 Pass 和降噪器。当前构建已在 RTX 5080 上分别验证 OptiX 与 OpenImageDenoise 2.5；移动/Settling 阶段输出 Raw，只有静止 Combined 才实际调度所选降噪器并写入 Denoised cache。
 - 默认情况下 Java 每次只租用并上传 Native 的低分辨率 RGBA16F 新帧；启用启动级互操作开关后，OptiX/CUDA 直接写 Vulkan 外部 buffer，Minecraft 在 GPU 内复制到显示纹理，不再发生每帧 GPU→CPU→GPU 像素搬运。
 - Minecraft 仍拥有 Vulkan swapchain、纹理和命令提交；Cycles 不是 Vulkan 渲染后端，只使用 Cycles 自带的 CUDA/Vulkan 显示互操作入口。
 
-当前 Native DisplayDriver、类型化 Pass cache 与 Minecraft 上传纹理均保持 scene-linear RGBA16F。`Standard` 和调试用 `Raw` 已生效，EV/Gamma 在 GPU 显示 shader 中应用；`AgX` 与 `Khronos PBR Neutral` 的配置 ID 已预留，但在 Blender OCIO 配置/LUT 正式部署前按 `Standard` 显示，不能视为 Blender 色彩管理已经完成。暂未实现正确的玻璃/水折射材质、方块实体、实体、天空系统、动态光源、LabPBR 和跨平台打包。
+当前 Native DisplayDriver、类型化 Pass cache 与 Minecraft 上传纹理均保持 scene-linear RGBA16F。`Standard` 和调试用 `Raw` 已生效，EV/Gamma 在 GPU 显示 shader 中应用；`AgX` 与 `Khronos PBR Neutral` 的配置 ID 已预留，但在 Blender OCIO 配置/LUT 正式部署前按 `Standard` 显示，不能视为 Blender 色彩管理已经完成。暂未实现正确的玻璃/水折射材质、方块实体、实体、Minecraft 时间/天气驱动的大气与体积天气、动态光源、LabPBR 和跨平台打包。
 
 P16 会在驱动支持时默认为 Minecraft Vulkan 设备请求 Win32 external memory/semaphore 扩展。故障排查时可在启动前加入 JVM 参数 `-Dcyclesrenderer.experimentalVulkanInterop=false`，或设置环境变量 `CYCLESRENDERER_VULKAN_INTEROP=false` 来显式关闭；该选择必须在创建 Vulkan 设备前确定，因此修改后需要重启客户端。共享分配容量跟随 F9 输出设置，内部由三个等距 RGBA16F 槽组成；CUDA 与 Vulkan 分别通过 ready/release timeline semaphore 等待对方，不再依赖逐帧 CUDA 主机同步或 Vulkan fence 等待来保证像素可见性。
 

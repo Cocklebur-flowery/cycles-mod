@@ -135,6 +135,11 @@ public final class CyclesSettingsScreen extends Screen {
                 settings.focalLengthMm(),
                 settings.sensorWidthMm(),
                 settings.depthOfField() ? CommonComponents.OPTION_ON : CommonComponents.OPTION_OFF));
+        lines.add(Component.translatable(
+                "screen.cyclesrenderer.settings.atmosphere",
+                settings.atmosphereSunElevationDegrees(),
+                settings.atmosphereSunRotationDegrees(),
+                settings.atmosphereSunIntensity()));
         if (!NativeBridge.isReady()) {
             lines.add(Component.translatable("screen.cyclesrenderer.settings.native_not_loaded"));
             return lines;

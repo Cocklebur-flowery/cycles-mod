@@ -889,6 +889,32 @@ int main(int argc, char** argv) {
         return 1;
     }
 
+    std::cerr << "[smoke] Applying runtime atmosphere settings\n";
+    const std::uint32_t atmosphere_section_count = diagnostics.section_count;
+    const std::uint32_t atmosphere_scene_delta_count = diagnostics.scene_delta_count;
+    settings.atmosphere_sun_elevation_degrees = 20.0F;
+    settings.atmosphere_sun_rotation_degrees = 120.0F;
+    settings.revision++;
+    if (!require_ok(
+            cycles_bridge_apply_settings(renderer, &settings),
+            "atmosphere settings")
+        || !wait_for_settings(renderer, settings.revision)
+        || !wait_for_updated_frame(
+            renderer, camera, frame, pixels, "atmosphere runtime update", info, true)
+        || !require_ok(
+            cycles_bridge_query_diagnostics(renderer, &diagnostics),
+            "atmosphere diagnostics")
+        || diagnostics.section_count != atmosphere_section_count
+        || diagnostics.scene_delta_count != atmosphere_scene_delta_count
+        || diagnostics.reset_level != CYCLES_BRIDGE_RESET_SESSION) {
+        std::cerr << "atmosphere update changed streamed scene data or missed the session reset: "
+                  << "sections=" << diagnostics.section_count
+                  << ";scene-deltas=" << diagnostics.scene_delta_count
+                  << ";reset=" << diagnostics.reset_level << '\n';
+        cycles_bridge_destroy_renderer(renderer);
+        return 1;
+    }
+
     if ((capabilities.denoiser_mask & CYCLES_BRIDGE_DENOISER_OPTIX) != 0U) {
         std::cerr << "[smoke] Enabling the detected OptiX denoiser\n";
         settings.denoiser_mode = 2U;

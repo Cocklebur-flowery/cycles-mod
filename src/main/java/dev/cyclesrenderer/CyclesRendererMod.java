@@ -642,6 +642,18 @@ public final class CyclesRendererMod {
             y += 10;
             graphics.text(
                     minecraft.font,
+                    "atmosphere=multiple-scattering sun="
+                            + settings.atmosphereSunElevationDegrees() + "deg/"
+                            + settings.atmosphereSunRotationDegrees() + "deg"
+                            + " size=" + settings.atmosphereSunSizeDegrees() + "deg"
+                            + " intensity=" + settings.atmosphereSunIntensity()
+                            + " density=" + settings.atmosphereAirDensity() + "/"
+                            + settings.atmosphereAerosolDensity() + "/"
+                            + settings.atmosphereOzoneDensity(),
+                    6, y, 0xFFE0E0E0);
+            y += 10;
+            graphics.text(
+                    minecraft.font,
                     "scene=" + diagnostics.sceneRevision()
                             + " camera=" + diagnostics.cameraRevision()
                             + " frame=" + diagnostics.frameGeneration()
