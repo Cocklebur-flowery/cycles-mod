@@ -452,6 +452,27 @@ public final class CyclesRendererMod {
     private static void extractDebugOverlay(
             GuiGraphicsExtractor graphics,
             Minecraft minecraft) {
+        CyclesDebugOverlay.extract(
+                graphics,
+                minecraft,
+                FRAME_PRESENTER,
+                INTEROP_BUFFER,
+                SCENE_MANAGER,
+                new CyclesDebugOverlay.RuntimeStats(
+                        bridgeCallCount,
+                        lastBridgeCallMicros,
+                        emaBridgeCallMicros,
+                        maxBridgeCallMicros,
+                        cameraCallCount,
+                        lastCameraCallMicros,
+                        emaCameraCallMicros,
+                        maxCameraCallMicros,
+                        skippedFrameDeliveryCount));
+    }
+
+    private static void extractLegacyDebugOverlay(
+            GuiGraphicsExtractor graphics,
+            Minecraft minecraft) {
         int y = 52;
         graphics.text(minecraft.font, "Cycles ABI " + NativeBridge.ABI_VERSION, 6, y, 0xFFE0E0E0);
         y += 10;
