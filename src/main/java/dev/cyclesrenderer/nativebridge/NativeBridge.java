@@ -24,7 +24,8 @@ import static java.lang.foreign.ValueLayout.JAVA_INT;
 import static java.lang.foreign.ValueLayout.JAVA_LONG;
 
 public final class NativeBridge {
-    public static final int ABI_VERSION = 34;
+    public static final int ABI_VERSION = 35;
+    public static final int DEVICE_UPDATE_PHASE_COUNT = 8;
     public static final int PIXEL_FORMAT_RGBA16_FLOAT = 2;
     public static final int PIXEL_FORMAT_RGBA32_FLOAT = 3;
 
@@ -356,7 +357,15 @@ public final class NativeBridge {
             JAVA_INT.withName("max_scene_first_frame_micros"),
             JAVA_INT.withName("timing_reserved"),
             JAVA_INT.withName("camera_type"),
-            JAVA_INT.withName("panorama_type"));
+            JAVA_INT.withName("panorama_type"),
+            JAVA_INT.withName("active_device_phase"),
+            JAVA_INT.withName("active_device_phase_micros"),
+            MemoryLayout.sequenceLayout(
+                    DEVICE_UPDATE_PHASE_COUNT, JAVA_INT).withName("last_device_phase_micros"),
+            MemoryLayout.sequenceLayout(
+                    DEVICE_UPDATE_PHASE_COUNT, JAVA_INT).withName("ema_device_phase_micros"),
+            MemoryLayout.sequenceLayout(
+                    DEVICE_UPDATE_PHASE_COUNT, JAVA_INT).withName("max_device_phase_micros"));
     private static final MemoryLayout VULKAN_INTEROP_BUFFER_LAYOUT =
             MemoryLayout.structLayout(
                     JAVA_INT.withName("struct_size"),
@@ -436,7 +445,7 @@ public final class NativeBridge {
                 || PASS_DESCRIPTOR_LAYOUT.byteSize() != 64L
                 || CAPABILITIES_LAYOUT.byteSize() != 64L
                 || COLOR_LUT_DESCRIPTOR_LAYOUT.byteSize() != 72L
-                || DIAGNOSTICS_LAYOUT.byteSize() != 512L
+                || DIAGNOSTICS_LAYOUT.byteSize() != 616L
                 || VULKAN_INTEROP_BUFFER_LAYOUT.byteSize() != 80L
                 || VULKAN_INTEROP_STATE_LAYOUT.byteSize() != 72L
                 || VERTEX_LAYOUT.byteSize() != 40L
@@ -1551,7 +1560,20 @@ public final class NativeBridge {
                     diagnosticsSegment.get(JAVA_INT, 492L),
                     diagnosticsSegment.get(JAVA_INT, 496L),
                     diagnosticsSegment.get(JAVA_INT, 504L),
-                    diagnosticsSegment.get(JAVA_INT, 508L));
+                    diagnosticsSegment.get(JAVA_INT, 508L),
+                    diagnosticsSegment.get(JAVA_INT, 512L),
+                    diagnosticsSegment.get(JAVA_INT, 516L),
+                    intArray(diagnosticsSegment, 520L, DEVICE_UPDATE_PHASE_COUNT),
+                    intArray(diagnosticsSegment, 552L, DEVICE_UPDATE_PHASE_COUNT),
+                    intArray(diagnosticsSegment, 584L, DEVICE_UPDATE_PHASE_COUNT));
+        }
+
+        private static int[] intArray(MemorySegment source, long offset, int count) {
+            int[] result = new int[count];
+            for (int index = 0; index < count; index++) {
+                result[index] = source.get(JAVA_INT, offset + index * Integer.BYTES);
+            }
+            return result;
         }
 
         private static String uuidString(MemorySegment bytes) {
@@ -2250,7 +2272,17 @@ public final class NativeBridge {
             int emaSceneFirstFrameMicros,
             int maxSceneFirstFrameMicros,
             int cameraType,
-            int panoramaType) {
+            int panoramaType,
+            int activeDevicePhase,
+            int activeDevicePhaseMicros,
+            int[] lastDevicePhaseMicros,
+            int[] emaDevicePhaseMicros,
+            int[] maxDevicePhaseMicros) {
+        public Diagnostics {
+            lastDevicePhaseMicros = lastDevicePhaseMicros.clone();
+            emaDevicePhaseMicros = emaDevicePhaseMicros.clone();
+            maxDevicePhaseMicros = maxDevicePhaseMicros.clone();
+        }
         public String stateName() {
             return switch (stateCode) {
                 case 1 -> "scene-staging";

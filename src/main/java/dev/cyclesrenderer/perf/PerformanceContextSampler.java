@@ -75,6 +75,15 @@ final class PerformanceContextSampler {
                 available ? diagnostics.lastDeviceUpdateMicros() : 0,
                 available ? diagnostics.lastGeometryUpdateMicros() : 0,
                 available ? diagnostics.lastBvhUpdateMicros() : 0,
-                available ? diagnostics.lastSceneFirstFrameMicros() : 0);
+                available ? diagnostics.lastSceneFirstFrameMicros() : 0,
+                available ? diagnostics.activeDevicePhase()
+                        : NativeBridge.DEVICE_UPDATE_PHASE_COUNT,
+                available ? diagnostics.activeDevicePhaseMicros() : 0,
+                available ? diagnostics.lastDevicePhaseMicros()
+                        : new int[NativeBridge.DEVICE_UPDATE_PHASE_COUNT],
+                available ? diagnostics.emaDevicePhaseMicros()
+                        : new int[NativeBridge.DEVICE_UPDATE_PHASE_COUNT],
+                available ? diagnostics.maxDevicePhaseMicros()
+                        : new int[NativeBridge.DEVICE_UPDATE_PHASE_COUNT]);
     }
 }

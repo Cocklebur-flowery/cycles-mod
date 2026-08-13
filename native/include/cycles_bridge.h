@@ -23,6 +23,18 @@ enum CyclesBridgeStatus : std::uint32_t {
     CYCLES_BRIDGE_STATUS_RENDER_ERROR = 5,
 };
 
+enum CyclesBridgeDeviceUpdatePhase : std::uint32_t {
+    CYCLES_BRIDGE_DEVICE_PHASE_SHADER_BACKGROUND = 0,
+    CYCLES_BRIDGE_DEVICE_PHASE_OBJECT = 1,
+    CYCLES_BRIDGE_DEVICE_PHASE_MESH_GEOMETRY = 2,
+    CYCLES_BRIDGE_DEVICE_PHASE_IMAGE_VOLUME = 3,
+    CYCLES_BRIDGE_DEVICE_PHASE_LIGHT = 4,
+    CYCLES_BRIDGE_DEVICE_PHASE_INTEGRATOR_FILM = 5,
+    CYCLES_BRIDGE_DEVICE_PHASE_FINALIZE = 6,
+    CYCLES_BRIDGE_DEVICE_PHASE_UNCLASSIFIED = 7,
+    CYCLES_BRIDGE_DEVICE_PHASE_COUNT = 8,
+};
+
 enum CyclesBridgeMaterialFlags : std::uint32_t {
     CYCLES_BRIDGE_MATERIAL_CUTOUT = 1U << 0U,
     CYCLES_BRIDGE_MATERIAL_BLEND = 1U << 1U,
@@ -595,6 +607,11 @@ struct CyclesBridgeDiagnostics {
     std::uint32_t timing_reserved;
     std::uint32_t camera_type;
     std::uint32_t panorama_type;
+    std::uint32_t active_device_phase;
+    std::uint32_t active_device_phase_micros;
+    std::uint32_t last_device_phase_micros[CYCLES_BRIDGE_DEVICE_PHASE_COUNT];
+    std::uint32_t ema_device_phase_micros[CYCLES_BRIDGE_DEVICE_PHASE_COUNT];
+    std::uint32_t max_device_phase_micros[CYCLES_BRIDGE_DEVICE_PHASE_COUNT];
 };
 
 struct CyclesBridgeVulkanInteropBuffer {

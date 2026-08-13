@@ -3,6 +3,7 @@
 #include "cycles_bridge.h"
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cstdint>
 #include <limits>
@@ -35,6 +36,9 @@ class CyclesSceneTiming final {
         active_device_micros_ = 0U;
         active_geometry_micros_ = 0U;
         active_bvh_micros_ = 0U;
+        active_device_phase_ = kNoDevicePhase;
+        active_device_phase_started_ = {};
+        active_device_phase_micros_.fill(0U);
         const auto commit = commit_times_.find(revision);
         if (commit != commit_times_.end()) {
             queue_.record(elapsed_micros(commit->second, now));
@@ -74,6 +78,8 @@ class CyclesSceneTiming final {
         update_phase(device_started_, active_device_micros_, device_active, now);
         update_phase(geometry_started_, active_geometry_micros_, geometry_active, now);
         update_phase(bvh_started_, active_bvh_micros_, bvh_active, now);
+        update_device_phase(
+            device_active ? classify_device_phase(status) : kNoDevicePhase, now);
     }
 
     void complete_scene_update(std::uint64_t revision) {
@@ -89,9 +95,13 @@ class CyclesSceneTiming final {
         update_phase(device_started_, active_device_micros_, false, now);
         update_phase(geometry_started_, active_geometry_micros_, false, now);
         update_phase(bvh_started_, active_bvh_micros_, false, now);
+        update_device_phase(kNoDevicePhase, now);
         device_update_.record(active_device_micros_);
         geometry_update_.record(active_geometry_micros_);
         bvh_update_.record(active_bvh_micros_);
+        for (std::size_t index = 0; index < device_phases_.size(); ++index) {
+            device_phases_[index].record(active_device_phase_micros_[index]);
+        }
         first_frame_.record(elapsed_micros(active_started_, now));
         completed_revision_ = revision;
         completed_count_++;
@@ -127,6 +137,20 @@ class CyclesSceneTiming final {
             diagnostics.last_scene_first_frame_micros,
             diagnostics.ema_scene_first_frame_micros,
             diagnostics.max_scene_first_frame_micros);
+        diagnostics.active_device_phase = active_device_phase_;
+        diagnostics.active_device_phase_micros = active_device_phase_ < kDevicePhaseCount
+            ? saturating_add(
+                active_device_phase_micros_[active_device_phase_],
+                active_device_phase_started_ != Clock::time_point{}
+                    ? elapsed_micros(active_device_phase_started_, Clock::now())
+                    : 0U)
+            : 0U;
+        for (std::size_t index = 0; index < device_phases_.size(); ++index) {
+            device_phases_[index].fill(
+                diagnostics.last_device_phase_micros[index],
+                diagnostics.ema_device_phase_micros[index],
+                diagnostics.max_device_phase_micros[index]);
+        }
     }
 
  private:
@@ -177,6 +201,62 @@ class CyclesSceneTiming final {
         }
     }
 
+    static std::uint32_t classify_device_phase(std::string_view status) {
+        if (status.starts_with("Updating Shaders")
+            || status.starts_with("Updating Background")
+            || status.starts_with("Updating Scene Attribute")
+            || status == "Updating Camera"
+            || status.starts_with("Updating Procedural")) {
+            return CYCLES_BRIDGE_DEVICE_PHASE_SHADER_BACKGROUND;
+        }
+        if (status.starts_with("Updating Objects")
+            || status.starts_with("Updating Particle Systems")
+            || status.starts_with("Updating Primitive Offsets")) {
+            return CYCLES_BRIDGE_DEVICE_PHASE_OBJECT;
+        }
+        if (status.starts_with("Updating Mesh")
+            || status.starts_with("Updating Geometry BVH")
+            || status.starts_with("Updating Scene BVH")
+            || status.starts_with("Updating Hair")) {
+            return CYCLES_BRIDGE_DEVICE_PHASE_MESH_GEOMETRY;
+        }
+        if (status.starts_with("Updating Images")
+            || status.starts_with("Updating Volume")
+            || status.starts_with("Updating Camera Volume")
+            || status.starts_with("Updating Lookup Tables")
+            || status.starts_with("Updating Displacement Images")) {
+            return CYCLES_BRIDGE_DEVICE_PHASE_IMAGE_VOLUME;
+        }
+        if (status.starts_with("Updating Lights")) {
+            return CYCLES_BRIDGE_DEVICE_PHASE_LIGHT;
+        }
+        if (status.starts_with("Updating Integrator")
+            || status.starts_with("Updating Film")
+            || status.starts_with("Updating Baking")) {
+            return CYCLES_BRIDGE_DEVICE_PHASE_INTEGRATOR_FILM;
+        }
+        if (status.starts_with("Updating Device")) {
+            return CYCLES_BRIDGE_DEVICE_PHASE_FINALIZE;
+        }
+        return CYCLES_BRIDGE_DEVICE_PHASE_UNCLASSIFIED;
+    }
+
+    void update_device_phase(std::uint32_t next_phase, Clock::time_point now) {
+        if (next_phase == active_device_phase_) {
+            return;
+        }
+        if (active_device_phase_ < kDevicePhaseCount
+            && active_device_phase_started_ != Clock::time_point{}) {
+            active_device_phase_micros_[active_device_phase_] = saturating_add(
+                active_device_phase_micros_[active_device_phase_],
+                elapsed_micros(active_device_phase_started_, now));
+        }
+        active_device_phase_ = next_phase;
+        active_device_phase_started_ = next_phase < kDevicePhaseCount
+            ? now
+            : Clock::time_point{};
+    }
+
     static std::uint32_t saturating_add(std::uint32_t left, std::uint32_t right) {
         return left > std::numeric_limits<std::uint32_t>::max() - right
             ? std::numeric_limits<std::uint32_t>::max()
@@ -184,6 +264,10 @@ class CyclesSceneTiming final {
     }
 
     static constexpr std::size_t kMaximumPendingCommits = 16U;
+    static constexpr std::size_t kDevicePhaseCount =
+        CYCLES_BRIDGE_DEVICE_PHASE_COUNT;
+    static constexpr std::uint32_t kNoDevicePhase =
+        CYCLES_BRIDGE_DEVICE_PHASE_COUNT;
 
     mutable std::mutex mutex_;
     std::map<std::uint64_t, Clock::time_point> commit_times_;
@@ -195,6 +279,9 @@ class CyclesSceneTiming final {
     std::uint32_t active_device_micros_ = 0U;
     std::uint32_t active_geometry_micros_ = 0U;
     std::uint32_t active_bvh_micros_ = 0U;
+    std::uint32_t active_device_phase_ = kNoDevicePhase;
+    Clock::time_point active_device_phase_started_{};
+    std::array<std::uint32_t, kDevicePhaseCount> active_device_phase_micros_{};
     std::uint64_t completed_revision_ = 0U;
     std::uint64_t completed_count_ = 0U;
     Metric queue_;
@@ -203,6 +290,7 @@ class CyclesSceneTiming final {
     Metric geometry_update_;
     Metric bvh_update_;
     Metric first_frame_;
+    std::array<Metric, kDevicePhaseCount> device_phases_{};
 };
 
 }  // namespace cyclesrenderer::timing

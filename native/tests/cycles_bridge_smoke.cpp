@@ -2,6 +2,7 @@
 
 #include <Windows.h>
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstdint>
@@ -480,7 +481,7 @@ bool verify_progressive_sampling(
 int main(int argc, char** argv) {
     const bool require_optix = argc > 1 && std::strcmp(argv[1], "--require-optix") == 0;
     std::cerr << "[smoke] ABI check\n";
-    if (cycles_bridge_abi_version() != 34U) {
+    if (cycles_bridge_abi_version() != 35U) {
         std::cerr << "unexpected native ABI " << cycles_bridge_abi_version() << '\n';
         return 1;
     }
@@ -1161,6 +1162,17 @@ int main(int argc, char** argv) {
     if (!require_ok(
             cycles_bridge_query_diagnostics(renderer, &diagnostics),
             "diagnostics query")) {
+        cycles_bridge_destroy_renderer(renderer);
+        return 1;
+    }
+    std::cerr << "[smoke] Device update phase telemetry\n";
+    if (diagnostics.scene_timing_revision == 0U
+        || diagnostics.active_device_phase > CYCLES_BRIDGE_DEVICE_PHASE_COUNT
+        || std::all_of(
+            std::begin(diagnostics.last_device_phase_micros),
+            std::end(diagnostics.last_device_phase_micros),
+            [](std::uint32_t micros) { return micros == 0U; })) {
+        std::cerr << "device update phases were not captured for the completed scene\n";
         cycles_bridge_destroy_renderer(renderer);
         return 1;
     }

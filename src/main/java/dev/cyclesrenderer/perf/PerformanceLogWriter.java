@@ -21,6 +21,16 @@ final class PerformanceLogWriter {
     private static final DateTimeFormatter FILE_TIME =
             DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss-SSS");
     private static final Capture STOP = new Capture(-1L, -1L, List.of(), 0L);
+    private static final String[] DEVICE_PHASE_NAMES = {
+            "shader_background",
+            "object",
+            "mesh_geometry",
+            "image_volume",
+            "light",
+            "integrator_film",
+            "finalize",
+            "unclassified"
+    };
 
     private final ArrayBlockingQueue<Capture> queue = new ArrayBlockingQueue<>(8);
     private final AtomicLong droppedCaptures = new AtomicLong();
@@ -104,7 +114,7 @@ final class PerformanceLogWriter {
     }
 
     private void writeMetadata(BufferedWriter writer) throws IOException {
-        writer.write("{\"type\":\"metadata\",\"schema\":2"
+        writer.write("{\"type\":\"metadata\",\"schema\":3"
                 + ",\"clock\":\"monotonic_ns\""
                 + ",\"absolute_stall_us\":20000"
                 + ",\"adaptive_min_us\":12000"
@@ -113,7 +123,8 @@ final class PerformanceLogWriter {
                 + ",\"gpu_queries_enabled\":" + gpuQueriesEnabled
                 + ",\"gpu_result_grace_frames\":64"
                 + ",\"cycles_gpu\":\"wall_clock_and_revision_context_only\""
-                + ",\"note\":\"CUDA/OptiX kernel time is not measured in schema 2\"}\n");
+                + ",\"cycles_device_phases\":\"progress_status_wall_clock\""
+                + ",\"note\":\"CUDA/OptiX kernel time is not measured in schema 3\"}\n");
     }
 
     private void writeCapture(BufferedWriter writer, Capture capture) throws IOException {
@@ -131,7 +142,7 @@ final class PerformanceLogWriter {
     private static void writeFrame(
             BufferedWriter writer,
             PerformanceSample.Snapshot frame) throws IOException {
-        StringBuilder json = new StringBuilder(2_048);
+        StringBuilder json = new StringBuilder(3_072);
         json.append("{\"type\":\"frame\",\"frame\":").append(frame.frameId())
                 .append(",\"start_ns\":").append(frame.frameStartNanos())
                 .append(",\"flip_interval_us\":");
@@ -225,7 +236,25 @@ final class PerformanceLogWriter {
                 .append(",\"geometry_update_last_us\":").append(value.lastGeometryUpdateMicros())
                 .append(",\"bvh_update_last_us\":").append(value.lastBvhUpdateMicros())
                 .append(",\"scene_first_frame_last_us\":").append(value.lastSceneFirstFrameMicros())
+                .append(",\"device_phase_active\":").append(value.activeDevicePhase())
+                .append(",\"device_phase_active_us\":").append(value.activeDevicePhaseMicros());
+        appendDevicePhases(json, "device_phase_last_us", value.lastDevicePhaseMicros());
+        appendDevicePhases(json, "device_phase_ema_us", value.emaDevicePhaseMicros());
+        appendDevicePhases(json, "device_phase_max_us", value.maxDevicePhaseMicros());
+        json
                 .append('}');
+    }
+
+    private static void appendDevicePhases(StringBuilder json, String name, int[] values) {
+        json.append(",\"").append(name).append("\":{");
+        for (int index = 0; index < DEVICE_PHASE_NAMES.length; index++) {
+            if (index > 0) {
+                json.append(',');
+            }
+            json.append('\"').append(DEVICE_PHASE_NAMES[index]).append("\":")
+                    .append(index < values.length ? values[index] : 0);
+        }
+        json.append('}');
     }
 
     private static void appendMicros(StringBuilder json, long nanos) {
@@ -249,6 +278,9 @@ final class PerformanceLogWriter {
         }
         if ((code & 4) != 0) {
             appendTriggerPart(name, "flip_adaptive");
+        }
+        if ((code & 8) != 0) {
+            appendTriggerPart(name, "cycles_device_phase");
         }
         return name.toString();
     }

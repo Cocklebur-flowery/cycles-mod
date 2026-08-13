@@ -1,5 +1,7 @@
 package dev.cyclesrenderer.perf;
 
+import dev.cyclesrenderer.nativebridge.NativeBridge;
+
 import java.util.Arrays;
 
 public final class PerformanceSample {
@@ -279,7 +281,18 @@ public final class PerformanceSample {
             int lastDeviceUpdateMicros,
             int lastGeometryUpdateMicros,
             int lastBvhUpdateMicros,
-            int lastSceneFirstFrameMicros) {
+            int lastSceneFirstFrameMicros,
+            int activeDevicePhase,
+            int activeDevicePhaseMicros,
+            int[] lastDevicePhaseMicros,
+            int[] emaDevicePhaseMicros,
+            int[] maxDevicePhaseMicros) {
+
+        Context {
+            lastDevicePhaseMicros = lastDevicePhaseMicros.clone();
+            emaDevicePhaseMicros = emaDevicePhaseMicros.clone();
+            maxDevicePhaseMicros = maxDevicePhaseMicros.clone();
+        }
 
         private static final Context EMPTY = new Context(
                 0L, 0L, 0, 0L,
@@ -291,7 +304,11 @@ public final class PerformanceSample {
                 0L, 0L, 0,
                 0L, 0L, 0L,
                 0L, 0L,
-                0, 0, 0, 0, 0, 0, 0, 0, 0);
+                0, 0, 0, 0, 0, 0, 0, 0, 0,
+                NativeBridge.DEVICE_UPDATE_PHASE_COUNT, 0,
+                new int[NativeBridge.DEVICE_UPDATE_PHASE_COUNT],
+                new int[NativeBridge.DEVICE_UPDATE_PHASE_COUNT],
+                new int[NativeBridge.DEVICE_UPDATE_PHASE_COUNT]);
 
         private static Context empty() {
             return EMPTY;

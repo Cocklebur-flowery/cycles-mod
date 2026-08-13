@@ -23,6 +23,8 @@ public final class FramePerformanceMonitor implements DisplayPerformanceProbe {
     private static final long ABSOLUTE_STALL_NANOS = 20_000_000L;
     private static final long MIN_ADAPTIVE_STALL_NANOS = 12_000_000L;
     private final PerformanceContextSampler contextSampler;
+    private final DevicePhaseStallDetector devicePhaseStallDetector =
+            new DevicePhaseStallDetector();
     private final JvmPerformanceSampler jvmSampler = new JvmPerformanceSampler();
     private final PerformanceSample[] ring = new PerformanceSample[RING_SIZE];
     private final long[] baseline = new long[BASELINE_SIZE];
@@ -99,6 +101,7 @@ public final class FramePerformanceMonitor implements DisplayPerformanceProbe {
         clientTickStartNanos = 0L;
         clientTickId = -1L;
         lastClientTickNanos = PerformanceSample.UNAVAILABLE;
+        devicePhaseStallDetector.reset();
         capture = null;
         current = null;
         latestContext = null;
@@ -216,13 +219,15 @@ public final class FramePerformanceMonitor implements DisplayPerformanceProbe {
         if (periodicContext || triggerCode != 0 || latestContext == null) {
             sampleContext();
         }
+        triggerCode |= devicePhaseStallDetector.classify(latestContext);
         current.setContext(latestContextFrame, latestContext);
         if (triggerCode != 0) {
             current.setTriggerCode(triggerCode);
             beginOrExtendCapture(current.frameId());
         }
-        updateBaseline(observed, triggerCode == 0);
-        updateFlipBaseline(current.flipIntervalNanos(), triggerCode == 0);
+        boolean ordinaryMinecraftFrame = (triggerCode & 7) == 0;
+        updateBaseline(observed, ordinaryMinecraftFrame);
+        updateFlipBaseline(current.flipIntervalNanos(), ordinaryMinecraftFrame);
 
         if (capture != null && current.frameId() >= capture.endFrame) {
             boolean timedOut = current.frameId() >= capture.endFrame + GPU_RESULT_GRACE_FRAMES;
