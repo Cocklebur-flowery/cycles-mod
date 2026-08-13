@@ -35,11 +35,16 @@ public final class VulkanCapabilityProbe {
     private static final String EXTERNAL_MEMORY_WIN32 = "VK_KHR_external_memory_win32";
     private static final String EXTERNAL_SEMAPHORE_WIN32 = "VK_KHR_external_semaphore_win32";
     private static final String HDR_METADATA = "VK_EXT_hdr_metadata";
+    private static final String COLORSPACE_PROPERTY =
+            "cyclesrenderer.vulkanSwapchainColorspace";
+    private static final String COLORSPACE_ENVIRONMENT =
+            "CYCLESRENDERER_VULKAN_SWAPCHAIN_COLORSPACE";
     private static final String INTEROP_PROPERTY =
             "cyclesrenderer.experimentalVulkanInterop";
     private static final String INTEROP_ENVIRONMENT =
             "CYCLESRENDERER_VULKAN_INTEROP";
     private static final InteropRequest INTEROP_REQUEST = interopRequest();
+    private static final InteropRequest COLORSPACE_REQUEST = colorspaceRequest();
 
     private static volatile Snapshot cached;
     private static volatile InteropBootstrap interopBootstrap =
@@ -53,8 +58,55 @@ public final class VulkanCapabilityProbe {
                     INTEROP_REQUEST.requested()
                             ? "awaiting device creation"
                             : "disabled");
+    private static volatile ColorspaceBootstrap colorspaceBootstrap =
+            new ColorspaceBootstrap(
+                    COLORSPACE_REQUEST.requested(),
+                    COLORSPACE_REQUEST.source(),
+                    false,
+                    false,
+                    false,
+                    COLORSPACE_REQUEST.requested()
+                            ? "awaiting instance creation"
+                            : "disabled");
 
     private VulkanCapabilityProbe() {
+    }
+
+    public static Set<String> withRequestedSwapchainColorspaceExtension(
+            Set<String> enabledExtensions) {
+        if (!COLORSPACE_REQUEST.requested()) {
+            colorspaceBootstrap = new ColorspaceBootstrap(
+                    false,
+                    COLORSPACE_REQUEST.source(),
+                    true,
+                    false,
+                    false,
+                    "disabled");
+            return enabledExtensions;
+        }
+        try {
+            boolean available = supportedInstanceExtensions().contains(SWAPCHAIN_COLORSPACE);
+            if (available) {
+                enabledExtensions.add(SWAPCHAIN_COLORSPACE);
+            }
+            colorspaceBootstrap = new ColorspaceBootstrap(
+                    true,
+                    COLORSPACE_REQUEST.source(),
+                    true,
+                    available,
+                    available,
+                    available ? "extension requested" : "extension unavailable");
+        } catch (RuntimeException | LinkageError error) {
+            colorspaceBootstrap = new ColorspaceBootstrap(
+                    true,
+                    COLORSPACE_REQUEST.source(),
+                    true,
+                    false,
+                    false,
+                    error.getClass().getSimpleName() + ": "
+                            + String.valueOf(error.getMessage()));
+        }
+        return enabledExtensions;
     }
 
     public static Collection<String> withRequestedInteropExtensions(
@@ -109,6 +161,10 @@ public final class VulkanCapabilityProbe {
 
     public static InteropBootstrap interopBootstrap() {
         return interopBootstrap;
+    }
+
+    public static ColorspaceBootstrap colorspaceBootstrap() {
+        return colorspaceBootstrap;
     }
 
     public static Snapshot snapshot(Minecraft minecraft) {
@@ -177,6 +233,20 @@ public final class VulkanCapabilityProbe {
             return new InteropRequest(Boolean.parseBoolean(property), "jvm-property");
         }
         String environment = System.getenv(INTEROP_ENVIRONMENT);
+        if (environment != null) {
+            return new InteropRequest(
+                    "1".equals(environment) || Boolean.parseBoolean(environment),
+                    "environment");
+        }
+        return new InteropRequest(true, "default-enabled");
+    }
+
+    private static InteropRequest colorspaceRequest() {
+        String property = System.getProperty(COLORSPACE_PROPERTY);
+        if (property != null) {
+            return new InteropRequest(Boolean.parseBoolean(property), "jvm-property");
+        }
+        String environment = System.getenv(COLORSPACE_ENVIRONMENT);
         if (environment != null) {
             return new InteropRequest(
                     "1".equals(environment) || Boolean.parseBoolean(environment),
@@ -335,6 +405,23 @@ public final class VulkanCapabilityProbe {
                     + " source=" + requestSource
                     + " attempted=" + attempted
                     + " injected=" + extensionsRequested
+                    + " reason=" + reason;
+        }
+    }
+
+    public record ColorspaceBootstrap(
+            boolean requested,
+            String requestSource,
+            boolean attempted,
+            boolean available,
+            boolean extensionRequested,
+            String reason) {
+        public String summary() {
+            return "request=" + requested
+                    + " source=" + requestSource
+                    + " attempted=" + attempted
+                    + " available=" + available
+                    + " injected=" + extensionRequested
                     + " reason=" + reason;
         }
     }
