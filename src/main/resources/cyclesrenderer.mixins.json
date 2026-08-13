@@ -9,6 +9,7 @@
     "SectionCompilerMixin",
     "VulkanBackendMixin",
     "VulkanGpuSurfaceAccessor",
+    "VulkanGpuSurfaceMixin",
     "VulkanInstanceMixin"
   ],
   "injectors": {

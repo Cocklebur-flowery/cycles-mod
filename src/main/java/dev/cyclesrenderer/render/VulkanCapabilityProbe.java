@@ -39,12 +39,19 @@ public final class VulkanCapabilityProbe {
             "cyclesrenderer.vulkanSwapchainColorspace";
     private static final String COLORSPACE_ENVIRONMENT =
             "CYCLESRENDERER_VULKAN_SWAPCHAIN_COLORSPACE";
+    private static final String HDR_SWAPCHAIN_PROPERTY =
+            "cyclesrenderer.experimentalHdrSwapchain";
+    private static final String HDR_SWAPCHAIN_ENVIRONMENT =
+            "CYCLESRENDERER_EXPERIMENTAL_HDR_SWAPCHAIN";
+    private static final int FORMAT_RGBA16_SFLOAT = 97;
+    private static final int COLOR_SPACE_EXTENDED_SRGB_LINEAR = 1_000_104_002;
     private static final String INTEROP_PROPERTY =
             "cyclesrenderer.experimentalVulkanInterop";
     private static final String INTEROP_ENVIRONMENT =
             "CYCLESRENDERER_VULKAN_INTEROP";
     private static final InteropRequest INTEROP_REQUEST = interopRequest();
     private static final InteropRequest COLORSPACE_REQUEST = colorspaceRequest();
+    private static final InteropRequest HDR_SWAPCHAIN_REQUEST = hdrSwapchainRequest();
 
     private static volatile Snapshot cached;
     private static volatile InteropBootstrap interopBootstrap =
@@ -68,6 +75,16 @@ public final class VulkanCapabilityProbe {
                     COLORSPACE_REQUEST.requested()
                             ? "awaiting instance creation"
                             : "disabled");
+    private static volatile SwapchainBootstrap swapchainBootstrap =
+            new SwapchainBootstrap(
+                    HDR_SWAPCHAIN_REQUEST.requested(),
+                    HDR_SWAPCHAIN_REQUEST.source(),
+                    false,
+                    false,
+                    new SurfaceFormat(-1, -1),
+                    HDR_SWAPCHAIN_REQUEST.requested()
+                            ? "awaiting surface format selection"
+                            : "disabled; SDR fallback");
 
     private VulkanCapabilityProbe() {
     }
@@ -167,6 +184,45 @@ public final class VulkanCapabilityProbe {
         return colorspaceBootstrap;
     }
 
+    public static SwapchainBootstrap swapchainBootstrap() {
+        return swapchainBootstrap;
+    }
+
+    public static VkSurfaceFormatKHR pickExperimentalHdrSurfaceFormat(
+            VkSurfaceFormatKHR.Buffer formats) {
+        if (!HDR_SWAPCHAIN_REQUEST.requested()) {
+            return null;
+        }
+        for (int index = formats.position(); index < formats.limit(); index++) {
+            VkSurfaceFormatKHR candidate = formats.get(index);
+            if (candidate.format() == FORMAT_RGBA16_SFLOAT
+                    && candidate.colorSpace() == COLOR_SPACE_EXTENDED_SRGB_LINEAR) {
+                return candidate;
+            }
+        }
+        return null;
+    }
+
+    public static void recordSelectedSwapchainSurfaceFormat(int format, int colorSpace) {
+        boolean selected = format == FORMAT_RGBA16_SFLOAT
+                && colorSpace == COLOR_SPACE_EXTENDED_SRGB_LINEAR;
+        String reason;
+        if (!HDR_SWAPCHAIN_REQUEST.requested()) {
+            reason = "disabled; SDR fallback";
+        } else if (selected) {
+            reason = "scRGB surface pair selected";
+        } else {
+            reason = "scRGB surface pair unavailable; SDR fallback";
+        }
+        swapchainBootstrap = new SwapchainBootstrap(
+                HDR_SWAPCHAIN_REQUEST.requested(),
+                HDR_SWAPCHAIN_REQUEST.source(),
+                true,
+                selected,
+                new SurfaceFormat(format, colorSpace),
+                reason);
+    }
+
     public static Snapshot snapshot(Minecraft minecraft) {
         Snapshot current = cached;
         if (current != null) {
@@ -253,6 +309,20 @@ public final class VulkanCapabilityProbe {
                     "environment");
         }
         return new InteropRequest(true, "default-enabled");
+    }
+
+    private static InteropRequest hdrSwapchainRequest() {
+        String property = System.getProperty(HDR_SWAPCHAIN_PROPERTY);
+        if (property != null) {
+            return new InteropRequest(Boolean.parseBoolean(property), "jvm-property");
+        }
+        String environment = System.getenv(HDR_SWAPCHAIN_ENVIRONMENT);
+        if (environment != null) {
+            return new InteropRequest(
+                    "1".equals(environment) || Boolean.parseBoolean(environment),
+                    "environment");
+        }
+        return new InteropRequest(false, "default-disabled");
     }
 
     private static Set<String> supportedInstanceExtensions() {
@@ -422,6 +492,23 @@ public final class VulkanCapabilityProbe {
                     + " attempted=" + attempted
                     + " available=" + available
                     + " injected=" + extensionRequested
+                    + " reason=" + reason;
+        }
+    }
+
+    public record SwapchainBootstrap(
+            boolean requested,
+            String requestSource,
+            boolean attempted,
+            boolean scRgbSelected,
+            SurfaceFormat activeSurfaceFormat,
+            String reason) {
+        public String summary() {
+            return "request=" + requested
+                    + " source=" + requestSource
+                    + " attempted=" + attempted
+                    + " selected=" + scRgbSelected
+                    + " active=" + activeSurfaceFormat.summary()
                     + " reason=" + reason;
         }
     }
