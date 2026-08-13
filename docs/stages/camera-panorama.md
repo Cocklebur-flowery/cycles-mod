@@ -163,6 +163,9 @@ Panorama is an additive but intentionally breaking native ABI extension:
 
 Static assertions pin these sizes and offsets. Java also checks ABI 34 during native initialization, so an old DLL fails the handshake instead of reading the enlarged structure incorrectly.
 
+These are the historical sizes for the panorama stage. The later camera-composition stage advances
+the combined bridge to ABI 36; see `camera-composition.md` for the current shift offsets and sizes.
+
 Existing settings remain valid: the camera type defaults to Perspective and the panorama subtype defaults to Equirectangular. New TOML keys are additive; no resource GUID, dependency, file format, or Minecraft world data is changed. The old perspective projection and DOF paths remain active when `camera.type=PERSPECTIVE`.
 
 F9 enables only relevant inputs:
@@ -231,6 +234,6 @@ The native smoke test now applies all seven panorama IDs, waits for a new frame,
 - The panorama path captures block-section geometry already available through `ViewArea`; it does not expand server/client chunk loading, add distant terrain, or broaden entity and block-entity extraction.
 - The first Perspective-to-Panorama switch can create a large compilation/upload burst proportional to view distance and world height. Existing asynchronous budgets limit per-frame work but do not eliminate total CPU/GPU/memory cost.
 - EAC-face is a single face. A six-face cubemap layout and export orchestration are outside this stage.
-- Stereo panorama, pole merge, camera shift, border crop and render-region controls are not exposed by this bridge.
+- Stereo panorama, pole merge, border crop and render-region controls are not exposed by this bridge.
 - Reversed min/max angular endpoints are accepted and forwarded. This is useful for axis reversal but should be considered when adding stricter UI validation later.
 - The OptiX cache warning observed during tests (`optix7cache.db` unavailable) did not prevent the scene-update test, but it may increase initialization cost and is not changed by this camera stage.
