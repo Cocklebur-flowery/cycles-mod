@@ -18,9 +18,9 @@ struct CyclesBridgeRenderer {
 
 namespace {
 
-constexpr std::uint32_t kAbiVersion = 31;
+constexpr std::uint32_t kAbiVersion = 33;
 constexpr std::uint32_t kStructVersion = 1;
-constexpr char kBuildInfo[] = "cyclesrenderer-native/cycles-5.2;abi=31";
+constexpr char kBuildInfo[] = "cyclesrenderer-native/cycles-5.2;abi=33";
 
 static_assert(sizeof(CyclesBridgeCamera) == 80);
 static_assert(offsetof(CyclesBridgeCamera, frame_id) == 8);
@@ -39,7 +39,7 @@ static_assert(offsetof(CyclesBridgeFrameView, pixels) == 48);
 static_assert(sizeof(CyclesBridgeRenderSettings) == 280);
 static_assert(sizeof(CyclesBridgePassDescriptor) == 64);
 static_assert(sizeof(CyclesBridgeCapabilities) == 64);
-static_assert(sizeof(CyclesBridgeColorLutDescriptor) == 64);
+static_assert(sizeof(CyclesBridgeColorLutDescriptor) == 72);
 static_assert(offsetof(CyclesBridgeColorLutDescriptor, pixel_byte_count) == 32);
 static_assert(sizeof(CyclesBridgeDiagnostics) == 504);
 static_assert(offsetof(CyclesBridgeDiagnostics, device_uuid_valid) == 376);
@@ -454,6 +454,7 @@ std::uint32_t cycles_bridge_write_color_management_info(
 
 std::uint32_t cycles_bridge_query_color_lut(
     const CyclesBridgeRenderer* renderer,
+    std::uint32_t display_device,
     std::uint32_t view_transform,
     std::uint32_t color_look,
     std::uint32_t working_space,
@@ -470,7 +471,7 @@ std::uint32_t cycles_bridge_query_color_lut(
         CyclesBridgeColorLutDescriptor result{};
         std::string error;
         if (!renderer->engine->query_color_lut(
-                view_transform, color_look, working_space,
+                display_device, view_transform, color_look, working_space,
                 result, nullptr, 0U, error)) {
             return CYCLES_BRIDGE_STATUS_RENDER_ERROR;
         }
@@ -482,7 +483,7 @@ std::uint32_t cycles_bridge_query_color_lut(
             return CYCLES_BRIDGE_STATUS_BUFFER_TOO_SMALL;
         }
         return renderer->engine->query_color_lut(
-                   view_transform, color_look, working_space,
+                   display_device, view_transform, color_look, working_space,
                    result, rgba, rgba_capacity, error)
             ? CYCLES_BRIDGE_STATUS_OK
             : CYCLES_BRIDGE_STATUS_RENDER_ERROR;

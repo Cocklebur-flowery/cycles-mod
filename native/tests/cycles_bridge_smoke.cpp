@@ -415,7 +415,7 @@ bool verify_progressive_sampling(
 int main(int argc, char** argv) {
     const bool require_optix = argc > 1 && std::strcmp(argv[1], "--require-optix") == 0;
     std::cerr << "[smoke] ABI check\n";
-    if (cycles_bridge_abi_version() != 31U) {
+    if (cycles_bridge_abi_version() != 33U) {
         std::cerr << "unexpected native ABI " << cycles_bridge_abi_version() << '\n';
         return 1;
     }
@@ -639,7 +639,7 @@ int main(int argc, char** argv) {
                 static_cast<std::uint32_t>(color_info.size())),
             "color management info")
         || std::strstr(color_info.data(), "state=ready") == nullptr
-        || std::strstr(color_info.data(), "display=sRGB") == nullptr) {
+        || std::strstr(color_info.data(), "displays=6") == nullptr) {
         std::cerr << "invalid color management info: " << color_info.data() << '\n';
         cycles_bridge_destroy_renderer(renderer);
         return 1;
@@ -651,6 +651,7 @@ int main(int argc, char** argv) {
     if (!require_ok(
             cycles_bridge_query_color_lut(
                 renderer,
+                CYCLES_BRIDGE_DISPLAY_SRGB,
                 CYCLES_BRIDGE_VIEW_TRANSFORM_AGX,
                 CYCLES_BRIDGE_COLOR_LOOK_AGX_PUNCHY,
                 CYCLES_BRIDGE_WORKING_SPACE_LINEAR_REC709,
@@ -664,9 +665,69 @@ int main(int argc, char** argv) {
         || color_lut.pixel_format != CYCLES_BRIDGE_PIXEL_FORMAT_RGBA32_FLOAT
         || color_lut.color_look != CYCLES_BRIDGE_COLOR_LOOK_AGX_PUNCHY
         || color_lut.working_space != CYCLES_BRIDGE_WORKING_SPACE_LINEAR_REC709
+        || color_lut.display_device != CYCLES_BRIDGE_DISPLAY_SRGB
         || color_lut.pixel_byte_count
             != static_cast<std::uint64_t>(color_lut.width) * color_lut.height
                 * 4U * sizeof(float)) {
+        cycles_bridge_destroy_renderer(renderer);
+        return 1;
+    }
+
+    const auto verify_color_pipeline = [&](std::uint32_t display,
+                                           std::uint32_t view,
+                                           std::uint32_t look,
+                                           const char* label) {
+        CyclesBridgeColorLutDescriptor descriptor{};
+        descriptor.struct_size = sizeof(descriptor);
+        descriptor.struct_version = 1;
+        return require_ok(
+                   cycles_bridge_query_color_lut(
+                       renderer, display, view, look,
+                       CYCLES_BRIDGE_WORKING_SPACE_LINEAR_REC709,
+                       &descriptor, nullptr, 0U),
+                   label)
+            && descriptor.display_device == display
+            && descriptor.view_transform == view
+            && descriptor.color_look == look;
+    };
+    if (!verify_color_pipeline(
+            CYCLES_BRIDGE_DISPLAY_P3,
+            CYCLES_BRIDGE_VIEW_TRANSFORM_AGX,
+            CYCLES_BRIDGE_COLOR_LOOK_AGX_PUNCHY,
+            "Display P3 AgX Punchy LUT")
+        || !verify_color_pipeline(
+            CYCLES_BRIDGE_DISPLAY_SRGB,
+            CYCLES_BRIDGE_VIEW_TRANSFORM_FILMIC,
+            CYCLES_BRIDGE_COLOR_LOOK_FILMIC_MEDIUM_CONTRAST,
+            "sRGB Filmic Medium Contrast LUT")
+        || !verify_color_pipeline(
+            CYCLES_BRIDGE_DISPLAY_SRGB,
+            CYCLES_BRIDGE_VIEW_TRANSFORM_ACES_2,
+            CYCLES_BRIDGE_COLOR_LOOK_ACES_2_GAMUT_COMPRESSION,
+            "sRGB ACES 2 gamut compression LUT")
+        || !verify_color_pipeline(
+            CYCLES_BRIDGE_DISPLAY_REC2100_PQ,
+            CYCLES_BRIDGE_VIEW_TRANSFORM_ACES_2_HDR_1000,
+            CYCLES_BRIDGE_COLOR_LOOK_NONE,
+            "PQ ACES 2 HDR 1000 LUT")) {
+        cycles_bridge_destroy_renderer(renderer);
+        return 1;
+    }
+    CyclesBridgeColorLutDescriptor incompatible_look{};
+    incompatible_look.struct_size = sizeof(incompatible_look);
+    incompatible_look.struct_version = 1;
+    if (!require_ok(
+            cycles_bridge_query_color_lut(
+                renderer,
+                CYCLES_BRIDGE_DISPLAY_P3,
+                CYCLES_BRIDGE_VIEW_TRANSFORM_STANDARD,
+                CYCLES_BRIDGE_COLOR_LOOK_AGX_PUNCHY,
+                CYCLES_BRIDGE_WORKING_SPACE_LINEAR_REC709,
+                &incompatible_look,
+                nullptr,
+                0U),
+            "incompatible look fallback")
+        || incompatible_look.color_look != CYCLES_BRIDGE_COLOR_LOOK_NONE) {
         cycles_bridge_destroy_renderer(renderer);
         return 1;
     }
@@ -676,6 +737,7 @@ int main(int argc, char** argv) {
     color_lut.struct_version = 1;
     if (cycles_bridge_query_color_lut(
             renderer,
+            CYCLES_BRIDGE_DISPLAY_SRGB,
             CYCLES_BRIDGE_VIEW_TRANSFORM_AGX,
             CYCLES_BRIDGE_COLOR_LOOK_AGX_PUNCHY,
             CYCLES_BRIDGE_WORKING_SPACE_LINEAR_REC709,
@@ -685,6 +747,7 @@ int main(int argc, char** argv) {
         || !require_ok(
             cycles_bridge_query_color_lut(
                 renderer,
+                CYCLES_BRIDGE_DISPLAY_SRGB,
                 CYCLES_BRIDGE_VIEW_TRANSFORM_AGX,
                 CYCLES_BRIDGE_COLOR_LOOK_AGX_PUNCHY,
                 CYCLES_BRIDGE_WORKING_SPACE_LINEAR_REC709,
@@ -716,6 +779,7 @@ int main(int argc, char** argv) {
         if (!require_ok(
                 cycles_bridge_query_color_lut(
                     renderer,
+                    CYCLES_BRIDGE_DISPLAY_SRGB,
                     CYCLES_BRIDGE_VIEW_TRANSFORM_AGX,
                     CYCLES_BRIDGE_COLOR_LOOK_AGX_PUNCHY,
                     working_space,
@@ -735,6 +799,7 @@ int main(int argc, char** argv) {
     if (!require_ok(
             cycles_bridge_query_color_lut(
                 renderer,
+                CYCLES_BRIDGE_DISPLAY_SRGB,
                 CYCLES_BRIDGE_VIEW_TRANSFORM_STANDARD,
                 CYCLES_BRIDGE_COLOR_LOOK_NONE,
                 CYCLES_BRIDGE_WORKING_SPACE_ACESCG,

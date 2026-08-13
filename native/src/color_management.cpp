@@ -26,7 +26,13 @@ constexpr float kShaperLog2Min = -10.0F;
 constexpr float kShaperLog2Max = 16.0F;
 constexpr float kShaperEpsilon = 1.0F / 1024.0F;
 
+struct DisplayDefinition final {
+    std::uint32_t id;
+    const char* name;
+};
+
 struct ViewDefinition final {
+    std::uint32_t display;
     std::uint32_t id;
     const char* name;
 };
@@ -41,11 +47,66 @@ struct WorkingSpaceDefinition final {
     const char* name;
 };
 
-constexpr std::array<ViewDefinition, 4> kOcioViews = {{
-    {CYCLES_BRIDGE_VIEW_TRANSFORM_STANDARD, "Standard"},
-    {CYCLES_BRIDGE_VIEW_TRANSFORM_AGX, "AgX"},
-    {CYCLES_BRIDGE_VIEW_TRANSFORM_KHRONOS_PBR_NEUTRAL, "Khronos PBR Neutral"},
-    {CYCLES_BRIDGE_VIEW_TRANSFORM_ACES_2, "ACES 2.0"},
+constexpr std::array<DisplayDefinition, 6> kDisplays = {{
+    {CYCLES_BRIDGE_DISPLAY_SRGB, "sRGB"},
+    {CYCLES_BRIDGE_DISPLAY_P3, "Display P3"},
+    {CYCLES_BRIDGE_DISPLAY_REC1886, "Rec.1886"},
+    {CYCLES_BRIDGE_DISPLAY_REC2020, "Rec.2020"},
+    {CYCLES_BRIDGE_DISPLAY_REC2100_PQ, "Rec.2100-PQ"},
+    {CYCLES_BRIDGE_DISPLAY_REC2100_HLG, "Rec.2100-HLG"},
+}};
+
+constexpr std::array<ViewDefinition, 50> kOcioViews = {{
+    {CYCLES_BRIDGE_DISPLAY_SRGB, CYCLES_BRIDGE_VIEW_TRANSFORM_STANDARD, "Standard"},
+    {CYCLES_BRIDGE_DISPLAY_SRGB, CYCLES_BRIDGE_VIEW_TRANSFORM_ACES_1_3, "ACES 1.3"},
+    {CYCLES_BRIDGE_DISPLAY_SRGB, CYCLES_BRIDGE_VIEW_TRANSFORM_ACES_2, "ACES 2.0"},
+    {CYCLES_BRIDGE_DISPLAY_SRGB, CYCLES_BRIDGE_VIEW_TRANSFORM_KHRONOS_PBR_NEUTRAL, "Khronos PBR Neutral"},
+    {CYCLES_BRIDGE_DISPLAY_SRGB, CYCLES_BRIDGE_VIEW_TRANSFORM_AGX, "AgX"},
+    {CYCLES_BRIDGE_DISPLAY_SRGB, CYCLES_BRIDGE_VIEW_TRANSFORM_FILMIC, "Filmic"},
+    {CYCLES_BRIDGE_DISPLAY_SRGB, CYCLES_BRIDGE_VIEW_TRANSFORM_FILMIC_LOG, "Filmic Log"},
+    {CYCLES_BRIDGE_DISPLAY_SRGB, CYCLES_BRIDGE_VIEW_TRANSFORM_FALSE_COLOR, "False Color"},
+    {CYCLES_BRIDGE_DISPLAY_SRGB, CYCLES_BRIDGE_VIEW_TRANSFORM_RAW, "Raw"},
+    {CYCLES_BRIDGE_DISPLAY_P3, CYCLES_BRIDGE_VIEW_TRANSFORM_STANDARD, "Standard"},
+    {CYCLES_BRIDGE_DISPLAY_P3, CYCLES_BRIDGE_VIEW_TRANSFORM_ACES_1_3, "ACES 1.3"},
+    {CYCLES_BRIDGE_DISPLAY_P3, CYCLES_BRIDGE_VIEW_TRANSFORM_ACES_2, "ACES 2.0"},
+    {CYCLES_BRIDGE_DISPLAY_P3, CYCLES_BRIDGE_VIEW_TRANSFORM_AGX, "AgX"},
+    {CYCLES_BRIDGE_DISPLAY_P3, CYCLES_BRIDGE_VIEW_TRANSFORM_FALSE_COLOR, "False Color"},
+    {CYCLES_BRIDGE_DISPLAY_P3, CYCLES_BRIDGE_VIEW_TRANSFORM_RAW, "Raw"},
+    {CYCLES_BRIDGE_DISPLAY_REC1886, CYCLES_BRIDGE_VIEW_TRANSFORM_STANDARD, "Standard"},
+    {CYCLES_BRIDGE_DISPLAY_REC1886, CYCLES_BRIDGE_VIEW_TRANSFORM_ACES_1_3, "ACES 1.3"},
+    {CYCLES_BRIDGE_DISPLAY_REC1886, CYCLES_BRIDGE_VIEW_TRANSFORM_ACES_2, "ACES 2.0"},
+    {CYCLES_BRIDGE_DISPLAY_REC1886, CYCLES_BRIDGE_VIEW_TRANSFORM_AGX, "AgX"},
+    {CYCLES_BRIDGE_DISPLAY_REC1886, CYCLES_BRIDGE_VIEW_TRANSFORM_FALSE_COLOR, "False Color"},
+    {CYCLES_BRIDGE_DISPLAY_REC1886, CYCLES_BRIDGE_VIEW_TRANSFORM_RAW, "Raw"},
+    {CYCLES_BRIDGE_DISPLAY_REC2020, CYCLES_BRIDGE_VIEW_TRANSFORM_STANDARD, "Standard"},
+    {CYCLES_BRIDGE_DISPLAY_REC2020, CYCLES_BRIDGE_VIEW_TRANSFORM_ACES_1_3, "ACES 1.3"},
+    {CYCLES_BRIDGE_DISPLAY_REC2020, CYCLES_BRIDGE_VIEW_TRANSFORM_ACES_2, "ACES 2.0"},
+    {CYCLES_BRIDGE_DISPLAY_REC2020, CYCLES_BRIDGE_VIEW_TRANSFORM_AGX, "AgX"},
+    {CYCLES_BRIDGE_DISPLAY_REC2020, CYCLES_BRIDGE_VIEW_TRANSFORM_FALSE_COLOR, "False Color"},
+    {CYCLES_BRIDGE_DISPLAY_REC2020, CYCLES_BRIDGE_VIEW_TRANSFORM_RAW, "Raw"},
+    {CYCLES_BRIDGE_DISPLAY_REC2100_PQ, CYCLES_BRIDGE_VIEW_TRANSFORM_STANDARD, "Standard"},
+    {CYCLES_BRIDGE_DISPLAY_REC2100_PQ, CYCLES_BRIDGE_VIEW_TRANSFORM_ACES_1_3_HDR_1000, "ACES 1.3 - HDR 1000 nits"},
+    {CYCLES_BRIDGE_DISPLAY_REC2100_PQ, CYCLES_BRIDGE_VIEW_TRANSFORM_ACES_1_3_HDR_2000, "ACES 1.3 - HDR 2000 nits"},
+    {CYCLES_BRIDGE_DISPLAY_REC2100_PQ, CYCLES_BRIDGE_VIEW_TRANSFORM_ACES_1_3_HDR_4000, "ACES 1.3 - HDR 4000 nits"},
+    {CYCLES_BRIDGE_DISPLAY_REC2100_PQ, CYCLES_BRIDGE_VIEW_TRANSFORM_ACES_1_3, "ACES 1.3 - SDR"},
+    {CYCLES_BRIDGE_DISPLAY_REC2100_PQ, CYCLES_BRIDGE_VIEW_TRANSFORM_ACES_2_HDR_500, "ACES 2.0 - HDR 500 nits"},
+    {CYCLES_BRIDGE_DISPLAY_REC2100_PQ, CYCLES_BRIDGE_VIEW_TRANSFORM_ACES_2_HDR_1000, "ACES 2.0 - HDR 1000 nits"},
+    {CYCLES_BRIDGE_DISPLAY_REC2100_PQ, CYCLES_BRIDGE_VIEW_TRANSFORM_ACES_2_HDR_2000, "ACES 2.0 - HDR 2000 nits"},
+    {CYCLES_BRIDGE_DISPLAY_REC2100_PQ, CYCLES_BRIDGE_VIEW_TRANSFORM_ACES_2_HDR_4000, "ACES 2.0 - HDR 4000 nits"},
+    {CYCLES_BRIDGE_DISPLAY_REC2100_PQ, CYCLES_BRIDGE_VIEW_TRANSFORM_ACES_2, "ACES 2.0 - SDR"},
+    {CYCLES_BRIDGE_DISPLAY_REC2100_PQ, CYCLES_BRIDGE_VIEW_TRANSFORM_AGX_HDR_1000, "AgX - HDR 1000 nits"},
+    {CYCLES_BRIDGE_DISPLAY_REC2100_PQ, CYCLES_BRIDGE_VIEW_TRANSFORM_AGX, "AgX - SDR"},
+    {CYCLES_BRIDGE_DISPLAY_REC2100_PQ, CYCLES_BRIDGE_VIEW_TRANSFORM_FALSE_COLOR, "False Color"},
+    {CYCLES_BRIDGE_DISPLAY_REC2100_PQ, CYCLES_BRIDGE_VIEW_TRANSFORM_RAW, "Raw"},
+    {CYCLES_BRIDGE_DISPLAY_REC2100_HLG, CYCLES_BRIDGE_VIEW_TRANSFORM_STANDARD, "Standard"},
+    {CYCLES_BRIDGE_DISPLAY_REC2100_HLG, CYCLES_BRIDGE_VIEW_TRANSFORM_ACES_1_3_HDR_1000, "ACES 1.3 - HDR 1000 nits"},
+    {CYCLES_BRIDGE_DISPLAY_REC2100_HLG, CYCLES_BRIDGE_VIEW_TRANSFORM_ACES_1_3, "ACES 1.3 - SDR"},
+    {CYCLES_BRIDGE_DISPLAY_REC2100_HLG, CYCLES_BRIDGE_VIEW_TRANSFORM_ACES_2_HDR_1000, "ACES 2.0 - HDR 1000 nits"},
+    {CYCLES_BRIDGE_DISPLAY_REC2100_HLG, CYCLES_BRIDGE_VIEW_TRANSFORM_ACES_2, "ACES 2.0 - SDR"},
+    {CYCLES_BRIDGE_DISPLAY_REC2100_HLG, CYCLES_BRIDGE_VIEW_TRANSFORM_AGX_HDR_1000, "AgX - HDR 1000 nits"},
+    {CYCLES_BRIDGE_DISPLAY_REC2100_HLG, CYCLES_BRIDGE_VIEW_TRANSFORM_AGX, "AgX - SDR"},
+    {CYCLES_BRIDGE_DISPLAY_REC2100_HLG, CYCLES_BRIDGE_VIEW_TRANSFORM_FALSE_COLOR, "False Color"},
+    {CYCLES_BRIDGE_DISPLAY_REC2100_HLG, CYCLES_BRIDGE_VIEW_TRANSFORM_RAW, "Raw"},
 }};
 
 constexpr std::array<LookDefinition, 9> kAgxLooks = {{
@@ -58,6 +119,33 @@ constexpr std::array<LookDefinition, 9> kAgxLooks = {{
     {CYCLES_BRIDGE_COLOR_LOOK_AGX_LOW_CONTRAST, "AgX - Low Contrast"},
     {CYCLES_BRIDGE_COLOR_LOOK_AGX_VERY_LOW_CONTRAST, "AgX - Very Low Contrast"},
     {CYCLES_BRIDGE_COLOR_LOOK_AGX_GREYSCALE, "AgX - Greyscale"},
+}};
+
+constexpr std::array<LookDefinition, 7> kFilmicLooks = {{
+    {CYCLES_BRIDGE_COLOR_LOOK_FILMIC_VERY_HIGH_CONTRAST, "Very High Contrast"},
+    {CYCLES_BRIDGE_COLOR_LOOK_FILMIC_HIGH_CONTRAST, "High Contrast"},
+    {CYCLES_BRIDGE_COLOR_LOOK_FILMIC_MEDIUM_HIGH_CONTRAST, "Medium High Contrast"},
+    {CYCLES_BRIDGE_COLOR_LOOK_FILMIC_MEDIUM_CONTRAST, "Medium Contrast"},
+    {CYCLES_BRIDGE_COLOR_LOOK_FILMIC_MEDIUM_LOW_CONTRAST, "Medium Low Contrast"},
+    {CYCLES_BRIDGE_COLOR_LOOK_FILMIC_LOW_CONTRAST, "Low Contrast"},
+    {CYCLES_BRIDGE_COLOR_LOOK_FILMIC_VERY_LOW_CONTRAST, "Very Low Contrast"},
+}};
+
+constexpr std::array<LookDefinition, 9> kFalseColorLooks = {{
+    {CYCLES_BRIDGE_COLOR_LOOK_FALSE_COLOR_PUNCHY, "False Color - Punchy"},
+    {CYCLES_BRIDGE_COLOR_LOOK_FALSE_COLOR_VERY_HIGH_CONTRAST, "False Color - Very High Contrast"},
+    {CYCLES_BRIDGE_COLOR_LOOK_FALSE_COLOR_HIGH_CONTRAST, "False Color - High Contrast"},
+    {CYCLES_BRIDGE_COLOR_LOOK_FALSE_COLOR_MEDIUM_HIGH_CONTRAST, "False Color - Medium High Contrast"},
+    {CYCLES_BRIDGE_COLOR_LOOK_FALSE_COLOR_BASE_CONTRAST, "False Color - Base Contrast"},
+    {CYCLES_BRIDGE_COLOR_LOOK_FALSE_COLOR_MEDIUM_LOW_CONTRAST, "False Color - Medium Low Contrast"},
+    {CYCLES_BRIDGE_COLOR_LOOK_FALSE_COLOR_LOW_CONTRAST, "False Color - Low Contrast"},
+    {CYCLES_BRIDGE_COLOR_LOOK_FALSE_COLOR_VERY_LOW_CONTRAST, "False Color - Very Low Contrast"},
+    {CYCLES_BRIDGE_COLOR_LOOK_FALSE_COLOR_GREYSCALE, "False Color - Greyscale"},
+}};
+
+constexpr std::array<LookDefinition, 2> kAcesLooks = {{
+    {CYCLES_BRIDGE_COLOR_LOOK_ACES_1_3_GAMUT_COMPRESSION, "ACES 1.3 - Reference Gamut Compression"},
+    {CYCLES_BRIDGE_COLOR_LOOK_ACES_2_GAMUT_COMPRESSION, "ACES 2.0 - Reference Gamut Compression"},
 }};
 
 constexpr std::array<WorkingSpaceDefinition, 3> kWorkingSpaces = {{
@@ -108,9 +196,18 @@ std::filesystem::path color_config_path() {
     return std::filesystem::path(path).parent_path() / "color" / "ocio" / "config.ocio";
 }
 
-const char* view_name(std::uint32_t view_transform) {
+const char* display_name(std::uint32_t display_device) {
+    for (const DisplayDefinition& display : kDisplays) {
+        if (display.id == display_device) {
+            return display.name;
+        }
+    }
+    return nullptr;
+}
+
+const char* view_name(std::uint32_t display_device, std::uint32_t view_transform) {
     for (const ViewDefinition& view : kOcioViews) {
-        if (view.id == view_transform) {
+        if (view.display == display_device && view.id == view_transform) {
             return view.name;
         }
     }
@@ -126,7 +223,48 @@ const char* look_name(std::uint32_t color_look) {
             return look.name;
         }
     }
+    for (const LookDefinition& look : kFilmicLooks) {
+        if (look.id == color_look) {
+            return look.name;
+        }
+    }
+    for (const LookDefinition& look : kFalseColorLooks) {
+        if (look.id == color_look) {
+            return look.name;
+        }
+    }
+    for (const LookDefinition& look : kAcesLooks) {
+        if (look.id == color_look) {
+            return look.name;
+        }
+    }
     return nullptr;
+}
+
+bool look_compatible(std::uint32_t view_transform, std::uint32_t color_look) {
+    if (color_look == CYCLES_BRIDGE_COLOR_LOOK_NONE) {
+        return true;
+    }
+    if (color_look <= CYCLES_BRIDGE_COLOR_LOOK_AGX_GREYSCALE) {
+        return view_transform == CYCLES_BRIDGE_VIEW_TRANSFORM_AGX
+            || view_transform == CYCLES_BRIDGE_VIEW_TRANSFORM_AGX_HDR_1000;
+    }
+    if (color_look <= CYCLES_BRIDGE_COLOR_LOOK_FILMIC_VERY_LOW_CONTRAST) {
+        return view_transform == CYCLES_BRIDGE_VIEW_TRANSFORM_FILMIC
+            || view_transform == CYCLES_BRIDGE_VIEW_TRANSFORM_FILMIC_LOG;
+    }
+    if (color_look <= CYCLES_BRIDGE_COLOR_LOOK_FALSE_COLOR_GREYSCALE) {
+        return view_transform == CYCLES_BRIDGE_VIEW_TRANSFORM_FALSE_COLOR;
+    }
+    if (color_look == CYCLES_BRIDGE_COLOR_LOOK_ACES_1_3_GAMUT_COMPRESSION) {
+        return view_transform == CYCLES_BRIDGE_VIEW_TRANSFORM_ACES_1_3
+            || (view_transform >= CYCLES_BRIDGE_VIEW_TRANSFORM_ACES_1_3_HDR_1000
+                && view_transform <= CYCLES_BRIDGE_VIEW_TRANSFORM_ACES_1_3_HDR_4000);
+    }
+    return color_look == CYCLES_BRIDGE_COLOR_LOOK_ACES_2_GAMUT_COMPRESSION
+        && (view_transform == CYCLES_BRIDGE_VIEW_TRANSFORM_ACES_2
+            || (view_transform >= CYCLES_BRIDGE_VIEW_TRANSFORM_ACES_2_HDR_500
+                && view_transform <= CYCLES_BRIDGE_VIEW_TRANSFORM_ACES_2_HDR_4000));
 }
 
 const char* working_space_name(std::uint32_t working_space) {
@@ -139,10 +277,12 @@ const char* working_space_name(std::uint32_t working_space) {
 }
 
 std::uint64_t pipeline_key(
+    std::uint32_t display_device,
     std::uint32_t working_space,
     std::uint32_t view_transform,
     std::uint32_t color_look) {
-    return (static_cast<std::uint64_t>(working_space) << 48U)
+    return (static_cast<std::uint64_t>(display_device) << 56U)
+        | (static_cast<std::uint64_t>(working_space) << 48U)
         | (static_cast<std::uint64_t>(view_transform) << 32U)
         | color_look;
 }
@@ -165,17 +305,31 @@ class ColorManagement::Impl final {
             config_ = OCIO::Config::CreateFromFile(wide_to_utf8(config_path_.wstring()).c_str());
             for (const WorkingSpaceDefinition& working_space : kWorkingSpaces) {
                 for (const ViewDefinition& view : kOcioViews) {
+                    if (view.id == CYCLES_BRIDGE_VIEW_TRANSFORM_RAW) {
+                        transform_mask_ |= 1U << view.id;
+                        continue;
+                    }
                     build_processor(
+                        view.display,
                         working_space.id,
                         view.id,
                         CYCLES_BRIDGE_COLOR_LOOK_NONE);
                     transform_mask_ |= 1U << view.id;
-                }
-                for (const LookDefinition& look : kAgxLooks) {
-                    build_processor(
-                        working_space.id,
-                        CYCLES_BRIDGE_VIEW_TRANSFORM_AGX,
-                        look.id);
+                    const auto build_compatible = [&](const auto& looks) {
+                        for (const LookDefinition& look : looks) {
+                            if (look_compatible(view.id, look.id)) {
+                                build_processor(
+                                    view.display,
+                                    working_space.id,
+                                    view.id,
+                                    look.id);
+                            }
+                        }
+                    };
+                    build_compatible(kAgxLooks);
+                    build_compatible(kFilmicLooks);
+                    build_compatible(kFalseColorLooks);
+                    build_compatible(kAcesLooks);
                 }
             }
             std::string activation_error;
@@ -213,7 +367,7 @@ class ColorManagement::Impl final {
             output << "unavailable";
         }
         output << ";config=" << wide_to_utf8(config_path_.wstring())
-               << ";display=sRGB;edge=" << kLutEdgeLength
+               << ";displays=6;edge=" << kLutEdgeLength
                << ";working=" << working_space_name(active_working_space_.load())
                << ";mask=0x" << std::hex << transform_mask_;
         if (!error_.empty()) {
@@ -248,6 +402,7 @@ class ColorManagement::Impl final {
     }
 
     bool query_lut(
+        std::uint32_t display_device,
         std::uint32_t view_transform,
         std::uint32_t color_look,
         std::uint32_t working_space,
@@ -255,14 +410,16 @@ class ColorManagement::Impl final {
         float* rgba,
         std::uint64_t rgba_capacity,
         std::string& error) const {
-        if (view_transform != CYCLES_BRIDGE_VIEW_TRANSFORM_AGX) {
+        if (!look_compatible(view_transform, color_look)) {
             color_look = CYCLES_BRIDGE_COLOR_LOOK_NONE;
         }
         const std::uint64_t key = pipeline_key(
-            working_space, view_transform, color_look);
+            display_device, working_space, view_transform, color_look);
         const auto processor = processors_.find(key);
         if (processor == processors_.end()) {
-            error = view_name(view_transform) == nullptr
+            error = display_name(display_device) == nullptr
+                ? "the requested display device is unavailable"
+                : view_name(display_device, view_transform) == nullptr
                 ? "the requested view transform does not use an OCIO LUT"
                 : working_space_name(working_space) == nullptr
                     ? "the requested working space is unavailable"
@@ -292,6 +449,7 @@ class ColorManagement::Impl final {
         descriptor.interpolation = CYCLES_BRIDGE_COLOR_LUT_INTERPOLATION_TRILINEAR;
         descriptor.color_look = color_look;
         descriptor.working_space = working_space;
+        descriptor.display_device = display_device;
 
         if (rgba == nullptr) {
             return rgba_capacity == 0U;
@@ -309,12 +467,14 @@ class ColorManagement::Impl final {
 
  private:
     void build_processor(
+        std::uint32_t display_device,
         std::uint32_t working_space,
         std::uint32_t view_transform,
         std::uint32_t color_look) {
-        const char* view = view_name(view_transform);
+        const char* display_name_value = display_name(display_device);
+        const char* view = view_name(display_device, view_transform);
         const char* source_color_space = working_space_name(working_space);
-        if (view == nullptr || source_color_space == nullptr) {
+        if (display_name_value == nullptr || view == nullptr || source_color_space == nullptr) {
             throw std::runtime_error("unknown OCIO color pipeline");
         }
         OCIO::GroupTransformRcPtr transforms = OCIO::GroupTransform::Create();
@@ -339,12 +499,12 @@ class ColorManagement::Impl final {
         }
         OCIO::DisplayViewTransformRcPtr display = OCIO::DisplayViewTransform::Create();
         display->setSrc(source_color_space);
-        display->setDisplay("sRGB");
+        display->setDisplay(display_name_value);
         display->setView(view);
         display->setLooksBypass(bypass_display_look);
         transforms->appendTransform(display);
         processors_.emplace(
-            pipeline_key(working_space, view_transform, color_look),
+            pipeline_key(display_device, working_space, view_transform, color_look),
             config_->getProcessor(transforms)->getDefaultCPUProcessor());
     }
 
@@ -423,6 +583,7 @@ bool ColorManagement::activate_working_space(
 }
 
 bool ColorManagement::query_lut(
+    std::uint32_t display_device,
     std::uint32_t view_transform,
     std::uint32_t color_look,
     std::uint32_t working_space,
@@ -431,6 +592,6 @@ bool ColorManagement::query_lut(
     std::uint64_t rgba_capacity,
     std::string& error) const {
     return impl_->query_lut(
-        view_transform, color_look, working_space,
+        display_device, view_transform, color_look, working_space,
         descriptor, rgba, rgba_capacity, error);
 }

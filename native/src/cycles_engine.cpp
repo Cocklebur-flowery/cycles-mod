@@ -2608,6 +2608,7 @@ class CyclesEngine::Impl final {
     }
 
     bool query_color_lut(
+        std::uint32_t display_device,
         std::uint32_t view_transform,
         std::uint32_t color_look,
         std::uint32_t working_space,
@@ -2616,7 +2617,7 @@ class CyclesEngine::Impl final {
         std::uint64_t rgba_capacity,
         std::string& error) const {
         return color_management_->query_lut(
-            view_transform, color_look, working_space,
+            display_device, view_transform, color_look, working_space,
             descriptor, rgba, rgba_capacity, error);
     }
 
@@ -3690,6 +3691,7 @@ std::string CyclesEngine::color_management_info() const {
 }
 
 bool CyclesEngine::query_color_lut(
+    std::uint32_t display_device,
     std::uint32_t view_transform,
     std::uint32_t color_look,
     std::uint32_t working_space,
@@ -3698,7 +3700,7 @@ bool CyclesEngine::query_color_lut(
     std::uint64_t rgba_capacity,
     std::string& error) const {
     return impl_->query_color_lut(
-        view_transform, color_look, working_space,
+        display_device, view_transform, color_look, working_space,
         descriptor, rgba, rgba_capacity, error);
 }
 

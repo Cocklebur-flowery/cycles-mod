@@ -24,6 +24,7 @@ class ColorManagement final {
         std::string& error);
 
     bool query_lut(
+        std::uint32_t display_device,
         std::uint32_t view_transform,
         std::uint32_t color_look,
         std::uint32_t working_space,

@@ -49,6 +49,7 @@ class CyclesEngine final {
     [[nodiscard]] std::string color_management_info() const;
 
     bool query_color_lut(
+        std::uint32_t display_device,
         std::uint32_t view_transform,
         std::uint32_t color_look,
         std::uint32_t working_space,
