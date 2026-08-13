@@ -6,6 +6,7 @@
     "GpuDeviceAccessor",
     "GpuSurfaceAccessor",
     "LevelRendererMixin",
+    "MinecraftMixin",
     "SectionCompilerMixin",
     "VulkanBackendMixin",
     "VulkanGpuSurfaceAccessor",

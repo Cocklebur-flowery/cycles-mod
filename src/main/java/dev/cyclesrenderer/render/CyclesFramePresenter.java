@@ -149,13 +149,14 @@ public final class CyclesFramePresenter {
             GpuTextureView source,
             DisplayPerformanceProbe performanceProbe) {
         long stageStart = performanceProbe.beginDisplayStage();
+        CyclesRenderSettings.DisplayDevice outputDisplay = outputDisplay(settings);
         GpuTextureView activeColorLut = updateColorLut(
-                settings.displayDevice(), settings.viewTransform(), settings.colorLook(),
+                outputDisplay, settings.viewTransform(), settings.colorLook(),
                 settings.workingSpace());
         performanceProbe.endDisplayStage(
                 DisplayPerformanceProbe.Stage.COLOR_LUT, stageStart);
         stageStart = performanceProbe.beginDisplayStage();
-        updateDisplayUniforms(settings, depthFar);
+        updateDisplayUniforms(settings, outputDisplay, depthFar);
         performanceProbe.endDisplayStage(
                 DisplayPerformanceProbe.Stage.UNIFORMS, stageStart);
         stageStart = performanceProbe.beginDisplayStage();
@@ -401,6 +402,7 @@ public final class CyclesFramePresenter {
 
     private void updateDisplayUniforms(
             CyclesRenderSettings settings,
+            CyclesRenderSettings.DisplayDevice outputDisplay,
             float depthFar) {
         int depthBits = Float.floatToIntBits(depthFar);
         if (displayUniformBuffer != null
@@ -421,7 +423,7 @@ public final class CyclesFramePresenter {
         displayUniformData.putFloat(Math.max(settings.stillSamples(), 1));
         displayUniformData.putInt(settings.activePass().nativeId());
         CyclesRenderSettings.ViewTransform effectiveView =
-                settings.viewTransform().effectiveFor(settings.displayDevice());
+                settings.viewTransform().effectiveFor(outputDisplay);
         displayUniformData.putInt(effectiveView.nativeId());
         displayUniformData.putInt(0);
         displayUniformData.putInt(0);
@@ -456,6 +458,16 @@ public final class CyclesFramePresenter {
                 displayUniformData);
         displaySettingsRevision = settings.revision();
         displayDepthFarBits = depthBits;
+    }
+
+    private static CyclesRenderSettings.DisplayDevice outputDisplay(
+            CyclesRenderSettings settings) {
+        // The current HDR stage embeds the already composed SDR framebuffer in
+        // linear scRGB. Keep the OCIO output on sRGB until the later direct HDR
+        // Cycles path can retain scene-linear highlights through composition.
+        return VulkanCapabilityProbe.swapchainBootstrap().scRgbSelected()
+                ? CyclesRenderSettings.DisplayDevice.SRGB
+                : settings.displayDevice();
     }
 
     private static long nanosToMicros(long nanos) {
