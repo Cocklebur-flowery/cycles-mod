@@ -5,6 +5,7 @@
   "client": [
     "GpuDeviceAccessor",
     "GpuSurfaceAccessor",
+    "LevelExtractorMixin",
     "LevelRendererMixin",
     "MinecraftMixin",
     "SectionCompilerMixin",

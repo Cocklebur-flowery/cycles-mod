@@ -35,6 +35,7 @@ public final class SectionSceneManager {
     private LabPbrAtlasBuilder.Atlases pbrAtlases = LabPbrAtlasBuilder.empty();
     private long resourceRevision = Long.MIN_VALUE;
     private int pbrResourceFingerprint;
+    private CyclesRenderSettings.CameraType cameraType;
     private int sceneOriginX;
     private int sceneOriginY;
     private int sceneOriginZ;
@@ -78,6 +79,7 @@ public final class SectionSceneManager {
         boolean reset = level != currentLevel
                 || resourceRevision != currentResourceRevision
                 || pbrResourceFingerprint != settings.pbrResourceFingerprint()
+                || cameraType != settings.cameraType()
                 || needsOriginRebase(cameraPosition);
         if (reset) {
             resetScene(
@@ -152,6 +154,7 @@ public final class SectionSceneManager {
         level = null;
         resourceRevision = Long.MIN_VALUE;
         pbrResourceFingerprint = 0;
+        cameraType = null;
         pbrDiscovery = LabPbrResources.empty();
         pbrAtlases = LabPbrAtlasBuilder.empty();
         sections.clear();
@@ -201,6 +204,7 @@ public final class SectionSceneManager {
         level = currentLevel;
         resourceRevision = currentResourceRevision;
         pbrResourceFingerprint = settings.pbrResourceFingerprint();
+        cameraType = settings.cameraType();
         lastCameraSectionX = Integer.MIN_VALUE;
         lastCameraSectionY = Integer.MIN_VALUE;
         lastCameraSectionZ = Integer.MIN_VALUE;
