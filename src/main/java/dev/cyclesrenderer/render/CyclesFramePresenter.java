@@ -462,12 +462,11 @@ public final class CyclesFramePresenter {
 
     private static CyclesRenderSettings.DisplayDevice outputDisplay(
             CyclesRenderSettings settings) {
-        // The current HDR stage embeds the already composed SDR framebuffer in
-        // linear scRGB. Keep the OCIO output on sRGB until the later direct HDR
-        // Cycles path can retain scene-linear highlights through composition.
-        return VulkanCapabilityProbe.swapchainBootstrap().scRgbSelected()
-                ? CyclesRenderSettings.DisplayDevice.SRGB
-                : settings.displayDevice();
+        // The current presentation targets are either sRGB-nonlinear or an
+        // scRGB carrier containing the already composed SDR framebuffer. Until
+        // the direct HDR path retains scene-linear Cycles values through final
+        // composition, every target therefore needs an sRGB OCIO output LUT.
+        return CyclesRenderSettings.DisplayDevice.SRGB;
     }
 
     private static long nanosToMicros(long nanos) {
