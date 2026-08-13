@@ -1,6 +1,7 @@
 package dev.cyclesrenderer;
 
 import com.mojang.blaze3d.platform.InputConstants;
+import dev.cyclesrenderer.client.CameraSafeAreaOverlay;
 import dev.cyclesrenderer.client.CyclesSettingsScreen;
 import dev.cyclesrenderer.config.CyclesClientConfig;
 import dev.cyclesrenderer.config.CyclesRenderSettings;
@@ -540,6 +541,10 @@ public final class CyclesRendererMod {
         }
 
         GuiGraphicsExtractor graphics = event.getGuiGraphics();
+        CyclesRenderSettings settings = CyclesClientConfig.snapshot();
+        if (shouldReplaceVanillaWorld()) {
+            CameraSafeAreaOverlay.extract(graphics, settings);
+        }
         if (testFrameEnabled) {
             Component status = INTEROP_BUFFER.hasActiveFrame() || FRAME_PRESENTER.hasFrame()
                     ? Component.translatable("message.cyclesrenderer.test_frame")
