@@ -55,7 +55,6 @@ void request_dlss_history_reset();
 #include "session/display_driver.h"
 #include "session/session.h"
 #include "util/colorspace.h"
-#include "util/half.h"
 #include "util/log.h"
 #include "util/image_metadata.h"
 #include "util/path.h"
@@ -1488,42 +1487,19 @@ class MemoryImageLoader final : public ccl::ImageLoader {
         metadata.height = height_;
         metadata.channels = 4;
         metadata.type = ccl::IMAGE_DATA_TYPE_BYTE4;
-        metadata.is_compressible_as_srgb = false;
+        metadata.is_compressible_as_srgb =
+            role_ == CYCLES_BRIDGE_TEXTURE_COLOR_SRGB;
         return true;
     }
 
     bool load_pixels(const ccl::ImageMetaData& metadata, void* pixels) override {
-        const std::size_t source_size = static_cast<std::size_t>(width_)
-            * static_cast<std::size_t>(height_) * 4U;
-        if (pixel_size_ != source_size) {
+        if (metadata.memory_size() != pixel_size_) {
             return false;
         }
-
-        const std::uint8_t* source =
-            resources_->texture_pixels.data() + pixel_offset_;
-        if (metadata.type == ccl::IMAGE_DATA_TYPE_BYTE4) {
-            if (metadata.memory_size() != source_size) {
-                return false;
-            }
-            std::memcpy(pixels, source, source_size);
-        }
-        else if (metadata.type == ccl::IMAGE_DATA_TYPE_HALF4
-                 && role_ == CYCLES_BRIDGE_TEXTURE_COLOR_SRGB) {
-            ccl::half4* destination = static_cast<ccl::half4*>(pixels);
-            const std::size_t pixel_count = source_size / 4U;
-            constexpr float kByteToFloat = 1.0F / 255.0F;
-            for (std::size_t index = 0; index < pixel_count; ++index) {
-                const std::size_t channel = index * 4U;
-                destination[index] = ccl::float4_to_half4(ccl::make_float4(
-                    static_cast<float>(source[channel]) * kByteToFloat,
-                    static_cast<float>(source[channel + 1U]) * kByteToFloat,
-                    static_cast<float>(source[channel + 2U]) * kByteToFloat,
-                    static_cast<float>(source[channel + 3U]) * kByteToFloat));
-            }
-        }
-        else {
-            return false;
-        }
+        std::memcpy(
+            pixels,
+            resources_->texture_pixels.data() + pixel_offset_,
+            pixel_size_);
         metadata.conform_pixels(pixels);
         return true;
     }
@@ -1566,7 +1542,7 @@ std::vector<ccl::ImageHandle> create_images(
         ccl::ImageParams params;
         params.colorspace = texture.role == CYCLES_BRIDGE_TEXTURE_DATA_LINEAR
             ? ccl::u_colorspace_data
-            : ccl::u_colorspace_srgb;
+            : ccl::u_colorspace_scene_linear_srgb;
         params.alpha_type = ccl::IMAGE_ALPHA_UNASSOCIATED;
         params.interpolation = ccl::INTERPOLATION_CLOSEST;
         params.extension = ccl::EXTENSION_REPEAT;
@@ -1586,7 +1562,7 @@ ccl::Shader* create_material_shader(
         graph->create_node<ccl::TextureCoordinateNode>();
     ccl::ImageTextureNode* texture = graph->create_node<ccl::ImageTextureNode>();
     texture->handle = images[material.texture_index];
-    texture->set_colorspace(ccl::u_colorspace_srgb);
+    texture->set_colorspace(ccl::u_colorspace_scene_linear_srgb);
     texture->set_alpha_type(ccl::IMAGE_ALPHA_UNASSOCIATED);
     texture->set_interpolation(ccl::INTERPOLATION_CLOSEST);
     texture->set_extension(ccl::EXTENSION_REPEAT);
