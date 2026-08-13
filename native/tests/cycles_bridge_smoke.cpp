@@ -23,6 +23,17 @@ bool require_ok(std::uint32_t status, const char* operation) {
     return false;
 }
 
+bool duplicate_win32_handle(HANDLE source, HANDLE& duplicate) {
+    return DuplicateHandle(
+        GetCurrentProcess(),
+        source,
+        GetCurrentProcess(),
+        &duplicate,
+        0U,
+        FALSE,
+        DUPLICATE_SAME_ACCESS) != FALSE;
+}
+
 std::string renderer_info(const CyclesBridgeRenderer* renderer) {
     std::array<char, 512> output{};
     if (!require_ok(
@@ -527,6 +538,19 @@ int main(int argc, char** argv) {
         cycles_bridge_destroy_renderer(renderer);
         return 1;
     }
+    HANDLE session_handle = nullptr;
+    HANDLE session_ready_handle = nullptr;
+    HANDLE session_release_handle = nullptr;
+    if (initial_diagnostics.device_uuid_valid != 0U
+        && (!duplicate_win32_handle(accepted_handle, session_handle)
+            || !duplicate_win32_handle(
+                accepted_ready_handle, session_ready_handle)
+            || !duplicate_win32_handle(
+                accepted_release_handle, session_release_handle))) {
+        std::cerr << "failed to duplicate interop handles for session ownership test\n";
+        cycles_bridge_destroy_renderer(renderer);
+        return 1;
+    }
     interop.memory_handle = static_cast<std::uint64_t>(
         reinterpret_cast<std::uintptr_t>(accepted_handle));
     interop.ready_semaphore_handle = static_cast<std::uint64_t>(
@@ -593,6 +617,16 @@ int main(int argc, char** argv) {
             cycles_bridge_destroy_renderer(renderer);
             return 1;
         }
+        if (SetEvent(session_handle) == FALSE
+            || SetEvent(session_ready_handle) == FALSE
+            || SetEvent(session_release_handle) == FALSE
+            || CloseHandle(session_handle) == FALSE
+            || CloseHandle(session_ready_handle) == FALSE
+            || CloseHandle(session_release_handle) == FALSE) {
+            std::cerr << "session interop handle copies did not retain independent ownership\n";
+            cycles_bridge_destroy_renderer(renderer);
+            return 1;
+        }
         HANDLE rejected_handle = CreateEventW(nullptr, FALSE, FALSE, nullptr);
         HANDLE rejected_ready_handle = CreateEventW(nullptr, FALSE, FALSE, nullptr);
         HANDLE rejected_release_handle = CreateEventW(nullptr, FALSE, FALSE, nullptr);
@@ -644,6 +678,42 @@ int main(int argc, char** argv) {
         cycles_bridge_destroy_renderer(renderer);
         return 1;
     }
+
+    for (std::uint32_t view = CYCLES_BRIDGE_VIEW_TRANSFORM_STANDARD;
+         view <= CYCLES_BRIDGE_VIEW_TRANSFORM_AGX_HDR_1000;
+         ++view) {
+        settings.view_transform = view;
+        settings.revision++;
+        if (!require_ok(
+                cycles_bridge_apply_settings(renderer, &settings),
+                "color view settings")) {
+            cycles_bridge_destroy_renderer(renderer);
+            return 1;
+        }
+    }
+    CyclesBridgeRenderSettings invalid_view = settings;
+    invalid_view.view_transform = CYCLES_BRIDGE_VIEW_TRANSFORM_AGX_HDR_1000 + 1U;
+    invalid_view.revision++;
+    if (cycles_bridge_apply_settings(renderer, &invalid_view)
+        != CYCLES_BRIDGE_STATUS_INVALID_ARGUMENT) {
+        std::cerr << "invalid color view was accepted\n";
+        cycles_bridge_destroy_renderer(renderer);
+        return 1;
+    }
+    settings.view_transform = CYCLES_BRIDGE_VIEW_TRANSFORM_AGX;
+    for (std::uint32_t working_space = CYCLES_BRIDGE_WORKING_SPACE_LINEAR_REC709;
+         working_space <= CYCLES_BRIDGE_WORKING_SPACE_ACESCG;
+         ++working_space) {
+        settings.working_space = working_space;
+        settings.revision++;
+        if (!require_ok(
+                cycles_bridge_apply_settings(renderer, &settings),
+                "working-space settings")) {
+            cycles_bridge_destroy_renderer(renderer);
+            return 1;
+        }
+    }
+    settings.working_space = CYCLES_BRIDGE_WORKING_SPACE_LINEAR_REC709;
 
     for (std::uint32_t pattern = CYCLES_BRIDGE_SAMPLING_PATTERN_SOBOL_BURLEY;
          pattern <= CYCLES_BRIDGE_SAMPLING_PATTERN_BLUE_NOISE_ROUND;

@@ -332,7 +332,7 @@ bool valid_settings(const CyclesBridgeRenderSettings& settings) {
         && settings.exposure_ev >= -20.0F && settings.exposure_ev <= 20.0F
         && std::isfinite(settings.gamma)
         && settings.gamma >= 0.1F && settings.gamma <= 5.0F
-        && settings.view_transform <= CYCLES_BRIDGE_VIEW_TRANSFORM_ACES_2
+        && settings.view_transform <= CYCLES_BRIDGE_VIEW_TRANSFORM_AGX_HDR_1000
         && settings.active_pass < CYCLES_BRIDGE_PASS_COUNT
         && valid_bool(settings.debug_overlay);
 }
