@@ -104,6 +104,7 @@ CyclesBridgeRenderSettings default_settings() {
     settings.pbr_normal_strength = 1.0F;
     settings.pbr_emission_scale = 1.0F;
     settings.working_space = CYCLES_BRIDGE_WORKING_SPACE_LINEAR_REC709;
+    settings.dlss_quality_mode = CYCLES_BRIDGE_DLSS_QUALITY_QUALITY;
     settings.interactive_samples = 1;
     settings.still_samples = 8;
     settings.stationary_delay_millis = 150;
@@ -180,6 +181,17 @@ ccl::Transform rec709_to_working_space(std::uint32_t working_space) {
             : ccl::ColorSpaceManager::get_xyz_to_rec709();
     return xyz_to_target
         * ccl::transform_inverse(ccl::ColorSpaceManager::get_xyz_to_rec709());
+}
+
+float dlss_upscale_factor(std::uint32_t quality_mode) {
+    constexpr std::array<float, 5> factors = {
+        1.0F,
+        1.0F / 0.65F,
+        1.0F / 0.57F,
+        2.0F,
+        3.0F,
+    };
+    return factors[quality_mode];
 }
 
 const char* pass_name(std::uint32_t pass) {
@@ -2007,6 +2019,9 @@ DenoiserSchedule configure_scene_settings(
     std::uint32_t effective_denoiser = 0;
     const bool optix_available = (device.denoisers & ccl::DENOISER_OPTIX) != 0;
     const bool oidn_available = (device.denoisers & ccl::DENOISER_OPENIMAGEDENOISE) != 0;
+#if defined(CYCLESRENDERER_DLSS_EXPERIMENTAL)
+    const bool dlss_available = (device.denoisers & ccl::DENOISER_DLSS) != 0;
+#endif
     if ((settings.denoiser_mode == 1U || settings.denoiser_mode == 2U)
         && optix_available) {
         effective_denoiser = 1U;
@@ -2015,6 +2030,11 @@ DenoiserSchedule configure_scene_settings(
                && oidn_available) {
         effective_denoiser = 2U;
         integrator->set_denoiser_type(ccl::DENOISER_OPENIMAGEDENOISE);
+#if defined(CYCLESRENDERER_DLSS_EXPERIMENTAL)
+    } else if (settings.denoiser_mode == 4U && dlss_available) {
+        effective_denoiser = 3U;
+        integrator->set_denoiser_type(ccl::DENOISER_DLSS);
+#endif
     }
     DenoiserSchedule denoiser_schedule{};
     denoiser_schedule.selected = effective_denoiser;
@@ -2022,6 +2042,10 @@ DenoiserSchedule configure_scene_settings(
         denoiser_schedule.reason = CYCLES_BRIDGE_DENOISER_SCHEDULE_DISABLED;
     } else if (settings.active_pass != CYCLES_BRIDGE_PASS_COMBINED) {
         denoiser_schedule.reason = CYCLES_BRIDGE_DENOISER_SCHEDULE_DEBUG_PASS;
+    } else if (effective_denoiser == 3U) {
+        denoiser_schedule.effective = effective_denoiser;
+        denoiser_schedule.start_sample = 0;
+        denoiser_schedule.reason = CYCLES_BRIDGE_DENOISER_SCHEDULE_REALTIME;
     } else if (sampling_state == CYCLES_BRIDGE_SAMPLING_STILL) {
         denoiser_schedule.effective = effective_denoiser;
         denoiser_schedule.start_sample = std::min(
@@ -2035,8 +2059,20 @@ DenoiserSchedule configure_scene_settings(
     }
     const bool denoise_active = denoiser_schedule.effective != 0U;
     integrator->set_use_denoise(denoise_active);
-    integrator->set_denoise_start_sample(static_cast<int>(settings.denoiser_start_sample));
+    integrator->set_denoise_start_sample(static_cast<int>(
+        effective_denoiser == 3U ? 0U : settings.denoiser_start_sample));
     int denoiser_passes = ccl::DENOISER_PASS_NONE;
+#if defined(CYCLESRENDERER_DLSS_EXPERIMENTAL)
+    if (effective_denoiser == 3U) {
+        denoiser_passes = ccl::DENOISER_PASS_ALBEDO
+            | ccl::DENOISER_PASS_SPECULAR_ALBEDO
+            | ccl::DENOISER_PASS_NORMAL
+            | ccl::DENOISER_PASS_ROUGHNESS
+            | ccl::DENOISER_PASS_DEPTH
+            | ccl::DENOISER_PASS_MOTION
+            | ccl::DENOISER_PASS_SPECULAR_MOTION;
+    } else
+#endif
     if (settings.denoiser_input >= 1U) {
         denoiser_passes |= ccl::DENOISER_PASS_ALBEDO;
     }
@@ -2056,7 +2092,12 @@ DenoiserSchedule configure_scene_settings(
         ccl::DENOISER_QUALITY_HIGH,
     };
     integrator->set_denoiser_quality(qualities[settings.denoiser_quality]);
-    integrator->set_denoise_use_gpu(settings.denoiser_use_gpu != 0U);
+    integrator->set_denoise_use_gpu(
+        effective_denoiser == 3U || settings.denoiser_use_gpu != 0U);
+    integrator->set_denoiser_upscale_factor(
+        effective_denoiser == 3U
+            ? dlss_upscale_factor(settings.dlss_quality_mode)
+            : 1.0F);
 
     ccl::Film* film = scene->film;
     const std::array<ccl::FilterType, 3> filters = {
@@ -2509,7 +2550,9 @@ class CyclesEngine::Impl final {
                            || settings.dynamic_resolution
                                != requested_settings_.dynamic_resolution
                            || settings.interactive_resolution_percentage
-                               != requested_settings_.interactive_resolution_percentage) {
+                               != requested_settings_.interactive_resolution_percentage
+                           || settings.dlss_quality_mode
+                               != requested_settings_.dlss_quality_mode) {
                     reset_level = CYCLES_BRIDGE_RESET_BUFFER;
                 } else if (pass_changed) {
                     reset_level = CYCLES_BRIDGE_RESET_ACCUMULATION;
@@ -2582,6 +2625,10 @@ class CyclesEngine::Impl final {
 #if defined(WITH_OCIO)
         capabilities.capability_flags |= CYCLES_BRIDGE_CAPABILITY_OCIO_COMPILED;
 #endif
+#if defined(CYCLESRENDERER_DLSS_EXPERIMENTAL)
+        capabilities.capability_flags |=
+            CYCLES_BRIDGE_CAPABILITY_DLSS_EXPERIMENTAL_COMPILED;
+#endif
         capabilities.pass_mask = (1ULL << CYCLES_BRIDGE_PASS_COUNT) - 1ULL;
         capabilities.maximum_width = kMaximumRenderWidth;
         capabilities.maximum_height = kMaximumRenderHeight;
@@ -2598,6 +2645,11 @@ class CyclesEngine::Impl final {
 #if defined(WITH_OPENIMAGEDENOISE)
             if ((device.denoisers & ccl::DENOISER_OPENIMAGEDENOISE) != 0) {
                 capabilities.denoiser_mask |= CYCLES_BRIDGE_DENOISER_OPENIMAGEDENOISE;
+            }
+#endif
+#if defined(CYCLESRENDERER_DLSS_EXPERIMENTAL)
+            if ((device.denoisers & ccl::DENOISER_DLSS) != 0) {
+                capabilities.denoiser_mask |= CYCLES_BRIDGE_DENOISER_DLSS_EXPERIMENTAL;
             }
 #endif
         }
@@ -2983,6 +3035,11 @@ class CyclesEngine::Impl final {
         }
         const bool use_graphics_interop = interop_snapshot.memory_handle != nullptr;
         session_params = make_session_params(device, use_graphics_interop);
+#if defined(CYCLESRENDERER_DLSS_EXPERIMENTAL)
+        if (settings.denoiser_mode == 4U) {
+            session_params.headless = false;
+        }
+#endif
         ccl::SceneParams scene_params;
         scene_params.background = false;
         auto session = ccl::make_unique<ccl::Session>(session_params, scene_params);

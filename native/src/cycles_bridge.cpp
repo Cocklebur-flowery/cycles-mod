@@ -36,7 +36,7 @@ static_assert(sizeof(CyclesBridgeFrame) == 40);
 static_assert(sizeof(CyclesBridgeFrameView) == 72);
 static_assert(offsetof(CyclesBridgeFrameView, generation) == 16);
 static_assert(offsetof(CyclesBridgeFrameView, pixels) == 48);
-static_assert(sizeof(CyclesBridgeRenderSettings) == 280);
+static_assert(sizeof(CyclesBridgeRenderSettings) == 288);
 static_assert(sizeof(CyclesBridgePassDescriptor) == 64);
 static_assert(sizeof(CyclesBridgeCapabilities) == 64);
 static_assert(sizeof(CyclesBridgeColorLutDescriptor) == 72);
@@ -318,12 +318,15 @@ bool valid_settings(const CyclesBridgeRenderSettings& settings) {
         && std::isfinite(settings.filter_width)
         && settings.filter_width >= 0.01F && settings.filter_width <= 10.0F
         && settings.seed >= 0
-        && settings.denoiser_mode <= 3U
+        && settings.denoiser_mode <= 4U
         && settings.denoiser_start_sample >= 1U
         && settings.denoiser_start_sample <= 4096U
         && settings.denoiser_input <= 2U
         && settings.denoiser_prefilter <= 2U
         && settings.denoiser_quality <= 2U
+        && settings.dlss_quality_mode
+            <= CYCLES_BRIDGE_DLSS_QUALITY_ULTRA_PERFORMANCE
+        && settings.dlss_reserved == 0U
         && valid_bool(settings.denoiser_use_gpu)
         && std::isfinite(settings.exposure_ev)
         && settings.exposure_ev >= -20.0F && settings.exposure_ev <= 20.0F

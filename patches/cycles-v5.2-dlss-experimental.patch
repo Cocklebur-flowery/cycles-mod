@@ -1,0 +1,1725 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 4a86798ed8d4b2774e541e98bd680dac040e993c..d8c58bd28d437e75a898ea546c4013e760ef1942 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -144,8 +144,25 @@ option(WITH_CYCLES_STANDALONE_GUI    "Build Cycles standalone with GUI" OFF)
+ if(NOT APPLE AND NOT (WIN32 AND CMAKE_SYSTEM_PROCESSOR STREQUAL "ARM64"))
+   option(WITH_CYCLES_DEVICE_CUDA "Enable Cycles NVIDIA CUDA compute support" ON)
+   option(WITH_CYCLES_DEVICE_OPTIX "Enable Cycles NVIDIA OptiX support" ON)
++  option(WITH_CYCLES_DLSS_EXPERIMENTAL "Enable experimental NVIDIA DLSS Ray Reconstruction" OFF)
+   mark_as_advanced(WITH_CYCLES_DEVICE_CUDA)
+ 
++  if(WITH_CYCLES_DLSS_EXPERIMENTAL)
++    if(NOT WIN32)
++      message(FATAL_ERROR "Experimental Cycles DLSS Ray Reconstruction is Windows-only")
++    endif()
++    if(NOT WITH_CYCLES_DEVICE_CUDA)
++      message(FATAL_ERROR "Experimental Cycles DLSS Ray Reconstruction requires CUDA")
++    endif()
++    set(DLSS_INCLUDE_DIR "" CACHE PATH "Path to the pinned NVIDIA DLSS SDK include directory")
++    if(NOT EXISTS "${DLSS_INCLUDE_DIR}/nvsdk_ngx.h" OR
++       NOT EXISTS "${DLSS_INCLUDE_DIR}/nvsdk_ngx_defs_dlssd.h")
++      message(FATAL_ERROR "DLSS_INCLUDE_DIR must point to the NVIDIA DLSS SDK include directory")
++    endif()
++    set(WITH_DLSS ON)
++    add_definitions(-DWITH_DLSS)
++  endif()
++
+   option(WITH_CYCLES_CUDA_BINARIES "Build Cycles NVIDIA CUDA binaries" OFF)
+   set(CYCLES_CUDA_BINARIES_ARCH
+     sm_30 sm_35 sm_37 sm_50 sm_52 sm_60 sm_61 sm_70 sm_75 sm_86 sm_89 sm_120 compute_75
+diff --git a/src/device/cuda/device.cpp b/src/device/cuda/device.cpp
+index 27f0d23d6062ff4f8ab015ae301e167e0d191821..362da44711ff4327e7dde72f1c8988b8d207b77b 100644
+--- a/src/device/cuda/device.cpp
++++ b/src/device/cuda/device.cpp
+@@ -10,6 +10,7 @@
+ #ifdef WITH_CUDA
+ #  include "device/cuda/device_impl.h"
+ 
++#  include "integrator/denoiser_dlss.h"
+ #  include "integrator/denoiser_oidn_gpu.h"  // IWYU pragma: keep
+ 
+ #  include "util/string.h"
+@@ -178,6 +179,11 @@ void device_cuda_info(vector<DeviceInfo> &devices)
+       info.denoisers |= DENOISER_OPENIMAGEDENOISE;
+     }
+ #  endif
++#  if defined(WITH_DLSS)
++    if (DLSSDenoiser::is_device_supported(info)) {
++      info.denoisers |= DENOISER_DLSS;
++    }
++#  endif
+ 
+     /* If device has a kernel timeout and no compute preemption, we assume
+      * it is connected to a display and will freeze the display while doing
+diff --git a/src/device/denoise.cpp b/src/device/denoise.cpp
+index ca255f841e43957bc0543d630b65aeb929a4d119..f92003a3069a9a719a6061a266582a8f957eb490 100644
+--- a/src/device/denoise.cpp
++++ b/src/device/denoise.cpp
+@@ -13,6 +13,8 @@ const char *denoiserTypeToHumanReadable(DenoiserType type)
+       return "OptiX";
+     case DENOISER_OPENIMAGEDENOISE:
+       return "OpenImageDenoise";
++    case DENOISER_DLSS:
++      return "DLSS";
+ 
+     case DENOISER_NUM:
+     case DENOISER_NONE:
+@@ -30,6 +32,7 @@ const NodeEnum *DenoiseParams::get_type_enum()
+   if (type_enum.empty()) {
+     type_enum.insert("optix", DENOISER_OPTIX);
+     type_enum.insert("openimageio", DENOISER_OPENIMAGEDENOISE);
++    type_enum.insert("dlss", DENOISER_DLSS);
+   }
+ 
+   return &type_enum;
+diff --git a/src/device/denoise.h b/src/device/denoise.h
+index 6c327a0b9da5707555a201c7aacb7631aa6dc847..db5f422715c45c47ccf808f3ed1bdff7018af968 100644
+--- a/src/device/denoise.h
++++ b/src/device/denoise.h
+@@ -11,6 +11,7 @@ CCL_NAMESPACE_BEGIN
+ enum DenoiserType {
+   DENOISER_OPTIX = 2,
+   DENOISER_OPENIMAGEDENOISE = 4,
++  DENOISER_DLSS = 8,
+   DENOISER_NUM,
+ 
+   DENOISER_NONE = 0,
+@@ -31,6 +32,7 @@ enum DenoiserPass {
+   DENOISER_PASS_DEPTH = 1 << 4,
+   DENOISER_PASS_MOTION = 1 << 5,
+   DENOISER_PASS_BACKWARD_MOTION = 1 << 6,
++  DENOISER_PASS_SPECULAR_MOTION = 1 << 7,
+ };
+ 
+ using DenoiserPassMask = int;
+diff --git a/src/device/kernel.cpp b/src/device/kernel.cpp
+index 13d3cc43ac444667c2d748aa9ff91f2b5d45833c..d8c82710fa6b17aa5f6a3b80c24848d8dc0baa53 100644
+--- a/src/device/kernel.cpp
++++ b/src/device/kernel.cpp
+@@ -162,12 +162,18 @@ const char *device_kernel_as_string(DeviceKernel kernel)
+     /* Denoising. */
+     case DEVICE_KERNEL_FILTER_GUIDING_PREPROCESS:
+       return "filter_guiding_preprocess";
++    case DEVICE_KERNEL_FILTER_GUIDING_PREPROCESS_TO_SURFACE:
++      return "filter_guiding_preprocess_to_surface";
+     case DEVICE_KERNEL_FILTER_GUIDING_SET_FAKE_ALBEDO:
+       return "filter_guiding_set_fake_albedo";
+     case DEVICE_KERNEL_FILTER_COLOR_PREPROCESS:
+       return "filter_color_preprocess";
++    case DEVICE_KERNEL_FILTER_COLOR_PREPROCESS_TO_SURFACE:
++      return "filter_color_preprocess_to_surface";
+     case DEVICE_KERNEL_FILTER_COLOR_POSTPROCESS:
+       return "filter_color_postprocess";
++    case DEVICE_KERNEL_FILTER_COLOR_POSTPROCESS_FROM_SURFACE:
++      return "filter_color_postprocess_from_surface";
+     case DEVICE_KERNEL_FILTER_COLOR_FLIP_Y:
+       return "filter_color_flip_y";
+ 
+diff --git a/src/device/queue.h b/src/device/queue.h
+index d45d8f87db5910dd3a3365dcc0bf0d1629e4c69f..557a9e4ace1666d0d6a32032e1aba0554befb84c 100644
+--- a/src/device/queue.h
++++ b/src/device/queue.h
+@@ -30,7 +30,7 @@ struct DeviceKernelArguments {
+     HIPRT_GLOBAL_STACK,
+   };
+ 
+-  static const int MAX_ARGS = 19;
++  static const int MAX_ARGS = 23;
+   Type types[MAX_ARGS];
+   void *values[MAX_ARGS];
+   size_t sizes[MAX_ARGS];
+diff --git a/src/integrator/CMakeLists.txt b/src/integrator/CMakeLists.txt
+index 70cbaec6c626273bb9845e746b435daf4d9f28d6..94101097f02426cd8bf2e28978cb0e2d899de6d5 100644
+--- a/src/integrator/CMakeLists.txt
++++ b/src/integrator/CMakeLists.txt
+@@ -12,6 +12,7 @@ set(INC_SYS
+ set(SRC
+   adaptive_sampling.cpp
+   denoiser.cpp
++  denoiser_dlss.cpp
+   denoiser_gpu.cpp
+   denoiser_oidn.cpp
+   denoiser_oidn_base.cpp
+@@ -36,6 +37,7 @@ set(SRC
+ set(SRC_HEADERS
+   adaptive_sampling.h
+   denoiser.h
++  denoiser_dlss.h
+   denoiser_gpu.h
+   denoiser_oidn.h
+   denoiser_oidn_base.h
+@@ -70,6 +72,12 @@ set(LIB
+   PRIVATE bf::dependencies::optional::openpgl
+ )
+ 
++if(WITH_DLSS)
++  list(APPEND INC_SYS
++    ${DLSS_INCLUDE_DIR}
++  )
++endif()
++
+ include_directories(${INC})
+ include_directories(SYSTEM ${INC_SYS})
+ 
+diff --git a/src/integrator/denoiser.cpp b/src/integrator/denoiser.cpp
+index 3dd23b5a2469f164a0ebcbc75c9995ac2ca377d0..7e997daa65eec5753f55a1415401069c21f930bf 100644
+--- a/src/integrator/denoiser.cpp
++++ b/src/integrator/denoiser.cpp
+@@ -6,6 +6,7 @@
+ 
+ #include "device/device.h"
+ 
++#include "integrator/denoiser_dlss.h"
+ #include "integrator/denoiser_oidn.h"
+ #include "session/display_driver.h"
+ #ifdef WITH_OPENIMAGEDENOISE
+@@ -102,6 +103,18 @@ bool use_gpu_oidn_denoiser(Device *denoiser_device, const DenoiseParams &params)
+ #endif
+ }
+ 
++bool use_dlss_denoiser(Device *denoiser_device, const DenoiseParams &params)
++{
++#ifdef WITH_DLSS
++  return (params.type == DENOISER_DLSS &&
++          DLSSDenoiser::is_device_supported(denoiser_device->info));
++#else
++  (void)denoiser_device;
++  (void)params;
++  return false;
++#endif
++}
++
+ DenoiseParams get_effective_denoise_params(Device *denoiser_device,
+                                            Device *cpu_fallback_device,
+                                            const DenoiseParams &params,
+@@ -131,7 +144,8 @@ DenoiseParams get_effective_denoise_params(Device *denoiser_device,
+   const bool is_cpu_denoiser_device = single_denoiser_device->info.type == DEVICE_CPU;
+   if (is_cpu_denoiser_device == false) {
+     if (use_optix_denoiser(single_denoiser_device, effective_denoise_params) ||
+-        use_gpu_oidn_denoiser(single_denoiser_device, effective_denoise_params))
++        use_gpu_oidn_denoiser(single_denoiser_device, effective_denoise_params) ||
++        use_dlss_denoiser(single_denoiser_device, effective_denoise_params))
+     {
+       /* Denoising parameters are correct and there is no need to fall back to CPU OIDN. */
+       return effective_denoise_params;
+@@ -170,6 +184,12 @@ unique_ptr<Denoiser> Denoiser::create(Device *denoiser_device,
+       return make_unique<OIDNDenoiserGPU>(single_denoiser_device, effective_denoiser_params);
+     }
+ #endif
++
++#ifdef WITH_DLSS
++    if (use_dlss_denoiser(single_denoiser_device, effective_denoiser_params)) {
++      return make_unique<DLSSDenoiser>(single_denoiser_device, effective_denoiser_params);
++    }
++#endif
+   }
+ 
+   if (!openimagedenoise_supported()) {
+@@ -182,6 +202,26 @@ unique_ptr<Denoiser> Denoiser::create(Device *denoiser_device,
+                                    effective_denoiser_params);
+ }
+ 
++bool Denoiser::is_device_supported(DenoiserType type, const DeviceInfo &denoise_device_info)
++{
++  switch (type) {
++#ifdef WITH_OPTIX
++    case DENOISER_OPTIX:
++      return OptiXDenoiser::is_device_supported(denoise_device_info);
++#endif
++#ifdef WITH_OPENIMAGEDENOISE
++    case DENOISER_OPENIMAGEDENOISE:
++      return OIDNDenoiserGPU::is_device_supported(denoise_device_info);
++#endif
++#ifdef WITH_DLSS
++    case DENOISER_DLSS:
++      return DLSSDenoiser::is_device_supported(denoise_device_info);
++#endif
++    default:
++      return false;
++  }
++}
++
+ DenoiserType Denoiser::automatic_viewport_denoiser_type(const DeviceInfo &denoise_device_info)
+ {
+ #ifdef WITH_OPENIMAGEDENOISE
+diff --git a/src/integrator/denoiser.h b/src/integrator/denoiser.h
+index 4e1dac4b6240588caf504bdb270bb9c2c963a2c5..b33c3a0e1e6167b371e1386d5449dd703a6b7fa9 100644
+--- a/src/integrator/denoiser.h
++++ b/src/integrator/denoiser.h
+@@ -21,6 +21,8 @@ class GraphicsInteropDevice;
+ class RenderBuffers;
+ class Progress;
+ 
++bool use_dlss_denoiser(Device *denoiser_device, const DenoiseParams &params);
++
+ bool use_optix_denoiser(Device *denoiser_device, const DenoiseParams &params);
+ 
+ bool use_gpu_oidn_denoiser(Device *denoiser_device, const DenoiseParams &params);
+@@ -58,6 +60,8 @@ class Denoiser {
+   void set_params(const DenoiseParams &params);
+   const DenoiseParams &get_params() const;
+ 
++  static bool is_device_supported(DenoiserType type, const DeviceInfo &denoise_device_info);
++
+   /* Recommended type for viewport denoising. */
+   static DenoiserType automatic_viewport_denoiser_type(const DeviceInfo &denoise_device_info);
+ 
+diff --git a/src/integrator/denoiser_dlss.cpp b/src/integrator/denoiser_dlss.cpp
+new file mode 100644
+index 0000000000000000000000000000000000000000..8f1f1a38654f1ac3f7ebf6399806891307deb035
+--- /dev/null
++++ b/src/integrator/denoiser_dlss.cpp
+@@ -0,0 +1,570 @@
++/* SPDX-FileCopyrightText: 2025 NVIDIA Corporation
++ * SPDX-FileCopyrightText: 2011-2022 Blender Foundation
++ *
++ * SPDX-License-Identifier: Apache-2.0 */
++
++#ifdef WITH_DLSS
++
++#  include "integrator/denoiser_dlss.h"
++#  include "integrator/pass_accessor_gpu.h"
++
++#  include "device/cuda/device_impl.h"
++
++#  include "util/path.h"
++
++#  include <nvsdk_ngx.h>
++#  include <nvsdk_ngx_defs_dlssd.h>
++
++#  ifdef _WIN32
++#    include "util/windows.h"
++
++#    define dynamic_library_open(path) LoadLibraryW(path)
++#    define dynamic_library_close(lib) FreeLibrary(static_cast<HMODULE>(lib))
++#    define dynamic_library_find(lib, symbol) \
++      reinterpret_cast<t##symbol>(GetProcAddress(static_cast<HMODULE>(lib), #symbol))
++#  else
++#    include <dlfcn.h>
++
++#    define dynamic_library_open(path) dlopen(path, RTLD_NOW)
++#    define dynamic_library_close(lib) dlclose(lib)
++#    define dynamic_library_find(lib, symbol) reinterpret_cast<t##symbol>(dlsym(lib, #symbol))
++#  endif
++
++struct NGXDriver {
++  using tNVSDK_NGX_CUDA_Init_Ext1 = NVSDK_NGX_Result (*)(unsigned long long,
++                                                         const wchar_t *,
++                                                         NVSDK_NGX_CUDADevice *,
++                                                         NVSDK_NGX_Version,
++                                                         const NVSDK_NGX_FeatureCommonInfo *);
++  using tNVSDK_NGX_CUDA_Shutdown1 = NVSDK_NGX_Result (*)(NVSDK_NGX_CUDADevice *, unsigned int &);
++  using tNVSDK_NGX_CUDA_GetFeatureRequirements = decltype(&NVSDK_NGX_CUDA_GetFeatureRequirements);
++  using tNVSDK_NGX_CUDA_CreateFeature1 = decltype(&NVSDK_NGX_CUDA_CreateFeature1);
++  using tNVSDK_NGX_CUDA_EvaluateFeature = decltype(&NVSDK_NGX_CUDA_EvaluateFeature);
++  using tNVSDK_NGX_CUDA_ReleaseFeature = decltype(&NVSDK_NGX_CUDA_ReleaseFeature);
++  using tNVSDK_NGX_CUDA_AllocateParameters = decltype(&NVSDK_NGX_CUDA_AllocateParameters);
++  using tNVSDK_NGX_CUDA_DestroyParameters = decltype(&NVSDK_NGX_CUDA_DestroyParameters);
++
++  tNVSDK_NGX_CUDA_Init_Ext1 Init_Ext1 = nullptr;
++  tNVSDK_NGX_CUDA_Shutdown1 Shutdown1 = nullptr;
++  tNVSDK_NGX_CUDA_GetFeatureRequirements GetFeatureRequirements = nullptr;
++  tNVSDK_NGX_CUDA_CreateFeature1 CreateFeature1 = nullptr;
++  tNVSDK_NGX_CUDA_EvaluateFeature EvaluateFeature = nullptr;
++  tNVSDK_NGX_CUDA_ReleaseFeature ReleaseFeature = nullptr;
++  tNVSDK_NGX_CUDA_AllocateParameters AllocateParameters = nullptr;
++  tNVSDK_NGX_CUDA_DestroyParameters DestroyParameters = nullptr;
++
++  explicit operator bool() const
++  {
++    return Init_Ext1 != nullptr && Shutdown1 != nullptr && CreateFeature1 != nullptr &&
++           EvaluateFeature != nullptr && ReleaseFeature != nullptr &&
++           AllocateParameters != nullptr && DestroyParameters != nullptr;
++  }
++
++  bool init()
++  {
++    if (*this) {
++      return true;
++    }
++
++#  ifdef _WIN32
++    WCHAR ngx_path[MAX_PATH] = L"";
++    {
++      HKEY ngx_key = nullptr;
++      LSTATUS result = RegOpenKeyExW(
++          HKEY_LOCAL_MACHINE,
++          L"System\\CurrentControlSet\\Services\\nvlddmkm\\Parameters\\NGXCore",
++          0,
++          KEY_READ,
++          &ngx_key);
++      if (result != ERROR_SUCCESS) {
++        result = RegOpenKeyExW(HKEY_LOCAL_MACHINE,
++                               L"System\\CurrentControlSet\\Services\\nvlddmkm\\NGXCore",
++                               0,
++                               KEY_READ,
++                               &ngx_key);
++      }
++      if (result == ERROR_SUCCESS) {
++        DWORD ngx_path_size = ARRAYSIZE(ngx_path);
++        result = RegQueryValueExW(
++            ngx_key, L"NGXPath", 0, nullptr, reinterpret_cast<LPBYTE>(ngx_path), &ngx_path_size);
++        RegCloseKey(ngx_key);
++      }
++      if (result != ERROR_SUCCESS) {
++        return false;
++      }
++
++      wcscat_s(ngx_path, L"\\_nvngx.dll");
++    }
++#  else
++    const char *const ngx_path = "libnvidia-ngx.so.1";
++#  endif
++
++    void *const ngx_module = dynamic_library_open(ngx_path);
++    if (ngx_module == nullptr) {
++      return false;
++    }
++
++    Init_Ext1 = dynamic_library_find(ngx_module, NVSDK_NGX_CUDA_Init_Ext1);
++    Shutdown1 = dynamic_library_find(ngx_module, NVSDK_NGX_CUDA_Shutdown1);
++    GetFeatureRequirements = dynamic_library_find(ngx_module,
++                                                  NVSDK_NGX_CUDA_GetFeatureRequirements);
++    CreateFeature1 = dynamic_library_find(ngx_module, NVSDK_NGX_CUDA_CreateFeature1);
++    EvaluateFeature = dynamic_library_find(ngx_module, NVSDK_NGX_CUDA_EvaluateFeature);
++    ReleaseFeature = dynamic_library_find(ngx_module, NVSDK_NGX_CUDA_ReleaseFeature);
++    AllocateParameters = dynamic_library_find(ngx_module, NVSDK_NGX_CUDA_AllocateParameters);
++    DestroyParameters = dynamic_library_find(ngx_module, NVSDK_NGX_CUDA_DestroyParameters);
++
++    if (*this) {
++      return true;
++    }
++    else {
++      dynamic_library_close(ngx_module);
++      return false;
++    }
++  }
++} NVSDK_NGX_CUDA;
++
++CCL_NAMESPACE_BEGIN
++
++static const int ApplicationId = 100334311;
++
++void DLSSDenoiser::CUDATexture::init(Device *device, int width, int height, int num_components)
++{
++  CUDA_ARRAY_DESCRIPTOR desc = {};
++  desc.Width = width;
++  desc.Height = height;
++  desc.Format = CU_AD_FORMAT_FLOAT;
++  desc.NumChannels = num_components;
++
++  cuda_device_assert(device, cuArrayCreate((CUarray *)&array, &desc));
++
++  CUDA_TEXTURE_DESC tex_desc = {};
++  tex_desc.addressMode[0] = CU_TR_ADDRESS_MODE_CLAMP;
++  tex_desc.addressMode[1] = CU_TR_ADDRESS_MODE_CLAMP;
++  tex_desc.addressMode[2] = CU_TR_ADDRESS_MODE_CLAMP;
++  tex_desc.flags = CU_TRSF_NORMALIZED_COORDINATES;
++
++  CUDA_RESOURCE_DESC res_desc = {};
++  res_desc.resType = CU_RESOURCE_TYPE_ARRAY;
++  res_desc.res.array.hArray = (CUarray)array;
++
++  cuda_device_assert(
++      device, cuTexObjectCreate((CUtexObject *)&texture_handle, &res_desc, &tex_desc, nullptr));
++  cuda_device_assert(device, cuSurfObjectCreate((CUsurfObject *)&surface_handle, &res_desc));
++}
++void DLSSDenoiser::CUDATexture::destroy()
++{
++  cuSurfObjectDestroy((CUsurfObject)surface_handle);
++  surface_handle = 0;
++  cuTexObjectDestroy((CUtexObject)texture_handle);
++  texture_handle = 0;
++
++  cuArrayDestroy((CUarray)array);
++  array = 0;
++}
++
++DLSSDenoiser::DLSSDenoiser(Device *denoiser_device, const DenoiseParams &params)
++    : DenoiserGPU(denoiser_device, params)
++{
++  CUDADevice *const cuda_device = static_cast<CUDADevice *>(denoiser_device_);
++  const CUDAContextScope scope(cuda_device);
++
++  if (!NVSDK_NGX_CUDA.init()) {
++    set_error("Failed to load NGX driver");
++    return;
++  }
++
++  const wstring app_path = string_to_wstring(path_get());
++  const wstring user_path = string_to_wstring(path_user_get());
++
++  const wchar_t *const app_paths[] = {app_path.c_str()};
++
++  NVSDK_NGX_FeatureCommonInfo feature_info = {};
++  feature_info.PathListInfo.Path = app_paths;
++  feature_info.PathListInfo.Length = 1;
++  feature_info.LoggingInfo.LoggingCallback =
++      [](const char *message, NVSDK_NGX_Logging_Level loggingLevel, NVSDK_NGX_Feature) {
++        switch (loggingLevel) {
++          case NVSDK_NGX_LOGGING_LEVEL_OFF:
++          case NVSDK_NGX_LOGGING_LEVEL_NUM:
++            assert(false);
++            break;
++          case NVSDK_NGX_LOGGING_LEVEL_ON:
++            LOG_INFO << message;
++            break;
++          case NVSDK_NGX_LOGGING_LEVEL_VERBOSE:
++            LOG_INFO << message;
++            break;
++        }
++      };
++  feature_info.LoggingInfo.MinimumLoggingLevel = NVSDK_NGX_LOGGING_LEVEL_ON;
++
++  ngx_device_ = new NVSDK_NGX_CUDADevice{
++      cuda_device->cuContext, static_cast<CUDADeviceQueue *>(denoiser_queue_.get())->stream()};
++
++  const NVSDK_NGX_Result result = NVSDK_NGX_CUDA.Init_Ext1(
++      ApplicationId, user_path.c_str(), ngx_device_, NVSDK_NGX_Version_API, &feature_info);
++
++  if (NVSDK_NGX_FAILED(result)) {
++    set_error("Failed to initialize NGX driver");
++  }
++}
++
++DLSSDenoiser::~DLSSDenoiser()
++{
++  CUDADevice *const cuda_device = static_cast<CUDADevice *>(denoiser_device_);
++  const CUDAContextScope scope(cuda_device);
++
++  tex_color_.destroy();
++  tex_depth_.destroy();
++  tex_diffuse_albedo_.destroy();
++  tex_specular_albedo_.destroy();
++  tex_normal_roughness_.destroy();
++  tex_motion_.destroy();
++  tex_specular_motion_.destroy();
++  tex_output_.destroy();
++
++  if (!NVSDK_NGX_CUDA) {
++    return;
++  }
++
++  if (handle_ != nullptr) {
++    NVSDK_NGX_CUDA.ReleaseFeature(handle_);
++  }
++
++  unsigned int n = 0;
++  const NVSDK_NGX_Result result = NVSDK_NGX_CUDA.Shutdown1(ngx_device_, n);
++
++  if (NVSDK_NGX_FAILED(result)) {
++    set_error("Failed to shutdown NGX driver");
++  }
++
++  delete ngx_device_;
++}
++
++bool DLSSDenoiser::is_device_supported(const DeviceInfo &device)
++{
++  if (device.type != DEVICE_CUDA && device.type != DEVICE_OPTIX) {
++    return false;
++  }
++
++  /* 'NVSDK_NGX_CUDA_GetFeatureRequirements' is an expensive call, so cache the result (since
++   * 'is_device_supported' is called a lot). */
++  static NVSDK_NGX_Feature_Support_Result supported_cache[8] = {
++      NVSDK_NGX_FeatureSupportResult_CheckNotPresent,
++      NVSDK_NGX_FeatureSupportResult_CheckNotPresent,
++      NVSDK_NGX_FeatureSupportResult_CheckNotPresent,
++      NVSDK_NGX_FeatureSupportResult_CheckNotPresent,
++      NVSDK_NGX_FeatureSupportResult_CheckNotPresent,
++      NVSDK_NGX_FeatureSupportResult_CheckNotPresent,
++      NVSDK_NGX_FeatureSupportResult_CheckNotPresent,
++      NVSDK_NGX_FeatureSupportResult_CheckNotPresent};
++
++  if (device.num >= 8) {
++    return false;
++  }
++  if (supported_cache[device.num] != NVSDK_NGX_FeatureSupportResult_CheckNotPresent) {
++    return supported_cache[device.num] == NVSDK_NGX_FeatureSupportResult_Supported;
++  }
++
++  if (!NVSDK_NGX_CUDA.init() || NVSDK_NGX_CUDA.GetFeatureRequirements == nullptr) {
++    /* NVIDIA driver is too old (requires 590+). */
++    return false;
++  }
++
++  const wstring user_path = string_to_wstring(path_user_get());
++
++  CUdevice cuDevice = 0;
++  cuDeviceGet(&cuDevice, device.num);
++
++  NVSDK_NGX_FeatureDiscoveryInfo discovery_info = {};
++  discovery_info.SDKVersion = NVSDK_NGX_Version_API;
++  discovery_info.FeatureID = NVSDK_NGX_Feature_RayReconstruction;
++  discovery_info.Identifier.IdentifierType = NVSDK_NGX_Application_Identifier_Type_Application_Id;
++  discovery_info.Identifier.v.ApplicationId = ApplicationId;
++  discovery_info.ApplicationDataPath = user_path.c_str();
++
++  NVSDK_NGX_FeatureRequirement requirement = {NVSDK_NGX_FeatureSupportResult_Supported};
++
++  const NVSDK_NGX_Result result = NVSDK_NGX_CUDA.GetFeatureRequirements(
++      cuDevice, &discovery_info, &requirement);
++
++  if (NVSDK_NGX_SUCCEED(result)) {
++    supported_cache[device.num] = requirement.FeatureSupported;
++    return requirement.FeatureSupported == NVSDK_NGX_FeatureSupportResult_Supported;
++  }
++  else if (result == NVSDK_NGX_Result_FAIL_NotImplemented) {
++    /* The 596.21 Windows driver exports this CUDA discovery entry point but returns
++     * NotImplemented for both project and application identifiers. Initialization and
++     * feature creation still perform the authoritative support checks. */
++    return true;
++  }
++  else {
++    return false;
++  }
++}
++
++bool DLSSDenoiser::denoise_create_if_needed(DenoiseContext &context)
++{
++  const bool recreate_denoiser = last_width_ != context.denoised_buffer_params.width ||
++                                 last_height_ != context.denoised_buffer_params.height ||
++                                 last_upscale_factor_ != context.denoise_params.upscale_factor;
++  if (handle_ != nullptr && !recreate_denoiser) {
++    return true;
++  }
++
++  CUDADevice *const cuda_device = static_cast<CUDADevice *>(denoiser_device_);
++  const CUDAContextScope scope(cuda_device);
++
++  if (handle_ != nullptr) {
++    denoiser_queue_->synchronize();
++
++    NVSDK_NGX_CUDA.ReleaseFeature(handle_);
++    handle_ = nullptr;
++  }
++
++  tex_color_.destroy();
++  tex_depth_.destroy();
++  tex_diffuse_albedo_.destroy();
++  tex_specular_albedo_.destroy();
++  tex_normal_roughness_.destroy();
++  tex_motion_.destroy();
++  tex_specular_motion_.destroy();
++  tex_output_.destroy();
++
++  if (context.buffer_params.width <= 128 || context.buffer_params.height <= 96) {
++    last_width_ = 0;
++    last_height_ = 0;
++    return false;
++  }
++
++  NVSDK_NGX_Parameter *params = nullptr;
++  if (NVSDK_NGX_FAILED(NVSDK_NGX_CUDA.AllocateParameters(&params))) {
++    return false;
++  }
++
++  params->Set(NVSDK_NGX_Parameter_Width, context.buffer_params.width);
++  params->Set(NVSDK_NGX_Parameter_Height, context.buffer_params.height);
++  params->Set(NVSDK_NGX_Parameter_OutWidth, context.denoised_buffer_params.width);
++  params->Set(NVSDK_NGX_Parameter_OutHeight, context.denoised_buffer_params.height);
++
++  params->Set(NVSDK_NGX_Parameter_DLSS_Denoise_Mode, NVSDK_NGX_DLSS_Denoise_Mode_DLUnified);
++  params->Set(NVSDK_NGX_Parameter_DLSS_Feature_Create_Flags,
++              NVSDK_NGX_DLSS_Feature_Flags_IsHDR | NVSDK_NGX_DLSS_Feature_Flags_MVLowRes);
++  params->Set(NVSDK_NGX_Parameter_DLSS_Enable_Output_Subrects, 0);
++  params->Set(NVSDK_NGX_Parameter_PerfQualityValue,
++              context.denoise_params.upscale_factor == 1.0f ?
++                  NVSDK_NGX_PerfQuality_Value_DLAA :
++              context.denoise_params.upscale_factor <= 1.0f / 0.65f ?
++                  NVSDK_NGX_PerfQuality_Value_MaxQuality :
++              context.denoise_params.upscale_factor <= 1.0f / 0.57f ?
++                  NVSDK_NGX_PerfQuality_Value_Balanced :
++              context.denoise_params.upscale_factor <= 1.0f / 0.5f ?
++                  NVSDK_NGX_PerfQuality_Value_MaxPerf :
++                  NVSDK_NGX_PerfQuality_Value_UltraPerformance);
++  params->Set(NVSDK_NGX_Parameter_Use_HW_Depth, NVSDK_NGX_DLSS_Depth_Type_Linear);
++  params->Set(NVSDK_NGX_Parameter_DLSS_Roughness_Mode, NVSDK_NGX_DLSS_Roughness_Mode_Packed);
++
++  params->Set(NVSDK_NGX_Parameter_RayReconstruction_Hint_Render_Preset_DLAA,
++              NVSDK_NGX_RayReconstruction_Hint_Render_Preset_E);
++  params->Set(NVSDK_NGX_Parameter_RayReconstruction_Hint_Render_Preset_Quality,
++              NVSDK_NGX_RayReconstruction_Hint_Render_Preset_E);
++  params->Set(NVSDK_NGX_Parameter_RayReconstruction_Hint_Render_Preset_Balanced,
++              NVSDK_NGX_RayReconstruction_Hint_Render_Preset_E);
++  params->Set(NVSDK_NGX_Parameter_RayReconstruction_Hint_Render_Preset_Performance,
++              NVSDK_NGX_RayReconstruction_Hint_Render_Preset_E);
++  params->Set(NVSDK_NGX_Parameter_RayReconstruction_Hint_Render_Preset_UltraPerformance,
++              NVSDK_NGX_RayReconstruction_Hint_Render_Preset_E);
++
++  const NVSDK_NGX_Result result = NVSDK_NGX_CUDA.CreateFeature1(
++      ngx_device_, NVSDK_NGX_Feature_RayReconstruction, params, &handle_);
++
++  NVSDK_NGX_CUDA.DestroyParameters(params);
++
++  if (NVSDK_NGX_FAILED(result)) {
++    set_error(string_printf("Failed to create DLSS instance (NGX 0x%08x)",
++                            static_cast<unsigned int>(result)));
++    return false;
++  }
++
++  tex_color_.init(cuda_device, context.buffer_params.width, context.buffer_params.height, 4);
++  tex_depth_.init(cuda_device, context.buffer_params.width, context.buffer_params.height, 1);
++  tex_diffuse_albedo_.init(
++      cuda_device, context.buffer_params.width, context.buffer_params.height, 4);
++  tex_specular_albedo_.init(
++      cuda_device, context.buffer_params.width, context.buffer_params.height, 4);
++  tex_normal_roughness_.init(
++      cuda_device, context.buffer_params.width, context.buffer_params.height, 4);
++  tex_motion_.init(cuda_device, context.buffer_params.width, context.buffer_params.height, 2);
++  tex_specular_motion_.init(
++      cuda_device, context.buffer_params.width, context.buffer_params.height, 2);
++
++  tex_output_.init(
++      cuda_device, context.denoised_buffer_params.width, context.denoised_buffer_params.height, 4);
++
++  last_width_ = context.denoised_buffer_params.width;
++  last_height_ = context.denoised_buffer_params.height;
++  last_upscale_factor_ = context.denoise_params.upscale_factor;
++
++  return !cuda_device->have_error();
++}
++
++bool DLSSDenoiser::denoise_configure_if_needed(DenoiseContext & /*context*/)
++{
++  return true;
++}
++
++bool DLSSDenoiser::denoise_filter_color_preprocess(const DenoiseContext &context,
++                                                   const DenoisePass &pass)
++{
++  if (pass.type != PASS_COMBINED) {
++    return true;
++  }
++
++  // Input params (with resolution divider applied)
++  const BufferParams &buffer_params = context.buffer_params;
++
++  const int work_size = buffer_params.width * buffer_params.height;
++
++  const DeviceKernelArguments args(&tex_color_.surface_handle,
++                                   &context.render_buffers->buffer.device_pointer,
++                                   &buffer_params.full_x,
++                                   &buffer_params.full_y,
++                                   &buffer_params.width,
++                                   &buffer_params.height,
++                                   &buffer_params.offset,
++                                   &buffer_params.stride,
++                                   &buffer_params.pass_stride,
++                                   &pass.denoised_offset);
++
++  return denoiser_queue_->enqueue(
++      DEVICE_KERNEL_FILTER_COLOR_PREPROCESS_TO_SURFACE, work_size, args);
++}
++bool DLSSDenoiser::denoise_filter_color_postprocess(const DenoiseContext &context,
++                                                    const DenoisePass &pass)
++{
++  if (pass.type != PASS_COMBINED) {
++    return true;
++  }
++
++  // Output params
++  const BufferParams &buffer_params = context.denoised_buffer_params;
++
++  const int work_size = buffer_params.width * buffer_params.height;
++
++  const DeviceKernelArguments args(&tex_output_.surface_handle,
++                                   &context.render_buffers->buffer.device_pointer,
++                                   &buffer_params.full_x,
++                                   &buffer_params.full_y,
++                                   &buffer_params.width,
++                                   &buffer_params.height,
++                                   &buffer_params.offset,
++                                   &buffer_params.stride,
++                                   &context.buffer_params.full_x,
++                                   &context.buffer_params.full_y,
++                                   &context.buffer_params.offset,
++                                   &context.buffer_params.stride,
++                                   &buffer_params.pass_stride,
++                                   &context.num_samples,
++                                   &pass.noisy_offset,
++                                   &pass.denoised_offset,
++                                   &context.pass_sample_count,
++                                   &pass.num_components,
++                                   &pass.use_compositing,
++                                   &params_.upscale_factor);
++
++  return denoiser_queue_->enqueue(
++      DEVICE_KERNEL_FILTER_COLOR_POSTPROCESS_FROM_SURFACE, work_size, args);
++}
++
++bool DLSSDenoiser::denoise_filter_guiding_preprocess(DenoiseContext &context)
++{
++  const BufferParams &buffer_params = context.buffer_params;
++
++  const int work_size = buffer_params.width * buffer_params.height;
++
++  const int pass_depth = context.buffer_params.get_pass_offset(PASS_DENOISING_DEPTH);
++  const int pass_specular_albedo = context.buffer_params.get_pass_offset(
++      PASS_DENOISING_SPECULAR_ALBEDO);
++  const int pass_roughness = context.buffer_params.get_pass_offset(PASS_DENOISING_ROUGHNESS);
++  const int pass_specular_motion = context.buffer_params.get_pass_offset(
++      PASS_DENOISING_SPECULAR_MOTION);
++
++  const DeviceKernelArguments args(&tex_depth_.surface_handle,
++                                   &tex_diffuse_albedo_.surface_handle,
++                                   &tex_specular_albedo_.surface_handle,
++                                   &tex_normal_roughness_.surface_handle,
++                                   &tex_motion_.surface_handle,
++                                   &tex_specular_motion_.surface_handle,
++                                   &context.render_buffers->buffer.device_pointer,
++                                   &buffer_params.offset,
++                                   &buffer_params.stride,
++                                   &buffer_params.pass_stride,
++                                   &context.pass_sample_count,
++                                   &pass_depth,
++                                   &context.pass_denoising_albedo,
++                                   &pass_specular_albedo,
++                                   &context.pass_denoising_normal,
++                                   &pass_roughness,
++                                   &context.pass_motion,
++                                   &pass_specular_motion,
++                                   &buffer_params.full_x,
++                                   &buffer_params.full_y,
++                                   &buffer_params.width,
++                                   &buffer_params.height,
++                                   &context.num_samples);
++
++  return denoiser_queue_->enqueue(
++      DEVICE_KERNEL_FILTER_GUIDING_PREPROCESS_TO_SURFACE, work_size, args);
++}
++
++bool DLSSDenoiser::denoise_run(const DenoiseContext &context, const DenoisePass &pass)
++{
++  if (pass.type != PASS_COMBINED) {
++    return true;
++  }
++
++  NVSDK_NGX_Parameter *params = nullptr;
++  if (NVSDK_NGX_FAILED(NVSDK_NGX_CUDA.AllocateParameters(&params))) {
++    return false;
++  }
++
++  CUDADevice *const cuda_device = static_cast<CUDADevice *>(denoiser_device_);
++  const CUDAContextScope scope(cuda_device);
++
++  params->Set(NVSDK_NGX_Parameter_Reset, 0);
++
++  params->Set(NVSDK_NGX_Parameter_Jitter_Offset_X, context.pixel_jitter.x);
++  params->Set(NVSDK_NGX_Parameter_Jitter_Offset_Y, context.pixel_jitter.y);
++
++  params->Set(NVSDK_NGX_Parameter_Color, &tex_color_.texture_handle);
++  params->Set(NVSDK_NGX_Parameter_Depth, &tex_depth_.texture_handle);
++  params->Set(NVSDK_NGX_Parameter_DiffuseAlbedo, &tex_diffuse_albedo_.texture_handle);
++  params->Set(NVSDK_NGX_Parameter_SpecularAlbedo, &tex_specular_albedo_.texture_handle);
++  params->Set(NVSDK_NGX_Parameter_GBuffer_Normals, &tex_normal_roughness_.texture_handle);
++  params->Set(NVSDK_NGX_Parameter_GBuffer_Roughness, &tex_normal_roughness_.texture_handle);
++  params->Set(NVSDK_NGX_Parameter_MotionVectors, &tex_motion_.texture_handle);
++  params->Set(NVSDK_NGX_Parameter_GBuffer_SpecularMvec, &tex_specular_motion_.texture_handle);
++  params->Set(NVSDK_NGX_Parameter_Output, &tex_output_.surface_handle);
++
++  params->Set(NVSDK_NGX_Parameter_DLSS_Render_Subrect_Dimensions_Width,
++              context.buffer_params.width);
++  params->Set(NVSDK_NGX_Parameter_DLSS_Render_Subrect_Dimensions_Height,
++              context.buffer_params.height);
++
++  params->Set(NVSDK_NGX_Parameter_DLSS_Indicator_Invert_Y_Axis, 1);
++
++  const NVSDK_NGX_Result result = NVSDK_NGX_CUDA.EvaluateFeature(handle_, params, nullptr);
++
++  NVSDK_NGX_CUDA.DestroyParameters(params);
++
++  if (NVSDK_NGX_FAILED(result)) {
++    set_error(string_printf("Failed to evaluate DLSS instance (NGX 0x%08x)",
++                            static_cast<unsigned int>(result)));
++  }
++  return NVSDK_NGX_SUCCEED(result);
++}
++
++CCL_NAMESPACE_END
++
++#endif
+diff --git a/src/integrator/denoiser_dlss.h b/src/integrator/denoiser_dlss.h
+new file mode 100644
+index 0000000000000000000000000000000000000000..8be5c022e8e8229d128345420b7ddd5122fa0272
+--- /dev/null
++++ b/src/integrator/denoiser_dlss.h
+@@ -0,0 +1,66 @@
++/* SPDX-FileCopyrightText: 2025 NVIDIA Corporation
++ * SPDX-FileCopyrightText: 2011-2022 Blender Foundation
++ *
++ * SPDX-License-Identifier: Apache-2.0 */
++
++#pragma once
++
++#ifdef WITH_DLSS
++
++#  include "integrator/denoiser_gpu.h"
++
++struct NVSDK_NGX_Handle;
++struct NVSDK_NGX_CUDADevice;
++
++CCL_NAMESPACE_BEGIN
++
++/* Implementation of denoising API which uses DLSS. */
++class DLSSDenoiser : public DenoiserGPU {
++ public:
++  DLSSDenoiser(Device *denoiser_device, const DenoiseParams &params);
++  ~DLSSDenoiser();
++
++  static bool is_device_supported(const DeviceInfo &device);
++
++ private:
++  bool denoise_create_if_needed(DenoiseContext &context) override;
++
++  bool denoise_configure_if_needed(DenoiseContext &context) override;
++
++  bool denoise_filter_color_preprocess(const DenoiseContext &context,
++                                       const DenoisePass &pass) override;
++  bool denoise_filter_color_postprocess(const DenoiseContext &context,
++                                        const DenoisePass &pass) override;
++
++  bool denoise_filter_guiding_preprocess(DenoiseContext &context) override;
++
++  bool denoise_run(const DenoiseContext &context, const DenoisePass &pass) override;
++
++  NVSDK_NGX_Handle *handle_ = nullptr;
++  NVSDK_NGX_CUDADevice *ngx_device_ = nullptr;
++
++  struct CUDATexture {
++    void init(Device *device, int width, int height, int num_components);
++    void destroy();
++
++    void *array = nullptr;
++    uint64_t texture_handle = 0;
++    uint64_t surface_handle = 0;
++  };
++  CUDATexture tex_color_;
++  CUDATexture tex_depth_;
++  CUDATexture tex_diffuse_albedo_;
++  CUDATexture tex_specular_albedo_;
++  CUDATexture tex_normal_roughness_;
++  CUDATexture tex_motion_;
++  CUDATexture tex_specular_motion_;
++  CUDATexture tex_output_;
++
++  int last_width_ = 0;
++  int last_height_ = 0;
++  float last_upscale_factor_ = 0.0f;
++};
++
++CCL_NAMESPACE_END
++
++#endif
+diff --git a/src/integrator/denoiser_gpu.cpp b/src/integrator/denoiser_gpu.cpp
+index cbef3e7b68db0e843a9fb73a277e0f1a635c1d77..65005c2fdbd409484fbe39eb46ccdf965667e1a6 100644
+--- a/src/integrator/denoiser_gpu.cpp
++++ b/src/integrator/denoiser_gpu.cpp
+@@ -134,10 +134,16 @@ bool DenoiserGPU::denoise_ensure(DenoiseContext &context)
+   return true;
+ }
+ 
+-bool DenoiserGPU::denoise_filter_guiding_preprocess(const DenoiseContext &context)
++bool DenoiserGPU::denoise_filter_guiding_preprocess(DenoiseContext &context)
+ {
+   const BufferParams &buffer_params = context.buffer_params;
+ 
++  if (context.use_guiding_passes && !context.guiding_params.device_pointer) {
++    context.guiding_buffer.alloc_to_device(buffer_params.width * buffer_params.height *
++                                           context.guiding_params.pass_stride);
++    context.guiding_params.device_pointer = context.guiding_buffer.device_pointer;
++  }
++
+   const int work_size = buffer_params.width * buffer_params.height;
+ 
+   const DeviceKernelArguments args(&context.guiding_params.device_pointer,
+@@ -226,10 +232,6 @@ DenoiserGPU::DenoiseContext::DenoiseContext(Device *device,
+       }
+ 
+       guiding_params.stride = buffer_params.width;
+-
+-      guiding_buffer.alloc_to_device(buffer_params.width * buffer_params.height *
+-                                     guiding_params.pass_stride);
+-      guiding_params.device_pointer = guiding_buffer.device_pointer;
+     }
+   }
+ }
+@@ -361,10 +363,16 @@ bool DenoiserGPU::denoise_filter_guiding_flip_y(const DenoiseContext &context)
+   return true;
+ }
+ 
+-bool DenoiserGPU::denoise_filter_guiding_set_fake_albedo(const DenoiseContext &context)
++bool DenoiserGPU::denoise_filter_guiding_set_fake_albedo(DenoiseContext &context)
+ {
+   const BufferParams &buffer_params = context.buffer_params;
+ 
++  if (context.use_guiding_passes && !context.guiding_params.device_pointer) {
++    context.guiding_buffer.alloc_to_device(buffer_params.width * buffer_params.height *
++                                           context.guiding_params.pass_stride);
++    context.guiding_params.device_pointer = context.guiding_buffer.device_pointer;
++  }
++
+   const int work_size = buffer_params.width * buffer_params.height;
+ 
+   const DeviceKernelArguments args(&context.guiding_params.device_pointer,
+diff --git a/src/integrator/denoiser_gpu.h b/src/integrator/denoiser_gpu.h
+index 9d854a62aef9de5f9f27d770c5d27516b788bbd9..b7fd9cd07a0e4e91ee322db7178c383dd467f004 100644
+--- a/src/integrator/denoiser_gpu.h
++++ b/src/integrator/denoiser_gpu.h
+@@ -47,20 +47,22 @@ class DenoiserGPU : public Denoiser {
+ 
+   /* Run corresponding filter kernels, preparing data for the denoiser or copying data from the
+    * denoiser result to the render buffer. */
+-  bool denoise_filter_color_preprocess(const DenoiseContext &context, const DenoisePass &pass);
+-  bool denoise_filter_color_postprocess(const DenoiseContext &context, const DenoisePass &pass);
++  virtual bool denoise_filter_color_preprocess(const DenoiseContext &context,
++                                               const DenoisePass &pass);
++  virtual bool denoise_filter_color_postprocess(const DenoiseContext &context,
++                                                const DenoisePass &pass);
+   bool denoise_filter_color_flip_y(const DenoiseContext &context,
+                                    const BufferParams &buffer_params,
+                                    const DenoisePass &pass);
+   bool denoise_filter_guiding_flip_y(const DenoiseContext &context);
+-  bool denoise_filter_guiding_set_fake_albedo(const DenoiseContext &context);
++  bool denoise_filter_guiding_set_fake_albedo(DenoiseContext &context);
+ 
+   /* Read guiding passes from the render buffers, preprocess them in a way which is expected by
+    * the GPU denoiser and store in the guiding passes memory within the given context.
+    *
+    * Pre-processing of the guiding passes is to only happen once per context lifetime. DO not
+    * preprocess them for every pass which is being denoised. */
+-  bool denoise_filter_guiding_preprocess(const DenoiseContext &context);
++  virtual bool denoise_filter_guiding_preprocess(DenoiseContext &context);
+ 
+   bool denoise_pass(DenoiseContext &context, PassType pass_type);
+ 
+diff --git a/src/integrator/path_trace.cpp b/src/integrator/path_trace.cpp
+index 3833fdd86dc82f240aa20572ca8f822d0adf7d82..84968ae3b0f4bafac0312100978694d318ff7fd5 100644
+--- a/src/integrator/path_trace.cpp
++++ b/src/integrator/path_trace.cpp
+@@ -546,7 +546,9 @@ void PathTrace::set_denoiser_params(const DenoiseParams &params)
+ 
+     const bool is_cpu_denoising = old_denoiser_params.type == DENOISER_OPENIMAGEDENOISE &&
+                                   old_denoiser_params.use_gpu == false;
+-    const bool requested_gpu_denoising = effective_denoise_params.type == DENOISER_OPTIX ||
++    const bool always_gpu_denoising = effective_denoise_params.type == DENOISER_DLSS ||
++                                      effective_denoise_params.type == DENOISER_OPTIX;
++    const bool requested_gpu_denoising = always_gpu_denoising ||
+                                          (effective_denoise_params.type ==
+                                               DENOISER_OPENIMAGEDENOISE &&
+                                           effective_denoise_params.use_gpu == true);
+@@ -564,7 +566,7 @@ void PathTrace::set_denoiser_params(const DenoiseParams &params)
+     /* Optix Denoiser is not supporting CPU devices, so use_gpu option is not
+      * shown in the UI and changes in the option value should not be checked. */
+     if (old_denoiser_params.type == effective_denoise_params.type &&
+-        (is_same_denoising_device_type || effective_denoise_params.type == DENOISER_OPTIX))
++        (is_same_denoising_device_type || always_gpu_denoising))
+     {
+       denoiser_->set_params(effective_denoise_params);
+     }
+@@ -911,7 +913,14 @@ void PathTrace::cancel()
+ {
+   thread_scoped_lock lock(render_cancel_.mutex);
+ 
+-  render_cancel_.is_requested = true;
++  /* DLSS needs an initial sample to produce a displayable frame. Other denoisers retain the
++   * regular Cycles cancellation behavior. */
++  const bool waiting_for_initial_dlss_sample =
++      denoiser_ && denoiser_->get_params().type == DENOISER_DLSS &&
++      get_num_samples_in_buffer() <= 1;
++  if (!waiting_for_initial_dlss_sample) {
++    render_cancel_.is_requested = true;
++  }
+ 
+   while (render_cancel_.is_rendering) {
+     render_cancel_.condition.wait(lock);
+diff --git a/src/integrator/render_scheduler.cpp b/src/integrator/render_scheduler.cpp
+index a7eb263cfa0beae4bbd191269e74b2953d6dd421..faad5047a54d61f714cbd4344435ae50b2d1b3f0 100644
+--- a/src/integrator/render_scheduler.cpp
++++ b/src/integrator/render_scheduler.cpp
+@@ -90,6 +90,11 @@ void RenderScheduler::set_sample_params(const int num_samples,
+ 
+ int RenderScheduler::get_num_samples() const
+ {
++  /* Do continuous rendering when DLSS is active. */
++  if (denoiser_params_.use && denoiser_params_.type == DENOISER_DLSS) {
++    return Integrator::MAX_SAMPLES;
++  }
++
+   return num_samples_;
+ }
+ 
+@@ -288,7 +293,7 @@ bool RenderScheduler::done() const
+     return true;
+   }
+ 
+-  return get_num_rendered_samples() >= num_samples_;
++  return get_num_rendered_samples() >= get_num_samples();
+ }
+ 
+ RenderWork RenderScheduler::get_render_work()
+@@ -344,6 +349,10 @@ RenderWork RenderScheduler::get_render_work()
+   render_work.denoised_resolution_divider = state_.resolution_divider;
+   if (denoiser_params_.use) {
+     render_work.resolution_divider *= denoiser_params_.upscale_factor;
++
++    if (denoiser_params_.type == DENOISER_DLSS) {
++      state_.num_rendered_samples = 0;
++    }
+   }
+ 
+   render_work.path_trace.start_sample = get_start_sample_to_path_trace();
+@@ -871,7 +880,7 @@ int RenderScheduler::get_num_samples_to_path_trace() const
+   /* Always start full resolution render  with a single sample. Gives more instant feedback to
+    * artists, and allows to gather information for a subsequent path tracing works. Do it in the
+    * headless mode as well, to give some estimate of how long samples are taking. */
+-  if (state_.num_rendered_samples == 0) {
++  if (state_.num_rendered_samples == 0 && state_.last_display_update_sample == -1) {
+     return 1;
+   }
+ 
+@@ -886,7 +895,8 @@ int RenderScheduler::get_num_samples_to_path_trace() const
+    * more than N samples. */
+   const int num_samples_pot = round_num_samples_to_power_of_2(num_samples_per_update);
+ 
+-  const int max_num_samples_to_render = sample_offset_ + num_samples_ - path_trace_start_sample;
++  const int max_num_samples_to_render = sample_offset_ + get_num_samples() -
++                                        path_trace_start_sample;
+ 
+   int num_samples_to_render = min(num_samples_pot, max_num_samples_to_render);
+ 
+@@ -958,7 +968,9 @@ int RenderScheduler::get_num_samples_to_path_trace() const
+                                 min(num_samples_to_occupy, max_num_samples_to_render));
+   }
+ 
+-  if (limit_samples_per_update_) {
++  if (limit_samples_per_update_ &&
++      !(denoiser_params_.use && denoiser_params_.type == DENOISER_DLSS))
++  {
+     num_samples_to_render = min(limit_samples_per_update_, num_samples_to_render);
+   }
+ 
+@@ -1044,6 +1056,10 @@ bool RenderScheduler::work_need_denoise(bool &delayed, bool &ready_to_display)
+ 
+   /* Viewport render. */
+ 
++  if (denoiser_params_.type == DENOISER_DLSS) {
++    return true;
++  }
++
+   /* Navigation might render multiple samples at a lower resolution. Those are not to be counted as
+    * final samples. */
+   const int num_samples_finished = state_.resolution_divider == pixel_size_ ?
+@@ -1151,6 +1167,11 @@ bool RenderScheduler::work_need_rebalance()
+ 
+ void RenderScheduler::update_start_resolution_divider()
+ {
++  if (denoiser_params_.use && denoiser_params_.type == DENOISER_DLSS) {
++    start_resolution_divider_ = 1;
++    return;
++  }
++
+   if (default_start_resolution_divider_ == 0) {
+     return;
+   }
+diff --git a/src/kernel/data_template.h b/src/kernel/data_template.h
+index b1333a8a8b0855af5293646818aaa25c6500b840..cda78449d48a4a94f30e34fc8e4d06d4bb244fac 100644
+--- a/src/kernel/data_template.h
++++ b/src/kernel/data_template.h
+@@ -136,6 +136,7 @@ KERNEL_STRUCT_MEMBER(film, int, pass_denoising_normal)
+ KERNEL_STRUCT_MEMBER(film, int, pass_denoising_roughness)
+ KERNEL_STRUCT_MEMBER(film, int, pass_denoising_depth)
+ KERNEL_STRUCT_MEMBER(film, int, pass_denoising_backward_motion)
++KERNEL_STRUCT_MEMBER(film, int, pass_denoising_specular_motion)
+ KERNEL_STRUCT_MEMBER(film, int, denoising_pass_options_flag)
+ /* AOVs. */
+ KERNEL_STRUCT_MEMBER(film, int, pass_aov_color)
+diff --git a/src/kernel/device/cuda/kernel.cu b/src/kernel/device/cuda/kernel.cu
+index 2033add259ce63547ab58f30118db6cd45261580..5410dfb6118c9931ca7f1492af3334a253bddedb 100644
+--- a/src/kernel/device/cuda/kernel.cu
++++ b/src/kernel/device/cuda/kernel.cu
+@@ -13,4 +13,248 @@
+ #  include "kernel/device/gpu/image.h"
+ #  include "kernel/device/gpu/kernel.h"
+ 
++/* --------------------------------------------------------------------
++ * Denoising.
++ */
++
++ccl_gpu_kernel(GPU_KERNEL_BLOCK_NUM_THREADS, GPU_KERNEL_MAX_REGISTERS)
++    ccl_gpu_kernel_signature(filter_color_preprocess_to_surface,
++                             cudaSurfaceObject_t color_surface,
++                             ccl_global float *render_buffer,
++                             const int full_x,
++                             const int full_y,
++                             const int width,
++                             const int height,
++                             const int offset,
++                             const int stride,
++                             const int pass_stride,
++                             const int pass_denoised)
++{
++  const int work_index = ccl_gpu_global_id_x();
++  const int y = work_index / width;
++  const int x = work_index - y * width;
++
++  if (x >= width || y >= height) {
++    return;
++  }
++
++  const uint64_t render_pixel_index = offset + (x + full_x) + (y + full_y) * stride;
++  ccl_global float *denoised_pixel = render_buffer + render_pixel_index * pass_stride +
++                                     pass_denoised;
++
++  float4 color_value;
++  color_value.x = denoised_pixel[0];
++  color_value.y = denoised_pixel[1];
++  color_value.z = denoised_pixel[2];
++  color_value.w = 1.0;
++
++  surf2Dwrite(color_value, color_surface, x * sizeof(float4), y);
++}
++ccl_gpu_kernel_postfix
++
++ccl_gpu_kernel(GPU_KERNEL_BLOCK_NUM_THREADS, GPU_KERNEL_MAX_REGISTERS)
++    ccl_gpu_kernel_signature(filter_guiding_preprocess_to_surface,
++                             cudaSurfaceObject_t depth_surface,
++                             cudaSurfaceObject_t albedo_surface,
++                             cudaSurfaceObject_t specular_albedo_surface,
++                             cudaSurfaceObject_t normal_roughness_surface,
++                             cudaSurfaceObject_t motion_surface,
++                             cudaSurfaceObject_t specular_motion_surface,
++                             const ccl_global float *render_buffer,
++                             const int render_offset,
++                             const int render_stride,
++                             const int render_pass_stride,
++                             const int render_pass_sample_count,
++                             const int render_pass_depth,
++                             const int render_pass_albedo,
++                             const int render_pass_specular_albedo,
++                             const int render_pass_normal,
++                             const int render_pass_roughness,
++                             const int render_pass_motion,
++                             const int render_pass_specular_motion,
++                             const int full_x,
++                             const int full_y,
++                             const int width,
++                             const int height,
++                             const int num_samples)
++{
++  const int work_index = ccl_gpu_global_id_x();
++  const int y = work_index / width;
++  const int x = work_index - y * width;
++
++  if (x >= width || y >= height) {
++    return;
++  }
++
++  const uint64_t render_pixel_index = render_offset + (x + full_x) + (y + full_y) * render_stride;
++  const ccl_global float *buffer = render_buffer + render_pixel_index * render_pass_stride;
++
++  float pixel_scale;
++  if (render_pass_sample_count == PASS_UNUSED) {
++    pixel_scale = 1.0f / num_samples;
++  }
++  else {
++    pixel_scale = 1.0f / __float_as_uint(buffer[render_pass_sample_count]);
++  }
++
++  /* Depth pass. */
++  if (render_pass_depth != PASS_UNUSED) {
++    const ccl_global float *depth_in = buffer + render_pass_depth;
++
++    const float depth_value = depth_in[0] * pixel_scale;
++
++    surf2Dwrite(depth_value, depth_surface, x * sizeof(float), y);
++  }
++
++  /* Diffuse albedo pass. */
++  if (render_pass_albedo != PASS_UNUSED) {
++    const ccl_global float *albedo_in = buffer + render_pass_albedo;
++
++    float4 albedo_value;
++    albedo_value.x = albedo_in[0] * pixel_scale;
++    albedo_value.y = albedo_in[1] * pixel_scale;
++    albedo_value.z = albedo_in[2] * pixel_scale;
++    albedo_value.w = 1.0;
++
++    /* Tonemap the albedo with simple reinhard operator. */
++    albedo_value.x = clamp(albedo_value.x / (1.0f + albedo_value.x), 0.0f, 1.0f);
++    albedo_value.y = clamp(albedo_value.y / (1.0f + albedo_value.y), 0.0f, 1.0f);
++    albedo_value.z = clamp(albedo_value.z / (1.0f + albedo_value.z), 0.0f, 1.0f);
++
++    surf2Dwrite(albedo_value, albedo_surface, x * sizeof(float4), y);
++  }
++
++  /* Specular albedo pass. */
++  if (render_pass_specular_albedo != PASS_UNUSED) {
++    const ccl_global float *albedo_in = buffer + render_pass_specular_albedo;
++
++    float4 specular_albedo_value;
++    specular_albedo_value.x = albedo_in[0] * pixel_scale;
++    specular_albedo_value.y = albedo_in[1] * pixel_scale;
++    specular_albedo_value.z = albedo_in[2] * pixel_scale;
++    specular_albedo_value.w = 1.0;
++
++    surf2Dwrite(specular_albedo_value, specular_albedo_surface, x * sizeof(float4), y);
++  }
++
++  /* Normal and roughness pass. */
++  if (render_pass_normal != PASS_UNUSED && render_pass_roughness != PASS_UNUSED) {
++    const ccl_global float *normal_in = buffer + render_pass_normal;
++    const ccl_global float *roughness_in = buffer + render_pass_roughness;
++
++    float4 normal_roughness_value;
++    normal_roughness_value.x = normal_in[0] * pixel_scale;
++    normal_roughness_value.y = normal_in[1] * pixel_scale;
++    normal_roughness_value.z = normal_in[2] * pixel_scale;
++    normal_roughness_value.w = roughness_in[0] * pixel_scale;
++
++    surf2Dwrite(normal_roughness_value, normal_roughness_surface, x * sizeof(float4), y);
++  }
++
++  /* Motion pass. */
++  if (render_pass_motion != PASS_UNUSED) {
++    const ccl_global float *motion_in = buffer + render_pass_motion;
++
++    float2 motion_value;
++    motion_value.x = motion_in[0] * pixel_scale;
++    motion_value.y = motion_in[1] * pixel_scale;
++
++    surf2Dwrite(motion_value, motion_surface, x * sizeof(float2), y);
++  }
++
++  /* Specular motion pass. */
++  if (render_pass_specular_motion != PASS_UNUSED) {
++    const ccl_global float *motion_in = buffer + render_pass_specular_motion;
++
++    float2 motion_value;
++    motion_value.x = motion_in[0] * pixel_scale;
++    motion_value.y = motion_in[1] * pixel_scale;
++
++    surf2Dwrite(motion_value, specular_motion_surface, x * sizeof(float2), y);
++  }
++}
++ccl_gpu_kernel_postfix
++
++ccl_gpu_kernel(GPU_KERNEL_BLOCK_NUM_THREADS, GPU_KERNEL_MAX_REGISTERS)
++    ccl_gpu_kernel_signature(filter_color_postprocess_from_surface,
++                             cudaSurfaceObject_t color_surface,
++                             ccl_global float *render_buffer,
++                             const int full_x,
++                             const int full_y,
++                             const int width,
++                             const int height,
++                             const int offset,
++                             const int stride,
++                             const int render_full_x,
++                             const int render_full_y,
++                             const int render_offset,
++                             const int render_stride,
++                             const int pass_stride,
++                             const int num_samples,
++                             const int pass_noisy,
++                             const int pass_denoised,
++                             const int pass_sample_count,
++                             const int num_components,
++                             const int use_compositing,
++                             const float upscale_factor)
++{
++  const int work_index = ccl_gpu_global_id_x();
++  const int y = work_index / width;
++  const int x = work_index - y * width;
++
++  if (x >= width || y >= height) {
++    return;
++  }
++
++  const uint64_t render_pixel_index = render_offset + (int(x / upscale_factor) + render_full_x) +
++                                      (int(y / upscale_factor) + render_full_y) * render_stride;
++  ccl_global float *buffer = render_buffer + render_pixel_index * pass_stride;
++
++  float pixel_scale;
++  if (pass_sample_count == PASS_UNUSED) {
++    pixel_scale = num_samples;
++  }
++  else {
++    pixel_scale = __float_as_uint(buffer[pass_sample_count]);
++  }
++
++  const uint64_t denoised_pixel_index = offset + (x + full_x) + (y + full_y) * stride;
++  ccl_global float *denoised_pixel = render_buffer + denoised_pixel_index * pass_stride +
++                                     pass_denoised;
++
++  float4 color_value;
++  surf2Dread(&color_value, color_surface, x * sizeof(float4), y);
++
++  denoised_pixel[0] = color_value.x;
++  denoised_pixel[1] = color_value.y;
++  denoised_pixel[2] = color_value.z;
++
++  if (pass_sample_count == PASS_UNUSED || upscale_factor == 1.0f) {
++    denoised_pixel[0] *= pixel_scale;
++    denoised_pixel[1] *= pixel_scale;
++    denoised_pixel[2] *= pixel_scale;
++  }
++
++  if (num_components == 3) {
++    /* Pass without alpha channel. */
++  }
++  else if (!use_compositing) {
++    /* Currently compositing passes are either 3-component (derived by dividing light passes)
++     * or do not have transparency (shadow catcher). Implicitly rely on this logic, as it
++     * simplifies logic and avoids extra memory allocation. */
++    const ccl_global float *noisy_pixel = buffer + pass_noisy;
++    denoised_pixel[3] = noisy_pixel[3];
++
++    if (pass_sample_count != PASS_UNUSED && upscale_factor != 1.0f) {
++      denoised_pixel[3] /= pixel_scale;
++    }
++  }
++  else {
++    /* Assigning to zero since this is a default alpha value for 3-component passes, and it
++     * is an opaque pixel for 4 component passes. */
++    denoised_pixel[3] = 0;
++  }
++}
++ccl_gpu_kernel_postfix
++
+ #endif
+diff --git a/src/kernel/device/oneapi/kernel.cpp b/src/kernel/device/oneapi/kernel.cpp
+index 116980db698274fa09b86c7533af83a730c009e0..13c378597bffaa5a0ee55c5f6310d73e6ed92f36 100644
+--- a/src/kernel/device/oneapi/kernel.cpp
++++ b/src/kernel/device/oneapi/kernel.cpp
+@@ -732,6 +732,7 @@ bool oneapi_enqueue_kernel(KernelContext *kernel_context,
+           break;
+         }
+         /* Unsupported kernels */
++        default:
+         case DEVICE_KERNEL_NUM:
+         case DEVICE_KERNEL_INTEGRATOR_MEGAKERNEL:
+         case DEVICE_KERNEL_INTEGRATOR_SHADOW_PATH_MNEE_PENDING:
+diff --git a/src/kernel/film/denoising_passes.h b/src/kernel/film/denoising_passes.h
+index 7ce5a9824a3621c10b06a70465165fbafb91601a..6afb1b98e3ce6afa2b29677af4373ea26f51b77f 100644
+--- a/src/kernel/film/denoising_passes.h
++++ b/src/kernel/film/denoising_passes.h
+@@ -126,6 +126,8 @@ ccl_device_forceinline void film_write_denoising_features_surface(KernelGlobals
+     feature_weight = smoothstep(0.0f, 0.5f, sum_nonspecular_weight / sum_weight);
+   }
+ 
++  const float deferred_feature_weight = 1.0f - feature_weight;
++
+   /* Whether to defer features to the next bounce for individual passes. */
+   const bool follow_reflections = (kernel_data.film.denoising_pass_options_flag &
+                                    DENOISING_PASS_FOLLOW_REFLECTIONS) != 0;
+@@ -187,12 +189,33 @@ ccl_device_forceinline void film_write_denoising_features_surface(KernelGlobals
+                              backward_motion);
+     }
+   }
++  else if (INTEGRATOR_STATE(state, path, bounce) == 1 && (path_flag & PATH_RAY_REFLECT)) {
++    if (kernel_data.film.pass_denoising_specular_motion != PASS_UNUSED) {
++      const float3 reflector_P = INTEGRATOR_STATE(state, ray, P);
++      const float3 reflector_N = INTEGRATOR_STATE(state, path, mis_origin_n);
++      const float4 specular_motion = primitive_motion_vector_reflection(
++          kg, reflector_P, reflector_N, sd);
++
++      film_write_pass_float(buffer + kernel_data.film.pass_denoising_specular_motion + 0,
++                            specular_motion.x);
++      film_write_pass_float(buffer + kernel_data.film.pass_denoising_specular_motion + 1,
++                            specular_motion.y);
++    }
++  }
+ 
+   /* Portion deferred to the next bounce. Specularity uses the feature weight, transparent
+    * always passes through. */
+-  const Spectrum deferred_albedo = specular_albedo * (1.0f - feature_weight) + transparent_albedo;
++  Spectrum deferred_albedo = specular_albedo * deferred_feature_weight + transparent_albedo;
++
++  /* Without full reflection-following, continue one reflection bounce only for specular motion. */
++  if (!follow_reflections && kernel_data.film.pass_denoising_specular_motion == PASS_UNUSED) {
++    deferred_albedo = transparent_albedo;
++  }
+ 
+   if (reduce_max(fabs(deferred_albedo)) > 1e-4f) {
++    if (!follow_reflections) {
++      deferred_albedo = transparent_albedo;
++    }
+     INTEGRATOR_STATE_WRITE(state, path, denoising_feature_throughput) *= deferred_albedo;
+   }
+   else {
+diff --git a/src/kernel/geom/primitive.h b/src/kernel/geom/primitive.h
+index c79e86ac9ac24b15e93975a8d2b9c5f8f9e2c55b..1161d2e03860cd5bbf5ac36f59fe2f4dd2156fcc 100644
+--- a/src/kernel/geom/primitive.h
++++ b/src/kernel/geom/primitive.h
+@@ -370,4 +370,44 @@ primitive_motion_vector_backward_depth_delta(KernelGlobals kg, const ccl_private
+   return make_float3(motion_pre.x, motion_pre.y, linear_depth_delta_pre);
+ }
+ 
++/* Motion vector for reflections. */
++
++ccl_device_forceinline float3 project_reflection(const float3 reflector_P,
++                                                 const float3 reflector_N,
++                                                 const float3 P)
++{
++  /* See Ray Tracing Gems chapter 32.4.3 Reflection Motion Vectors. */
++  const float3 reflector_to_o = P - reflector_P;
++  const float3 N = dot(reflector_N, reflector_to_o) < 0.0f ? -reflector_N : reflector_N;
++  float3 T, B;
++  make_orthonormals(N, &T, &B);
++
++  const float3 P_o = to_local(reflector_to_o, T, B, N);
++  const float z_o = max(P_o.z, 1e-5f);
++  const float z_i = -z_o;
++  const float x_i = -(z_i / z_o) * P_o.x;
++  const float y_i = -(z_i / z_o) * P_o.y;
++
++  return reflector_P + to_global(make_float3(x_i, y_i, z_i), T, B, N);
++}
++
++ccl_device_forceinline float4 primitive_motion_vector_reflection(KernelGlobals kg,
++                                                                 const float3 reflector_P,
++                                                                 const float3 reflector_N,
++                                                                 const ccl_private ShaderData *sd)
++{
++  float3 motion_center, motion_pre, motion_post;
++  primitive_motion_data_without_camera(kg, sd, &motion_center, &motion_pre, &motion_post);
++
++  /* TODO: This does not handle cases where the reflector is moving. */
++  motion_center = project_reflection(reflector_P, reflector_N, motion_center);
++  motion_pre = project_reflection(reflector_P, reflector_N, motion_pre);
++  motion_post = project_reflection(reflector_P, reflector_N, motion_post);
++
++  primitive_motion_data_camera_step(kg, &motion_center, &motion_pre, &motion_post);
++  motion_pre -= motion_center;
++  motion_post = motion_center - motion_post;
++  return make_float4(motion_pre.x, motion_pre.y, motion_post.x, motion_post.y);
++}
++
+ CCL_NAMESPACE_END
+diff --git a/src/kernel/types.h b/src/kernel/types.h
+index de78d9541ea7461da98e1ac9ed40ce2238a81796..bb4bca17922080df82060d130aa1e0dd443c979b 100644
+--- a/src/kernel/types.h
++++ b/src/kernel/types.h
+@@ -428,6 +428,7 @@ enum PassType {
+   PASS_DENOISING_ROUGHNESS,
+   PASS_DENOISING_DEPTH,
+   PASS_DENOISING_BACKWARD_MOTION,
++  PASS_DENOISING_SPECULAR_MOTION,
+   PASS_CATEGORY_DENOISING_END = 95,
+ 
+   PASS_BAKE_PRIMITIVE,
+@@ -1807,9 +1808,12 @@ enum DeviceKernel : int {
+   DEVICE_KERNEL_ADAPTIVE_SAMPLING_CONVERGENCE_FILTER_Y,
+ 
+   DEVICE_KERNEL_FILTER_GUIDING_PREPROCESS,
++  DEVICE_KERNEL_FILTER_GUIDING_PREPROCESS_TO_SURFACE,
+   DEVICE_KERNEL_FILTER_GUIDING_SET_FAKE_ALBEDO,
+   DEVICE_KERNEL_FILTER_COLOR_PREPROCESS,
++  DEVICE_KERNEL_FILTER_COLOR_PREPROCESS_TO_SURFACE,
+   DEVICE_KERNEL_FILTER_COLOR_POSTPROCESS,
++  DEVICE_KERNEL_FILTER_COLOR_POSTPROCESS_FROM_SURFACE,
+   DEVICE_KERNEL_FILTER_COLOR_FLIP_Y,
+ 
+   DEVICE_KERNEL_VOLUME_GUIDING_FILTER_X,
+diff --git a/src/scene/film.cpp b/src/scene/film.cpp
+index 79d1b6736e986db62565e4c085c70d2485aaa2eb..4f00fbdd8236ff5b996b369f782731c84852370a 100644
+--- a/src/scene/film.cpp
++++ b/src/scene/film.cpp
+@@ -207,6 +207,7 @@ void Film::device_update(Device *device, DeviceScene *dscene, Scene *scene)
+   kfilm->pass_denoising_roughness = PASS_UNUSED;
+   kfilm->pass_denoising_depth = PASS_UNUSED;
+   kfilm->pass_denoising_backward_motion = PASS_UNUSED;
++  kfilm->pass_denoising_specular_motion = PASS_UNUSED;
+   kfilm->pass_sample_count = PASS_UNUSED;
+   kfilm->pass_render_time = PASS_UNUSED;
+   kfilm->pass_adaptive_aux_buffer = PASS_UNUSED;
+@@ -245,7 +246,8 @@ void Film::device_update(Device *device, DeviceScene *dscene, Scene *scene)
+ 
+     /* Can't do motion pass if no motion vectors are available. */
+     if (pass->get_type() == PASS_MOTION || pass->get_type() == PASS_MOTION_WEIGHT ||
+-        pass->get_type() == PASS_DENOISING_BACKWARD_MOTION)
++        pass->get_type() == PASS_DENOISING_BACKWARD_MOTION ||
++        pass->get_type() == PASS_DENOISING_SPECULAR_MOTION)
+     {
+       const Scene::MotionType need_motion = scene->need_motion();
+       if (need_motion != Scene::MOTION_PASS && need_motion != Scene::MOTION_PASS_INTERACTIVE) {
+@@ -403,6 +405,9 @@ void Film::device_update(Device *device, DeviceScene *dscene, Scene *scene)
+       case PASS_DENOISING_BACKWARD_MOTION:
+         kfilm->pass_denoising_backward_motion = kfilm->pass_stride;
+         break;
++      case PASS_DENOISING_SPECULAR_MOTION:
++        kfilm->pass_denoising_specular_motion = kfilm->pass_stride;
++        break;
+ 
+       case PASS_SHADOW_CATCHER:
+         kfilm->pass_shadow_catcher = kfilm->pass_stride;
+@@ -591,6 +596,9 @@ void Film::update_passes(Scene *scene)
+     if (denoiser_passes & DENOISER_PASS_BACKWARD_MOTION) {
+       add_auto_pass(scene, PASS_DENOISING_BACKWARD_MOTION);
+     }
++    if (denoiser_passes & DENOISER_PASS_SPECULAR_MOTION) {
++      add_auto_pass(scene, PASS_DENOISING_SPECULAR_MOTION);
++    }
+   }
+ 
+   /* Create passes for shadow catcher. */
+@@ -818,7 +826,7 @@ uint Film::get_kernel_features(const Scene *scene) const
+                                   !is_volume_guiding_pass(pass_type);
+ 
+     if (has_denoise_pass ||
+-        (pass_type >= PASS_DENOISING_ALBEDO && pass_type <= PASS_DENOISING_BACKWARD_MOTION))
++        (pass_type >= PASS_DENOISING_ALBEDO && pass_type <= PASS_DENOISING_SPECULAR_MOTION))
+     {
+       kernel_features |= KERNEL_FEATURE_DENOISING;
+     }
+diff --git a/src/scene/integrator.cpp b/src/scene/integrator.cpp
+index 77ca236cbd40426b806ef70f30923c5d61be537d..1b7251e9baca34af5cb059b6d8b5e5ef19fe0e3d 100644
+--- a/src/scene/integrator.cpp
++++ b/src/scene/integrator.cpp
+@@ -166,6 +166,7 @@ NODE_DEFINE(Integrator)
+   denoiser_type_enum.insert("none", DENOISER_NONE);
+   denoiser_type_enum.insert("optix", DENOISER_OPTIX);
+   denoiser_type_enum.insert("openimagedenoise", DENOISER_OPENIMAGEDENOISE);
++  denoiser_type_enum.insert("dlss", DENOISER_DLSS);
+ 
+   static NodeEnum denoiser_prefilter_enum;
+   denoiser_prefilter_enum.insert("none", DENOISER_PREFILTER_NONE);
+@@ -211,6 +212,10 @@ void Integrator::device_update(Device *device, DeviceScene *dscene, Scene *scene
+     }
+   });
+ 
++  if (use_denoise && denoiser_type == DENOISER_DLSS) {
++    use_pixel_jitter = true;
++  }
++
+   KernelIntegrator *kintegrator = &dscene->data.integrator;
+ 
+   device_free(device, dscene);
+diff --git a/src/scene/pass.cpp b/src/scene/pass.cpp
+index 6262795a7f148452227624430eaa5ac0bda57d8f..924f139a6008a3e1b9bc14231d46834c07edab1d 100644
+--- a/src/scene/pass.cpp
++++ b/src/scene/pass.cpp
+@@ -93,6 +93,7 @@ const NodeEnum *Pass::get_type_enum()
+     pass_type_enum.insert("denoising_roughness", PASS_DENOISING_ROUGHNESS);
+     pass_type_enum.insert("denoising_depth", PASS_DENOISING_DEPTH);
+     pass_type_enum.insert("denoising_backward_motion", PASS_DENOISING_BACKWARD_MOTION);
++    pass_type_enum.insert("denoising_specular_motion", PASS_DENOISING_SPECULAR_MOTION);
+     pass_type_enum.insert("denoising_previous", PASS_DENOISING_PREVIOUS);
+     pass_type_enum.insert("volume_majorant", PASS_VOLUME_MAJORANT);
+     pass_type_enum.insert("volume_majorant_sample_count", PASS_VOLUME_MAJORANT_SAMPLE_COUNT);
+@@ -313,6 +314,7 @@ PassInfo Pass::get_info(const PassType type,
+     case PASS_DENOISING_SPECULAR_ALBEDO:
+     case PASS_DENOISING_NORMAL:
+     case PASS_DENOISING_BACKWARD_MOTION:
++    case PASS_DENOISING_SPECULAR_MOTION:
+       pass_info.num_components = 3;
+       break;
+     case PASS_DENOISING_ROUGHNESS:
+diff --git a/src/scene/scene.cpp b/src/scene/scene.cpp
+index cf58010de5117419fb35076100d12c51dc09de49..ea5bae62e1134f617dfd216f1047faa90506b030 100644
+--- a/src/scene/scene.cpp
++++ b/src/scene/scene.cpp
+@@ -431,11 +431,14 @@ Scene::MotionType Scene::need_motion() const
+   if (integrator->get_motion_blur()) {
+     return MOTION_BLUR;
+   }
++  const DenoiserPassMask denoiser_motion_passes = DENOISER_PASS_MOTION |
++                                                  DENOISER_PASS_BACKWARD_MOTION |
++                                                  DENOISER_PASS_SPECULAR_MOTION;
+   const bool denoiser_motion = integrator->get_use_denoise() &&
+-                               (integrator->get_denoiser_passes() &
+-                                (DENOISER_PASS_MOTION | DENOISER_PASS_BACKWARD_MOTION)) != 0;
++                               (integrator->get_denoiser_passes() & denoiser_motion_passes) != 0;
+   if (denoiser_motion || (Pass::contains(passes, PASS_MOTION) ||
+-                          Pass::contains(passes, PASS_DENOISING_BACKWARD_MOTION)))
++                          Pass::contains(passes, PASS_DENOISING_BACKWARD_MOTION) ||
++                          Pass::contains(passes, PASS_DENOISING_SPECULAR_MOTION)))
+   {
+     return params.background ? MOTION_PASS : MOTION_PASS_INTERACTIVE;
+   }
+diff --git a/src/util/string.cpp b/src/util/string.cpp
+index 9b2dd9f4e0347fdeffb75bc699fab2defc4675a3..7061458e602a0ce942b47727c412f67068898b3a 100644
+--- a/src/util/string.cpp
++++ b/src/util/string.cpp
+@@ -16,6 +16,8 @@
+ #  ifndef vsnprintf
+ #    define vsnprintf _vsnprintf
+ #  endif
++#else
++#  include <locale.h>
+ #endif /* _WIN32 */
+ 
+ CCL_NAMESPACE_BEGIN
+@@ -239,26 +241,52 @@ string string_remove_gpu_from_cpu_name(const string &s)
+ 
+ /* Wide char strings helpers for Windows. */
+ 
+-#ifdef _WIN32
+-
+ wstring string_to_wstring(const string &str)
+ {
++#ifdef _WIN32
+   const int length_wc = MultiByteToWideChar(CP_UTF8, 0, str.c_str(), str.length(), nullptr, 0);
+   wstring str_wc(length_wc, 0);
+   MultiByteToWideChar(CP_UTF8, 0, str.c_str(), str.length(), &str_wc[0], length_wc);
++#else
++  locale_t new_locale = newlocale(LC_CTYPE_MASK, "C", (locale_t)0);
++  locale_t old_locale = uselocale(new_locale);
++  const size_t length_wc = mbstowcs(nullptr, str.c_str(), str.size());
++  wstring str_wc;
++  if (length_wc != (size_t)-1) {
++    str_wc.resize(length_wc, 0);
++    mbstowcs(str_wc.data(), str.c_str(), str.size());
++  }
++  uselocale(old_locale);
++  freelocale(new_locale);
++#endif
+   return str_wc;
+ }
+ 
+ string string_from_wstring(const wstring &str)
+ {
++#ifdef _WIN32
+   int length_mb = WideCharToMultiByte(
+       CP_UTF8, 0, str.c_str(), str.size(), nullptr, 0, nullptr, nullptr);
+   string str_mb(length_mb, 0);
+   WideCharToMultiByte(
+       CP_UTF8, 0, str.c_str(), str.size(), &str_mb[0], length_mb, nullptr, nullptr);
++#else
++  locale_t new_locale = newlocale(LC_CTYPE_MASK, "C", (locale_t)0);
++  locale_t old_locale = uselocale(new_locale);
++  const size_t length_mb = wcstombs(nullptr, str.c_str(), str.size());
++  string str_mb;
++  if (length_mb != (size_t)-1) {
++    str_mb.resize(length_mb, 0);
++    wcstombs(str_mb.data(), str.c_str(), str.size());
++  }
++  uselocale(old_locale);
++  freelocale(new_locale);
++#endif
+   return str_mb;
+ }
+ 
++#ifdef _WIN32
++
+ string string_to_ansi(const string &str)
+ {
+   const int length_wc = MultiByteToWideChar(CP_UTF8, 0, str.c_str(), str.length(), nullptr, 0);
+diff --git a/src/util/string.h b/src/util/string.h
+index f20d0d9119e377d6e1b94b53125506f7aa678b1a..b30383b424a6eaa367294514d7c38dd84a78c9ee 100644
+--- a/src/util/string.h
++++ b/src/util/string.h
+@@ -58,10 +58,10 @@ string string_remove_gpu_from_cpu_name(const string &s);
+  * Please note that strings are expected to be in UTF8 code-page, and
+  * if ANSI is needed then explicit conversion required.
+  */
+-#ifdef _WIN32
+ using std::wstring;
+ wstring string_to_wstring(const string &path);
+ string string_from_wstring(const wstring &path);
++#ifdef _WIN32
+ string string_to_ansi(const string &str);
+ #endif
+ 

@@ -3,6 +3,11 @@ cmake_minimum_required(VERSION 3.25)
 project(cyclesrenderer_native LANGUAGES CXX)
 
 get_filename_component(CYCLESRENDERER_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/.." ABSOLUTE)
+option(
+    CYCLESRENDERER_DLSS_EXPERIMENTAL
+    "Build against the temporary Cycles 5.2 DLSS Ray Reconstruction patch"
+    OFF
+)
 set(CYCLES_SOURCE_DIR "${CYCLESRENDERER_ROOT}/.deps/cycles" CACHE PATH "Cycles source checkout")
 set(CYCLES_BUILD_DIR "${CYCLESRENDERER_ROOT}/.deps/cycles-build" CACHE PATH "Cycles build tree")
 set(CYCLES_INSTALL_DIR "${CYCLESRENDERER_ROOT}/.deps/cycles-install" CACHE PATH "Cycles install tree")
@@ -62,6 +67,11 @@ target_compile_definitions(cyclesrenderer_native PRIVATE
     OPENEXR_DLL
     IMATH_DLL
 )
+if(CYCLESRENDERER_DLSS_EXPERIMENTAL)
+    target_compile_definitions(cyclesrenderer_native PRIVATE
+        CYCLESRENDERER_DLSS_EXPERIMENTAL
+    )
+endif()
 
 target_include_directories(cyclesrenderer_native
     PUBLIC

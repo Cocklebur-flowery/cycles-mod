@@ -165,6 +165,7 @@ enum CyclesBridgeCapabilityFlags : std::uint64_t {
     CYCLES_BRIDGE_CAPABILITY_CUDA_COMPILED = 1ULL << 4U,
     CYCLES_BRIDGE_CAPABILITY_OIDN_COMPILED = 1ULL << 5U,
     CYCLES_BRIDGE_CAPABILITY_OCIO_COMPILED = 1ULL << 6U,
+    CYCLES_BRIDGE_CAPABILITY_DLSS_EXPERIMENTAL_COMPILED = 1ULL << 7U,
 };
 
 enum CyclesBridgeDeviceMask : std::uint32_t {
@@ -176,6 +177,15 @@ enum CyclesBridgeDeviceMask : std::uint32_t {
 enum CyclesBridgeDenoiserMask : std::uint32_t {
     CYCLES_BRIDGE_DENOISER_OPTIX = 1U << 0U,
     CYCLES_BRIDGE_DENOISER_OPENIMAGEDENOISE = 1U << 1U,
+    CYCLES_BRIDGE_DENOISER_DLSS_EXPERIMENTAL = 1U << 2U,
+};
+
+enum CyclesBridgeDlssQualityMode : std::uint32_t {
+    CYCLES_BRIDGE_DLSS_QUALITY_DLAA = 0,
+    CYCLES_BRIDGE_DLSS_QUALITY_QUALITY = 1,
+    CYCLES_BRIDGE_DLSS_QUALITY_BALANCED = 2,
+    CYCLES_BRIDGE_DLSS_QUALITY_PERFORMANCE = 3,
+    CYCLES_BRIDGE_DLSS_QUALITY_ULTRA_PERFORMANCE = 4,
 };
 
 enum CyclesBridgeDenoiserScheduleReason : std::uint32_t {
@@ -184,6 +194,7 @@ enum CyclesBridgeDenoiserScheduleReason : std::uint32_t {
     CYCLES_BRIDGE_DENOISER_SCHEDULE_SETTLING = 2,
     CYCLES_BRIDGE_DENOISER_SCHEDULE_DEBUG_PASS = 3,
     CYCLES_BRIDGE_DENOISER_SCHEDULE_STILL = 4,
+    CYCLES_BRIDGE_DENOISER_SCHEDULE_REALTIME = 5,
 };
 
 enum CyclesBridgePass : std::uint32_t {
@@ -391,6 +402,8 @@ struct CyclesBridgeRenderSettings {
     float pbr_normal_strength;
     float pbr_emission_scale;
     std::uint32_t working_space;
+    std::uint32_t dlss_quality_mode;
+    std::uint32_t dlss_reserved;
 };
 
 struct CyclesBridgePassDescriptor {

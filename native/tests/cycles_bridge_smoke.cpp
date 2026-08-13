@@ -263,6 +263,7 @@ CyclesBridgeRenderSettings default_settings() {
     settings.pbr_normal_strength = 1.0F;
     settings.pbr_emission_scale = 1.0F;
     settings.working_space = CYCLES_BRIDGE_WORKING_SPACE_LINEAR_REC709;
+    settings.dlss_quality_mode = CYCLES_BRIDGE_DLSS_QUALITY_QUALITY;
     settings.interactive_samples = 1;
     settings.still_samples = 1;
     settings.stationary_delay_millis = 150;
@@ -356,6 +357,52 @@ bool wait_for_denoised_still(
         Sleep(10);
     }
     std::cerr << denoiser_name << " denoiser never produced a Still frame: " << info
+              << ";state=" << diagnostics.sampling_state
+              << ";effective=" << diagnostics.effective_denoiser
+              << ";selected=" << diagnostics.selected_denoiser
+              << ";scheduled=" << diagnostics.denoiser_scheduled
+              << ";start=" << diagnostics.effective_denoiser_start_sample
+              << ";reason=" << diagnostics.denoiser_schedule_reason
+              << ";run/skip=" << diagnostics.denoiser_schedule_run_count
+              << '/' << diagnostics.denoiser_schedule_skip_count
+              << ";variant=" << diagnostics.active_frame_variant << '\n';
+    return false;
+}
+
+bool wait_for_realtime_dlss(
+    CyclesBridgeRenderer* renderer,
+    CyclesBridgeCamera& camera,
+    CyclesBridgeFrame& frame,
+    std::vector<std::uint8_t>& pixels,
+    CyclesBridgeDiagnostics& diagnostics,
+    std::string& info) {
+    for (int attempt = 0; attempt < 400; ++attempt) {
+        camera.frame_id++;
+        if (!require_ok(
+                cycles_bridge_render_frame(
+                    renderer, &camera, &frame, pixels.data(), pixels.size()),
+                "DLSS realtime frame")
+            || !require_ok(
+                cycles_bridge_query_diagnostics(renderer, &diagnostics),
+                "DLSS realtime diagnostics")) {
+            return false;
+        }
+        info = renderer_info(renderer);
+        if (diagnostics.effective_denoiser == 3U
+            && diagnostics.selected_denoiser == 3U
+            && diagnostics.denoiser_scheduled != 0U
+            && diagnostics.effective_denoiser_start_sample == 0U
+            && diagnostics.denoiser_schedule_reason
+                == CYCLES_BRIDGE_DENOISER_SCHEDULE_REALTIME
+            && diagnostics.denoiser_schedule_run_count > 0U
+            && diagnostics.active_frame_variant
+                == CYCLES_BRIDGE_FRAME_VARIANT_DENOISED
+            && (frame.flags & CYCLES_BRIDGE_FRAME_UPDATED) != 0U) {
+            return true;
+        }
+        Sleep(10);
+    }
+    std::cerr << "DLSS never produced a realtime denoised frame: " << info
               << ";state=" << diagnostics.sampling_state
               << ";effective=" << diagnostics.effective_denoiser
               << ";selected=" << diagnostics.selected_denoiser
@@ -621,6 +668,29 @@ int main(int argc, char** argv) {
         return 1;
     }
     settings.sampling_pattern = CYCLES_BRIDGE_SAMPLING_PATTERN_BLUE_NOISE_FIRST;
+    for (std::uint32_t dlss_mode = CYCLES_BRIDGE_DLSS_QUALITY_DLAA;
+         dlss_mode <= CYCLES_BRIDGE_DLSS_QUALITY_ULTRA_PERFORMANCE;
+         ++dlss_mode) {
+        settings.dlss_quality_mode = dlss_mode;
+        settings.revision++;
+        if (!require_ok(
+                cycles_bridge_apply_settings(renderer, &settings),
+                "DLSS quality mode settings")) {
+            cycles_bridge_destroy_renderer(renderer);
+            return 1;
+        }
+    }
+    CyclesBridgeRenderSettings invalid_dlss_mode = settings;
+    invalid_dlss_mode.dlss_quality_mode =
+        CYCLES_BRIDGE_DLSS_QUALITY_ULTRA_PERFORMANCE + 1U;
+    invalid_dlss_mode.revision++;
+    if (cycles_bridge_apply_settings(renderer, &invalid_dlss_mode)
+        != CYCLES_BRIDGE_STATUS_INVALID_ARGUMENT) {
+        std::cerr << "invalid DLSS quality mode was accepted\n";
+        cycles_bridge_destroy_renderer(renderer);
+        return 1;
+    }
+    settings.dlss_quality_mode = CYCLES_BRIDGE_DLSS_QUALITY_QUALITY;
     settings.camera_clip_near = 0.125F;
     settings.camera_clip_far = 50.0F;
     settings.revision++;
@@ -1075,6 +1145,33 @@ int main(int argc, char** argv) {
                   << ";reset=" << diagnostics.reset_level << '\n';
         cycles_bridge_destroy_renderer(renderer);
         return 1;
+    }
+
+    if ((capabilities.denoiser_mask & CYCLES_BRIDGE_DENOISER_DLSS_EXPERIMENTAL) != 0U) {
+        std::cerr << "[smoke] Enabling experimental DLSS Quality mode\n";
+        settings.denoiser_mode = 4U;
+        settings.dlss_quality_mode = CYCLES_BRIDGE_DLSS_QUALITY_QUALITY;
+        settings.revision++;
+        if (!require_ok(
+                cycles_bridge_apply_settings(renderer, &settings),
+                "DLSS denoiser settings")
+            || !wait_for_settings(renderer, settings.revision)
+            || !wait_for_realtime_dlss(
+                renderer, camera, frame, pixels, diagnostics, info)) {
+            cycles_bridge_destroy_renderer(renderer);
+            return 1;
+        }
+        settings.denoiser_mode = 0U;
+        settings.revision++;
+        if (!require_ok(
+                cycles_bridge_apply_settings(renderer, &settings),
+                "DLSS denoiser restore settings")
+            || !wait_for_settings(renderer, settings.revision)
+            || !wait_for_updated_frame(
+                renderer, camera, frame, pixels, "DLSS denoiser restore", info, true)) {
+            cycles_bridge_destroy_renderer(renderer);
+            return 1;
+        }
     }
 
     if ((capabilities.denoiser_mask & CYCLES_BRIDGE_DENOISER_OPTIX) != 0U) {

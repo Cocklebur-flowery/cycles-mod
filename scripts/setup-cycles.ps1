@@ -4,6 +4,7 @@ param(
     [string]$OptixRoot,
     [ValidateRange(1, 32)]
     [int]$BuildJobs = 6,
+    [switch]$ExperimentalDlss,
     [switch]$FetchOnly
 )
 
@@ -13,15 +14,24 @@ $cyclesRevision = 'v5.2.0'
 $cyclesCommit = '3b97e190c5ff1a2ed2160d879ad5bf95bea7b8ba'
 $cyclesLibrariesCommit = '60d6e96b917568278d400a4024c98da0fb777338'
 $cyclesRepository = 'https://projects.blender.org/blender/cycles.git'
+$dlssSdkCommit = 'a291cc7d2cc642a51566f3dfd5376f635cd1b284'
+$dlssSdkRawRoot = "https://raw.githubusercontent.com/NVIDIA/DLSS/$dlssSdkCommit/include"
+$dlssRuntimeName = 'nvngx_dlssd.dll'
+$dlssRuntimeUrl = "https://raw.githubusercontent.com/NVIDIA/DLSS/$dlssSdkCommit/lib/Windows_x86_64/rel/$dlssRuntimeName"
+$dlssRuntimeHash = 'f4e97624f70fbb769acb11ebd751b512ecc9463d4bd6aef04896d3956e6084a0'
 $blenderRevision = 'v5.2.0'
 $blenderCommit = 'fbe6228777e7d9afefcd61a413844e790ae75db7'
 $blenderRepository = 'https://projects.blender.org/blender/blender.git'
 $projectRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 $dependencyRoot = Join-Path $projectRoot '.deps'
-$cyclesSource = Join-Path $dependencyRoot 'cycles'
+$cyclesVariant = if ($ExperimentalDlss) { 'cycles-dlss' } else { 'cycles' }
+$cyclesSource = Join-Path $dependencyRoot $cyclesVariant
 $cyclesLibraries = Join-Path $cyclesSource 'lib\windows_x64'
-$cyclesBuild = Join-Path $dependencyRoot 'cycles-build'
-$cyclesInstall = Join-Path $dependencyRoot 'cycles-install'
+$cyclesBuild = Join-Path $dependencyRoot "${cyclesVariant}-build"
+$cyclesInstall = Join-Path $dependencyRoot "${cyclesVariant}-install"
+$dlssSdkRoot = Join-Path $dependencyRoot 'dlss-sdk'
+$dlssInclude = Join-Path $dlssSdkRoot 'include'
+$dlssRuntime = Join-Path $dlssSdkRoot "bin\$dlssRuntimeName"
 $blenderSource = Join-Path $dependencyRoot 'blender'
 $colorManagementSource = Join-Path $blenderSource 'release\datafiles\colormanagement'
 $colorManagementInstall = Join-Path $cyclesInstall 'color\ocio'
@@ -31,6 +41,21 @@ $cyclesPatches = @(
     (Join-Path $projectRoot 'patches\cycles-v5.2-vulkan-interop-range.patch'),
     (Join-Path $projectRoot 'patches\cycles-v5.2-vulkan-interop-timeline.patch')
 )
+if ($ExperimentalDlss) {
+    $cyclesPatches += Join-Path $projectRoot 'patches\cycles-v5.2-dlss-experimental.patch'
+}
+$cyclesPatchStamp = Join-Path $cyclesSource '.cyclesrenderer-patches'
+$expectedCyclesPatchState = (@("cycles=$cyclesCommit") + @(
+    $cyclesPatches | ForEach-Object {
+        "$([System.IO.Path]::GetFileName($_))=$((Get-FileHash -Algorithm SHA256 -LiteralPath $_).Hash.ToLowerInvariant())"
+    }
+)) -join "`n"
+$dlssHeaders = [ordered]@{
+    'nvsdk_ngx.h' = 'f6014a256f9d75ccec1278ac6e23d596b398a76cc3960048ca1a274b378b1989'
+    'nvsdk_ngx_defs.h' = 'ea23f33497cd274860d1c25a97644fce807dcb0037c594547203343103fad03e'
+    'nvsdk_ngx_params.h' = '943bc8cc5cdae03b6303016fbad3183636f2335ae27a2d18776798c3b4efabbc'
+    'nvsdk_ngx_defs_dlssd.h' = 'd2fde340db2189c89bce093bc1edd7b3579df48decac329218a98a9c5fd46018'
+}
 $requiredLibraryDirectories = @(
     'OpenImageIO',
     'aom',
@@ -70,8 +95,12 @@ function Apply-CyclesPatch {
         throw "Cycles patch is missing: $PatchPath"
     }
 
+    $previousErrorActionPreference = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
     & $git -C $cyclesSource apply --reverse --check -- $PatchPath 2>$null
-    if ($LASTEXITCODE -eq 0) {
+    $reverseCheckExitCode = $LASTEXITCODE
+    $ErrorActionPreference = $previousErrorActionPreference
+    if ($reverseCheckExitCode -eq 0) {
         Write-Host "[cycles] Patch already applied: $([System.IO.Path]::GetFileName($PatchPath))"
         return
     }
@@ -82,6 +111,44 @@ function Apply-CyclesPatch {
     }
     Invoke-Checked $git -C $cyclesSource apply -- $PatchPath
     Write-Host "[cycles] Applied patch: $([System.IO.Path]::GetFileName($PatchPath))"
+}
+
+function Initialize-DlssSdk {
+    if (-not (Test-Path -LiteralPath $dlssInclude -PathType Container)) {
+        New-Item -ItemType Directory -Path $dlssInclude | Out-Null
+    }
+
+    foreach ($header in $dlssHeaders.GetEnumerator()) {
+        $destination = Join-Path $dlssInclude $header.Key
+        $valid = (Test-Path -LiteralPath $destination -PathType Leaf) -and
+            ((Get-FileHash -Algorithm SHA256 -LiteralPath $destination).Hash.ToLowerInvariant() -eq
+                $header.Value)
+        if (-not $valid) {
+            Write-Host "[cycles] Downloading NVIDIA DLSS SDK header: $($header.Key)"
+            Invoke-WebRequest -UseBasicParsing -Uri "$dlssSdkRawRoot/$($header.Key)" -OutFile $destination
+        }
+        $actualHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $destination).Hash.ToLowerInvariant()
+        if ($actualHash -ne $header.Value) {
+            throw "Unexpected SHA-256 for DLSS SDK header $($header.Key): $actualHash"
+        }
+    }
+
+    $dlssRuntimeDirectory = Split-Path -Parent $dlssRuntime
+    if (-not (Test-Path -LiteralPath $dlssRuntimeDirectory -PathType Container)) {
+        New-Item -ItemType Directory -Path $dlssRuntimeDirectory | Out-Null
+    }
+    $runtimeValid = (Test-Path -LiteralPath $dlssRuntime -PathType Leaf) -and
+        ((Get-FileHash -Algorithm SHA256 -LiteralPath $dlssRuntime).Hash.ToLowerInvariant() -eq
+            $dlssRuntimeHash)
+    if (-not $runtimeValid) {
+        Write-Host "[cycles] Downloading NVIDIA DLSS Ray Reconstruction runtime: $dlssRuntimeName"
+        Invoke-WebRequest -UseBasicParsing -Uri $dlssRuntimeUrl -OutFile $dlssRuntime
+    }
+    $actualRuntimeHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $dlssRuntime).Hash.ToLowerInvariant()
+    if ($actualRuntimeHash -ne $dlssRuntimeHash) {
+        throw "Unexpected SHA-256 for DLSS runtime ${dlssRuntimeName}: $actualRuntimeHash"
+    }
+    Write-Host "[cycles] DLSS SDK: headers and signed RR runtime from NVIDIA/DLSS@$dlssSdkCommit"
 }
 
 function Get-MissingLibraryObjects {
@@ -175,6 +242,9 @@ Write-Host "[cycles] Project : $projectRoot"
 Write-Host "[cycles] CUDA    : $resolvedCudaRoot"
 Write-Host "[cycles] OptiX   : $resolvedOptixRoot"
 Write-Host "[cycles] Source  : $cyclesSource ($cyclesRevision)"
+if ($ExperimentalDlss) {
+    Write-Host '[cycles] DLSS RR : EXPERIMENTAL (explicit opt-in, DLAA 1x only)'
+}
 
 if (-not (Test-Path -LiteralPath $dependencyRoot -PathType Container)) {
     New-Item -ItemType Directory -Path $dependencyRoot | Out-Null
@@ -239,8 +309,33 @@ if ($missingObjects.Count -gt 0) {
 }
 Write-Host "[cycles] Libraries: $cyclesLibraries ($cyclesLibrariesCommit)"
 
-foreach ($cyclesPatch in $cyclesPatches) {
-    Apply-CyclesPatch -PatchPath $cyclesPatch
+$patchesAlreadyApplied = $false
+if (Test-Path -LiteralPath $cyclesPatchStamp -PathType Leaf) {
+    $actualCyclesPatchState = (Get-Content -LiteralPath $cyclesPatchStamp -Raw).TrimEnd("`r", "`n")
+    if ($actualCyclesPatchState -ne $expectedCyclesPatchState) {
+        throw "Cycles patch state does not match the requested patch set. Remove only the isolated source directory and rerun: $cyclesSource"
+    }
+    $patchesAlreadyApplied = $true
+    Write-Host '[cycles] Patch set already applied and fingerprint verified.'
+}
+if (-not $patchesAlreadyApplied) {
+    $trackedSourceChanges = @(& $git -C $cyclesSource diff --name-only)
+    if ($LASTEXITCODE -ne 0) {
+        throw "Unable to inspect Cycles source changes at $cyclesSource"
+    }
+    if ($trackedSourceChanges.Count -gt 0) {
+        throw "Cycles source has unrecognized tracked changes and cannot be patched safely: $cyclesSource"
+    }
+    foreach ($cyclesPatch in $cyclesPatches) {
+        Apply-CyclesPatch -PatchPath $cyclesPatch
+    }
+    [System.IO.File]::WriteAllText(
+        $cyclesPatchStamp,
+        $expectedCyclesPatchState + "`n",
+        [System.Text.UTF8Encoding]::new($false))
+}
+if ($ExperimentalDlss) {
+    Initialize-DlssSdk
 }
 
 if (-not (Test-Path -LiteralPath $blenderSource)) {
@@ -271,6 +366,7 @@ if ($FetchOnly) {
 
 $cmakeCudaRoot = $resolvedCudaRoot.Replace('\', '/')
 $cmakeOptixRoot = $resolvedOptixRoot.Replace('\', '/')
+$cmakeDlssInclude = $dlssInclude.Replace('\', '/')
 $env:CUDA_PATH = $cmakeCudaRoot
 $env:Path = (Join-Path $resolvedCudaRoot 'bin') + [System.IO.Path]::PathSeparator + $env:Path
 
@@ -307,8 +403,18 @@ $configureArguments = @(
     '-DWITH_CYCLES_USD=OFF',
     '-DWITH_LIBS_PRECOMPILED=ON'
 )
+if ($ExperimentalDlss) {
+    $configureArguments += @(
+        '-DWITH_CYCLES_DLSS_EXPERIMENTAL=ON',
+        "-DDLSS_INCLUDE_DIR=$cmakeDlssInclude"
+    )
+}
 Invoke-Checked $cmake @configureArguments
 Invoke-Checked $cmake --build $cyclesBuild --config Release --target install --parallel $BuildJobs
+
+if ($ExperimentalDlss) {
+    Copy-Item -LiteralPath $dlssRuntime -Destination (Join-Path $cyclesInstall $dlssRuntimeName) -Force
+}
 
 if (-not (Test-Path -LiteralPath $colorManagementInstall -PathType Container)) {
     New-Item -ItemType Directory -Path $colorManagementInstall | Out-Null

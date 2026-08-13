@@ -47,6 +47,7 @@ public final class NativeBridge {
     public static final long CAPABILITY_CUDA_COMPILED = 1L << 4;
     public static final long CAPABILITY_OIDN_COMPILED = 1L << 5;
     public static final long CAPABILITY_OCIO_COMPILED = 1L << 6;
+    public static final long CAPABILITY_DLSS_EXPERIMENTAL_COMPILED = 1L << 7;
 
     private static final MemoryLayout CAMERA_LAYOUT = MemoryLayout.structLayout(
             JAVA_INT.withName("struct_size"),
@@ -184,7 +185,9 @@ public final class NativeBridge {
             JAVA_FLOAT.withName("atmosphere_ozone_density"),
             JAVA_FLOAT.withName("pbr_normal_strength"),
             JAVA_FLOAT.withName("pbr_emission_scale"),
-            JAVA_INT.withName("working_space"));
+            JAVA_INT.withName("working_space"),
+            JAVA_INT.withName("dlss_quality_mode"),
+            JAVA_INT.withName("dlss_reserved"));
     private static final MemoryLayout PASS_DESCRIPTOR_LAYOUT = MemoryLayout.structLayout(
             JAVA_INT.withName("struct_size"),
             JAVA_INT.withName("struct_version"),
@@ -409,7 +412,7 @@ public final class NativeBridge {
                 || SECTION_LAYOUT.byteSize() != 48L
                 || FRAME_LAYOUT.byteSize() != 40L
                 || FRAME_VIEW_LAYOUT.byteSize() != 72L
-                || SETTINGS_LAYOUT.byteSize() != 280L
+                || SETTINGS_LAYOUT.byteSize() != 288L
                 || PASS_DESCRIPTOR_LAYOUT.byteSize() != 64L
                 || CAPABILITIES_LAYOUT.byteSize() != 64L
                 || COLOR_LUT_DESCRIPTOR_LAYOUT.byteSize() != 72L
@@ -1274,6 +1277,7 @@ public final class NativeBridge {
             settingsSegment.set(JAVA_FLOAT, 268L, settings.pbrNormalStrength());
             settingsSegment.set(JAVA_FLOAT, 272L, settings.pbrEmissionScale());
             settingsSegment.set(JAVA_INT, 276L, settings.workingSpace().nativeId());
+            settingsSegment.set(JAVA_INT, 280L, settings.dlssQualityMode().nativeId());
             checkRendererStatus(
                     (int) applySettings.invokeExact(renderer, settingsSegment),
                     "settings update");
@@ -1995,9 +1999,14 @@ public final class NativeBridge {
             return (denoiserMask & 2) != 0;
         }
 
+        public boolean dlssExperimentalDenoiserAvailable() {
+            return (denoiserMask & 4) != 0;
+        }
+
         public String denoiserSummary() {
             return "OptiX=" + availability(optixDenoiserAvailable())
-                    + ", OIDN=" + availability(oidnDenoiserAvailable());
+                    + ", OIDN=" + availability(oidnDenoiserAvailable())
+                    + ", DLSS-RR(exp)=" + availability(dlssExperimentalDenoiserAvailable());
         }
 
         private static String availability(boolean value) {
@@ -2224,6 +2233,7 @@ public final class NativeBridge {
             return switch (effectiveDenoiser) {
                 case 1 -> "OptiX";
                 case 2 -> "OpenImageDenoise";
+                case 3 -> "DLSS Ray Reconstruction";
                 default -> "Off";
             };
         }
@@ -2232,6 +2242,7 @@ public final class NativeBridge {
             return switch (selectedDenoiser) {
                 case 1 -> "OptiX";
                 case 2 -> "OpenImageDenoise";
+                case 3 -> "DLSS Ray Reconstruction";
                 default -> "Off";
             };
         }
@@ -2242,6 +2253,7 @@ public final class NativeBridge {
                 case 2 -> "settling";
                 case 3 -> "debug-pass";
                 case 4 -> "still";
+                case 5 -> "realtime";
                 default -> "disabled";
             };
         }

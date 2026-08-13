@@ -70,6 +70,7 @@ public record CyclesRenderSettings(
         DenoiserInput denoiserInput,
         DenoiserPrefilter denoiserPrefilter,
         DenoiserQuality denoiserQuality,
+        DlssQualityMode dlssQualityMode,
         boolean denoiserUseGpu,
         float exposureEv,
         float gamma,
@@ -208,7 +209,7 @@ public record CyclesRenderSettings(
     }
 
     public enum DenoiserMode implements NativeEnum, NamedEnum {
-        OFF(0), AUTO(1), OPTIX(2), OPEN_IMAGE_DENOISE(3);
+        OFF(0), AUTO(1), OPTIX(2), OPEN_IMAGE_DENOISE(3), DLSS_EXPERIMENTAL(4);
 
         private final int nativeId;
 
@@ -224,6 +225,13 @@ public record CyclesRenderSettings(
         @Override
         public String translationGroup() {
             return "denoiser";
+        }
+
+        @Override
+        public Component getTranslatedName() {
+            return this == DLSS_EXPERIMENTAL
+                    ? Component.literal("DLSS Ray Reconstruction (experimental)")
+                    : NamedEnum.super.getTranslatedName();
         }
     }
 
@@ -304,6 +312,37 @@ public record CyclesRenderSettings(
         @Override
         public String translationGroup() {
             return "denoiser_quality";
+        }
+    }
+
+    public enum DlssQualityMode implements NativeEnum, NamedEnum {
+        DLAA(0), QUALITY(1), BALANCED(2), PERFORMANCE(3), ULTRA_PERFORMANCE(4);
+
+        private final int nativeId;
+
+        DlssQualityMode(int nativeId) {
+            this.nativeId = nativeId;
+        }
+
+        @Override
+        public int nativeId() {
+            return nativeId;
+        }
+
+        @Override
+        public String translationGroup() {
+            return "dlss_quality_mode";
+        }
+
+        @Override
+        public Component getTranslatedName() {
+            return switch (this) {
+                case DLAA -> Component.literal("DLAA (100%)");
+                case QUALITY -> Component.literal("Quality (65%)");
+                case BALANCED -> Component.literal("Balanced (57%)");
+                case PERFORMANCE -> Component.literal("Performance (50%)");
+                case ULTRA_PERFORMANCE -> Component.literal("Ultra Performance (33%)");
+            };
         }
     }
 

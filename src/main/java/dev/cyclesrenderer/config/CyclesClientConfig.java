@@ -74,6 +74,7 @@ public final class CyclesClientConfig {
     private static final ModConfigSpec.EnumValue<CyclesRenderSettings.DenoiserInput> DENOISER_INPUT;
     private static final ModConfigSpec.EnumValue<CyclesRenderSettings.DenoiserPrefilter> DENOISER_PREFILTER;
     private static final ModConfigSpec.EnumValue<CyclesRenderSettings.DenoiserQuality> DENOISER_QUALITY;
+    private static final ModConfigSpec.EnumValue<CyclesRenderSettings.DlssQualityMode> DLSS_QUALITY_MODE;
     private static final ModConfigSpec.BooleanValue DENOISER_USE_GPU;
     private static final ModConfigSpec.DoubleValue EXPOSURE_EV;
     private static final ModConfigSpec.DoubleValue GAMMA;
@@ -266,6 +267,9 @@ public final class CyclesClientConfig {
                 .defineEnum("prefilter", CyclesRenderSettings.DenoiserPrefilter.FAST);
         DENOISER_QUALITY = builder.translation("config.cyclesrenderer.denoise.quality")
                 .defineEnum("quality", CyclesRenderSettings.DenoiserQuality.BALANCED);
+        DLSS_QUALITY_MODE = builder
+                .comment("DLSS Ray Reconstruction input resolution mode; ignored by other denoisers.")
+                .defineEnum("dlssMode", CyclesRenderSettings.DlssQualityMode.QUALITY);
         DENOISER_USE_GPU = builder.translation("config.cyclesrenderer.denoise.useGpu")
                 .define("useGpu", true);
         builder.pop();
@@ -344,7 +348,8 @@ public final class CyclesClientConfig {
                 PBR_FALLBACK_ROUGHNESS.get().floatValue(),
                 PBR_FALLBACK_F0.get().floatValue(),
                 DENOISER_MODE.get(), DENOISER_START_SAMPLE.get(), DENOISER_INPUT.get(),
-                DENOISER_PREFILTER.get(), DENOISER_QUALITY.get(), DENOISER_USE_GPU.get(),
+                DENOISER_PREFILTER.get(), DENOISER_QUALITY.get(), DLSS_QUALITY_MODE.get(),
+                DENOISER_USE_GPU.get(),
                 EXPOSURE_EV.get().floatValue(), GAMMA.get().floatValue(), DISPLAY_DEVICE.get(),
                 VIEW_TRANSFORM.get(),
                 COLOR_LOOK.get(),

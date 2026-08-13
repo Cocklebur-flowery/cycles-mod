@@ -36,13 +36,18 @@ base {
 }
 
 def nativeSourceDirectory = layout.projectDirectory.dir('native')
-def nativeBuildDirectory = layout.buildDirectory.dir('native').get().asFile
+def experimentalDlss = providers.gradleProperty('experimentalDlss')
+        .map { it.toBoolean() }
+        .getOrElse(false)
+def nativeVariant = experimentalDlss ? 'native-dlss' : 'native'
+def cyclesVariant = experimentalDlss ? 'cycles-dlss' : 'cycles'
+def nativeBuildDirectory = layout.buildDirectory.dir(nativeVariant).get().asFile
 def nativeLibraryFile = new File(nativeBuildDirectory, 'bin/cyclesrenderer_native.dll')
 def nativeSmokeFile = new File(nativeBuildDirectory, 'bin/cyclesrenderer_smoke.exe')
 def nativeRuntimeDirectory = nativeLibraryFile.parentFile
-def cyclesSourceDirectory = layout.projectDirectory.dir('.deps/cycles').asFile
-def cyclesBuildDirectory = layout.projectDirectory.dir('.deps/cycles-build').asFile
-def cyclesInstallDirectory = layout.projectDirectory.dir('.deps/cycles-install').asFile
+def cyclesSourceDirectory = layout.projectDirectory.dir(".deps/${cyclesVariant}").asFile
+def cyclesBuildDirectory = layout.projectDirectory.dir(".deps/${cyclesVariant}-build").asFile
+def cyclesInstallDirectory = layout.projectDirectory.dir(".deps/${cyclesVariant}-install").asFile
 def clientFmlConfigFile = layout.projectDirectory.file('run/config/fml.toml').asFile
 
 // Mojang ships Java 25 to end users in 26.2, so mods should target Java 25.
@@ -158,7 +163,8 @@ tasks.register('configureNative', Exec) {
             '-A', 'x64',
             "-DCYCLES_SOURCE_DIR=${cyclesSourceDirectory.absolutePath}",
             "-DCYCLES_BUILD_DIR=${cyclesBuildDirectory.absolutePath}",
-            "-DCYCLES_INSTALL_DIR=${cyclesInstallDirectory.absolutePath}"
+            "-DCYCLES_INSTALL_DIR=${cyclesInstallDirectory.absolutePath}",
+            "-DCYCLESRENDERER_DLSS_EXPERIMENTAL=${experimentalDlss ? 'ON' : 'OFF'}"
 }
 
 tasks.register('buildNative', Exec) {
@@ -166,6 +172,7 @@ tasks.register('buildNative', Exec) {
     description = 'Builds the Windows x64 native renderer bridge.'
     dependsOn 'configureNative'
     inputs.dir(nativeSourceDirectory)
+    inputs.dir(new File(cyclesBuildDirectory, 'lib/Release'))
     outputs.files(nativeLibraryFile, nativeSmokeFile)
     commandLine 'cmake',
             '--build', nativeBuildDirectory.absolutePath,
