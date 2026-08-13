@@ -204,9 +204,12 @@ public final class LabPbrAtlasBuilder {
                 int emission = ARGB.alpha(argb);
                 int output = (targetY * atlasWidth + targetX) * 4;
                 float perceptualSmoothness = smoothness / 255.0F;
-                float perceptualRoughness = 1.0F - perceptualSmoothness;
-                float linearRoughness = perceptualRoughness * perceptualRoughness;
-                target[output] = (byte) toUnorm8(linearRoughness);
+                // LabPBR defines GGX alpha as (1 - smoothness)^2, while the Cycles
+                // Principled Roughness socket expects the unsquared perceptual value
+                // and performs that square internally. Supplying alpha here would
+                // square it twice and make ordinary blocks unnaturally mirror-like.
+                float cyclesPerceptualRoughness = 1.0F - perceptualSmoothness;
+                target[output] = (byte) toUnorm8(cyclesPerceptualRoughness);
                 target[output + 1] = (byte) (encodedF0OrMetal >= 230 ? 255 : 0);
                 target[output + 2] = (byte) (encodedF0OrMetal >= 230
                         ? toUnorm8(fallbackF0)
