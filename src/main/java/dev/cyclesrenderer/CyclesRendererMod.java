@@ -73,6 +73,7 @@ public final class CyclesRendererMod {
     private static long lastStatsLogNanos;
     private static long appliedSettingsRevision = -1L;
     private static long rejectedSettingsRevision = -1L;
+    private static long lastWorkingSpaceRebuildRevision = -1L;
     private static CyclesRenderSettings appliedSettings;
     private static long bridgeCallCount;
     private static long lastBridgeCallMicros;
@@ -467,6 +468,7 @@ public final class CyclesRendererMod {
         appliedSettingsRevision = settings.revision();
         rejectedSettingsRevision = -1L;
         if (previous != null && previous.workingSpace() != settings.workingSpace()) {
+            lastWorkingSpaceRebuildRevision = settings.revision();
             LOGGER.info(
                     "Cycles working space changed from {} to {}; native session rebuild queued",
                     previous.workingSpace(),
@@ -566,6 +568,7 @@ public final class CyclesRendererMod {
                 CyclesClientConfig.snapshot(),
                 activeRenderSettings(),
                 rejectedSettingsRevision,
+                lastWorkingSpaceRebuildRevision,
                 new CyclesDebugOverlay.RuntimeStats(
                         bridgeCallCount,
                         lastBridgeCallMicros,

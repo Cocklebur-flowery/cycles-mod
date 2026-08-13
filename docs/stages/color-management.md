@@ -92,6 +92,6 @@ Minecraft 26.2 的图形封装目前不开放 3D 纹理，因此 P11 的 GPU LUT
 
 - 原生设置校验必须接受当前已定义的全部 View Transform ID。Filmic、Filmic Log、False Color、ACES 1.3、ACES 2 和 HDR View 不得因为 ID 高于早期 ACES 2 枚举而被误判为非法设置。
 - 已有 Cycles Session 运行时，如果新配置仍被原生端拒绝，客户端保留上一份完整、已接受的设置继续渲染；场景资源解释、Working Space 和显示 LUT 必须共同使用这份设置，不能关闭整个后端或形成新旧配置混用。
-- F10 分别显示 requested、accepted 和 rejected 配置 revision，并显示 requested/accepted Working Space 与最近一次原生 reset。二者不一致表示请求没有生效；切换到 ACEScg 后显示 `accepted=ACESCG` 且 `last native reset=session`，表示 Session 重建已排队或完成。
+- F10 分别显示 requested、accepted 和 rejected 配置 revision，并显示 requested/accepted Working Space、最近一次 Working Space rebuild revision 与当前原生 reset。二者不一致表示请求没有生效；切换到 ACEScg 后显示 `accepted=ACESCG` 且 rebuild revision 更新，表示 Session 重建已排队或完成。
 - Working Space 是 Cycles 的内部 scene-linear 空间。`ACEScg` 与 `Linear Rec.2020` 可在 sRGB SDR 显示器上使用，切换时会重建 Cycles Session 和其场景色彩数据，但不要求重新捕获 Minecraft 区块。
 - 没有 HDR 显示设备时，显示设备保持 `sRGB`。Filmic、False Color、ACES 1.3、ACES 2、AgX 等 SDR View 仍应正常工作；Rec.2100-PQ/HLG 和 HDR View 只代表 OCIO 处理组合，不会让当前 SDR 交换链变成真实 HDR 输出。

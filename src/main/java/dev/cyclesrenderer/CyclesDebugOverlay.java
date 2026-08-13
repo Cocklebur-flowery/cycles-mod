@@ -40,6 +40,7 @@ final class CyclesDebugOverlay {
             CyclesRenderSettings requestedSettings,
             CyclesRenderSettings acceptedSettings,
             long rejectedSettingsRevision,
+            long lastWorkingSpaceRebuildRevision,
             RuntimeStats runtime) {
         Writer out = new Writer(graphics, minecraft, TOP);
         if (!NativeBridge.isReady()) {
@@ -286,7 +287,10 @@ final class CyclesDebugOverlay {
                     "working space requested/accepted="
                             + requestedSettings.workingSpace().name() + "/"
                             + acceptedSettings.workingSpace().name()
-                            + "  last native reset=" + diagnostics.resetName(),
+                            + "  rebuild revision="
+                            + (lastWorkingSpaceRebuildRevision >= 0L
+                            ? lastWorkingSpaceRebuildRevision : "-")
+                            + "  native reset=" + diagnostics.resetName(),
                     requestedSettings.workingSpace() == acceptedSettings.workingSpace()
                             ? COLOR_STATE : COLOR_WARNING);
             out.line(
