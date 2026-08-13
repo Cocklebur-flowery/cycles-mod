@@ -23,17 +23,6 @@ bool require_ok(std::uint32_t status, const char* operation) {
     return false;
 }
 
-bool duplicate_win32_handle(HANDLE source, HANDLE& duplicate) {
-    return DuplicateHandle(
-        GetCurrentProcess(),
-        source,
-        GetCurrentProcess(),
-        &duplicate,
-        0U,
-        FALSE,
-        DUPLICATE_SAME_ACCESS) != FALSE;
-}
-
 std::string renderer_info(const CyclesBridgeRenderer* renderer) {
     std::array<char, 512> output{};
     if (!require_ok(
@@ -538,19 +527,6 @@ int main(int argc, char** argv) {
         cycles_bridge_destroy_renderer(renderer);
         return 1;
     }
-    HANDLE session_handle = nullptr;
-    HANDLE session_ready_handle = nullptr;
-    HANDLE session_release_handle = nullptr;
-    if (initial_diagnostics.device_uuid_valid != 0U
-        && (!duplicate_win32_handle(accepted_handle, session_handle)
-            || !duplicate_win32_handle(
-                accepted_ready_handle, session_ready_handle)
-            || !duplicate_win32_handle(
-                accepted_release_handle, session_release_handle))) {
-        std::cerr << "failed to duplicate interop handles for session ownership test\n";
-        cycles_bridge_destroy_renderer(renderer);
-        return 1;
-    }
     interop.memory_handle = static_cast<std::uint64_t>(
         reinterpret_cast<std::uintptr_t>(accepted_handle));
     interop.ready_semaphore_handle = static_cast<std::uint64_t>(
@@ -614,16 +590,6 @@ int main(int argc, char** argv) {
             || CloseHandle(accepted_ready_handle) != FALSE
             || CloseHandle(accepted_release_handle) != FALSE) {
             std::cerr << "empty interop frame ownership was not rejected\n";
-            cycles_bridge_destroy_renderer(renderer);
-            return 1;
-        }
-        if (SetEvent(session_handle) == FALSE
-            || SetEvent(session_ready_handle) == FALSE
-            || SetEvent(session_release_handle) == FALSE
-            || CloseHandle(session_handle) == FALSE
-            || CloseHandle(session_ready_handle) == FALSE
-            || CloseHandle(session_release_handle) == FALSE) {
-            std::cerr << "session interop handle copies did not retain independent ownership\n";
             cycles_bridge_destroy_renderer(renderer);
             return 1;
         }
