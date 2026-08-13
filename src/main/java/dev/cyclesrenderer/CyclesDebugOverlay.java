@@ -4,6 +4,7 @@ import dev.cyclesrenderer.config.CyclesClientConfig;
 import dev.cyclesrenderer.config.CyclesRenderSettings;
 import dev.cyclesrenderer.nativebridge.NativeBridge;
 import dev.cyclesrenderer.render.CyclesFramePresenter;
+import dev.cyclesrenderer.render.HdrOutputStage;
 import dev.cyclesrenderer.render.VulkanCapabilityProbe;
 import dev.cyclesrenderer.render.VulkanExternalBufferPrototype;
 import dev.cyclesrenderer.scene.SectionGeometryCollector;
@@ -60,6 +61,9 @@ final class CyclesDebugOverlay {
                     NativeBridge.passDescriptor(diagnostics.activePassId());
             VulkanCapabilityProbe.Snapshot vulkan =
                     VulkanCapabilityProbe.snapshot(minecraft);
+            VulkanCapabilityProbe.SwapchainBootstrap swapchain =
+                    VulkanCapabilityProbe.swapchainBootstrap();
+            HdrOutputStage.Telemetry hdrOutput = HdrOutputStage.telemetry();
 
             long completedFrames = interop.active()
                     ? copy.copyCount()
@@ -153,6 +157,37 @@ final class CyclesDebugOverlay {
                             + "  count/gaps=" + presentation.uploadCount() + "/"
                             + presentation.generationGaps(),
                     COLOR_FRAME);
+
+            out.section("[ OUTPUT / SWAPCHAIN ]", COLOR_FRAME);
+            out.line(
+                    "colorspace extension "
+                            + VulkanCapabilityProbe.colorspaceBootstrap().summary(),
+                    VulkanCapabilityProbe.colorspaceBootstrap().extensionRequested()
+                            ? COLOR_FRAME : COLOR_WARNING);
+            out.line(
+                    "scRGB request/attempted/selected=" + swapchain.requested() + "/"
+                            + swapchain.attempted() + "/" + swapchain.scRgbSelected()
+                            + "  active=" + swapchain.activeSurfaceFormat().summary(),
+                    swapchain.scRgbSelected() ? COLOR_FRAME : COLOR_WARNING);
+            out.line(
+                    "output=" + (hdrOutput.active()
+                            ? "linear scRGB (composited SDR prototype)"
+                            : "sRGB SDR")
+                            + "  size=" + hdrOutput.width() + "x" + hdrOutput.height()
+                            + "  paper white=" + hdrOutput.paperWhiteNits() + " nits"
+                            + "  scale=" + oneDecimal(hdrOutput.scRgbScale()),
+                    hdrOutput.active() ? COLOR_FRAME : COLOR_STATIC);
+            out.line(
+                    "scRGB conversion us last/EMA/max="
+                            + timing(hdrOutput.lastConversionMicros(),
+                            hdrOutput.emaConversionMicros(),
+                            hdrOutput.maxConversionMicros())
+                            + "  count=" + hdrOutput.conversionCount()
+                            + "  reason=" + swapchain.reason(),
+                    hdrOutput.error().isEmpty() ? COLOR_FRAME : COLOR_ERROR);
+            if (!hdrOutput.error().isEmpty()) {
+                out.line("scRGB conversion error=" + hdrOutput.error(), COLOR_ERROR);
+            }
 
             out.section("[ PERFORMANCE: last / EMA / max us ]", COLOR_TIMING);
             out.line(
@@ -337,7 +372,9 @@ final class CyclesDebugOverlay {
                             + capabilities.supportsViewTransform(settings.viewTransform())
                             + "  OCIO=" + capabilities.colorConfigStateName()
                             + "  working=" + settings.workingSpace().name()
-                            + "  output=sRGB SDR",
+                            + "  output=" + (hdrOutput.active()
+                            ? "sRGB view -> linear scRGB"
+                            : "sRGB SDR"),
                     COLOR_STATIC);
             out.line(
                     "white balance=" + (settings.whiteBalance() ? "on" : "off")

@@ -1,6 +1,6 @@
-# Windows HDR 与 Cycles/Vulkan 互操作 Spike（P13）
+# Windows HDR 与 Cycles/Vulkan 互操作
 
-状态：技术可行性已确认；实现必须拆成后续独立阶段
+状态：P16 互操作已接通；P18 scRGB 交换链原型代码完成，等待游戏内验收
 审计基线：Minecraft/NeoForge 26.2.0.58、Blender Cycles 5.2、Windows、OptiX、Vulkan 1.2
 
 ## 1. 结论
@@ -207,11 +207,48 @@ P15/P16 游戏内验收：
 
 重启后 F10 的预期状态是 `interop available=true enabled=true`、外部缓冲 `allocated/bound=true/true`、`active=true`，并且 Vulkan copy 计数持续增长。若任一 capabilities 未启用，P16 会保持禁用并回退 CPU 上传链路，不会在不满足创建契约的 VkDevice 上强行分配共享资源。
 
-### P17：HDR swapchain 原型
+### P18：HDR swapchain 原型（代码完成，等待游戏内验收）
 
-- 与 P15/P16 解耦，单独选择 HDR surface mode 并实现输出 shader。
-- 先验证 Windows HDR 开/关、窗口跨显示器、全屏/窗口、HUD 白点与 SDR 回退，再开放用户设置。
-- 未通过实机仪器或可信测试图验收前，F9 不显示“真 HDR 已启用”。
+- P18a 在 Vulkan instance 创建前按可用性请求
+  `VK_EXT_swapchain_colorspace`。该扩展默认请求，也可用 JVM 属性
+  `-Dcyclesrenderer.vulkanSwapchainColorspace=false` 或环境变量
+  `CYCLESRENDERER_VULKAN_SWAPCHAIN_COLORSPACE=false` 关闭。
+- P18b 保存完整 surface format/color-space 对。只有显式请求实验模式，且 surface
+  实际公布 `RGBA16_SFLOAT + EXTENDED_SRGB_LINEAR_EXT` 时，才替换 Minecraft
+  原版 SDR 选择；不满足条件时继续使用原版 8-bit sRGB 组合。
+- P18c 在所有世界、后处理和 HUD/GUI 已合成后，创建同尺寸 `RGBA16_FLOAT`
+  目标，用 GPU shader 把主目标的 sRGB 显示值解码成线性值并按 scRGB 参考白缩放，
+  然后由原有 Vulkan surface blit/present。SDR 模式不会创建该目标，也没有额外转换。
+- 默认 paper white 为 200 nits。scRGB 约定 `1.0 = 80 nits`，因此默认缩放为
+  `2.5`。可用 JVM 属性 `-Dcyclesrenderer.hdrPaperWhiteNits=...` 或环境变量
+  `CYCLESRENDERER_HDR_PAPER_WHITE_NITS=...` 在 80–1000 nits 范围内覆盖。
+- 实验模式必须在启动前设置 JVM 属性
+  `-Dcyclesrenderer.experimentalHdrSwapchain=true`，或环境变量
+  `CYCLESRENDERER_EXPERIMENTAL_HDR_SWAPCHAIN=true`，随后完整重启客户端。
+  Windows HDR 也应在启动前开启；该早期交换链模式不能由 F9 热切换。
+- P18d 的 F10 输出区分 extension request、实际 active surface pair、最终转换尺寸、
+  paper white、scRGB scale 和转换 last/EMA/max。只有 `selected=true` 且 active pair
+  是 `RGBA16_SFLOAT/extended-sRGB-linear` 才表示 scRGB 交换链已经实际建立。
+
+当前原型的边界：Minecraft 主目标仍是 RGBA8，P18c 将完整 SDR 合成结果正确嵌入
+scRGB，但已经在主目标中截断的 Cycles 超白高光无法恢复。它用于先验收 Windows
+Advanced Color、surface 协商、HUD 白点、重建和 SDR 回退；后续阶段必须让 Cycles
+场景线性 HDR 在 OCIO/HDR view 与 GUI 合成期间保持 FP16，才能宣称保留真实 HDR
+高光。Rec.2100-PQ/HLG 也不会被误送进线性 scRGB；本原型激活时显示端暂时使用
+sRGB OCIO view。
+
+P18 游戏内验收：
+
+1. 不设置实验开关启动，F10 应显示 SDR active pair、`selected=false`；F8、F9、
+   窗口缩放及原版回退必须与改动前一致。
+2. Windows 开启 HDR，设置实验开关并完整重启。F10 应显示
+   `RGBA16_SFLOAT/extended-sRGB-linear`、`selected=true`，转换 count 持续增长且无错误。
+3. 对比 HDR 开/关、窗口/全屏、移动到 SDR/HDR 显示器、缩放窗口和 Alt-Tab。
+   画面不得黑屏、偏紫、双重 gamma、过曝或 device lost；若 surface 不再支持目标对，
+   重启时必须回退 SDR。
+4. 检查 HUD、菜单和白色方块的亮度。默认 200-nit paper white 只是一致性基线，
+   不能当作显示器峰值校准结果。
+5. 本轮不验收超过 SDR 白点的 Cycles 高光，也不宣称 PQ/HLG 或 HDR metadata 完成。
 
 ## 6. 稳定契约与停止条件
 
