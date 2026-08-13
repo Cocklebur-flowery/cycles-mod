@@ -128,6 +128,8 @@ CyclesBridgeRenderSettings default_settings() {
     settings.central_cylindrical_height_min = -1.0F;
     settings.central_cylindrical_height_max = 1.0F;
     settings.central_cylindrical_radius = 1.0F;
+    settings.camera_shift_x = 0.0F;
+    settings.camera_shift_y = 0.0F;
     settings.interactive_samples = 1;
     settings.still_samples = 8;
     settings.stationary_delay_millis = 150;
@@ -2044,6 +2046,22 @@ ccl::BufferParams configure_camera(
     camera->set_motion(motion);
     camera->set_use_perspective_motion(false);
     camera->compute_auto_viewplane();
+    if (panorama) {
+        camera->set_viewplane_left(settings.camera_shift_x);
+        camera->set_viewplane_right(1.0F + settings.camera_shift_x);
+        camera->set_viewplane_bottom(settings.camera_shift_y);
+        camera->set_viewplane_top(1.0F + settings.camera_shift_y);
+    } else {
+        const float fit_aspect = std::max(aspect, 1.0F / aspect);
+        const float radius_x = aspect >= 1.0F ? aspect : 1.0F;
+        const float radius_y = aspect >= 1.0F ? 1.0F : 1.0F / aspect;
+        const float offset_x = 2.0F * fit_aspect * settings.camera_shift_x;
+        const float offset_y = 2.0F * fit_aspect * settings.camera_shift_y;
+        camera->set_viewplane_left(-radius_x + offset_x);
+        camera->set_viewplane_right(radius_x + offset_x);
+        camera->set_viewplane_bottom(-radius_y + offset_y);
+        camera->set_viewplane_top(radius_y + offset_y);
+    }
     camera->need_flags_update = true;
     camera->need_device_update = true;
 
@@ -2614,10 +2632,14 @@ class CyclesEngine::Impl final {
                     && !same_atmosphere_settings(settings, requested_settings_);
                 const bool material_shader_changed = settings_revision_ > 0
                     && !same_material_shader_settings(settings, requested_settings_);
+                const bool camera_shift_changed = settings_revision_ > 0
+                    && (settings.camera_shift_x != requested_settings_.camera_shift_x
+                        || settings.camera_shift_y != requested_settings_.camera_shift_y);
                 if (settings.device_policy != requested_settings_.device_policy
                     || denoiser_topology_changed
                     || atmosphere_changed
                     || material_shader_changed
+                    || camera_shift_changed
                     || settings.working_space != requested_settings_.working_space) {
                     reset_level = CYCLES_BRIDGE_RESET_SESSION;
                 } else if (settings.resolution_mode != requested_settings_.resolution_mode
@@ -2814,6 +2836,8 @@ class CyclesEngine::Impl final {
             diagnostics.aperture_ratio = aperture_ratio_diagnostic_;
             diagnostics.camera_type = camera_type_diagnostic_;
             diagnostics.panorama_type = panorama_type_diagnostic_;
+            diagnostics.camera_shift_x = camera_shift_x_diagnostic_;
+            diagnostics.camera_shift_y = camera_shift_y_diagnostic_;
             if (selected_device_uuid_.has_value()) {
                 diagnostics.device_uuid_valid = 1U;
                 std::memcpy(
@@ -3324,6 +3348,8 @@ class CyclesEngine::Impl final {
             projection_mode_diagnostic_ = settings.projection_mode;
             camera_type_diagnostic_ = settings.camera_type;
             panorama_type_diagnostic_ = settings.panorama_type;
+            camera_shift_x_diagnostic_ = settings.camera_shift_x;
+            camera_shift_y_diagnostic_ = settings.camera_shift_y;
             const float aspect = static_cast<float>(camera_request.render_width)
                 / static_cast<float>(std::max(1U, camera_request.render_height));
             vertical_fov_diagnostic_ = settings.projection_mode
@@ -3747,6 +3773,8 @@ class CyclesEngine::Impl final {
     std::uint32_t projection_mode_diagnostic_ = CYCLES_BRIDGE_PROJECTION_MINECRAFT_FOV;
     std::uint32_t camera_type_diagnostic_ = CYCLES_BRIDGE_CAMERA_PERSPECTIVE;
     std::uint32_t panorama_type_diagnostic_ = CYCLES_BRIDGE_PANORAMA_EQUIRECTANGULAR;
+    float camera_shift_x_diagnostic_ = 0.0F;
+    float camera_shift_y_diagnostic_ = 0.0F;
     float vertical_fov_diagnostic_ = 0.0F;
     std::uint32_t depth_of_field_diagnostic_ = 0U;
     float focus_distance_diagnostic_ = 10.0F;

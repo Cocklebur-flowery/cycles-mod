@@ -443,7 +443,8 @@ public final class CyclesClientConfig {
                 CAMERA_CYLINDRICAL_LONGITUDE_MAX.get().floatValue(),
                 CAMERA_CYLINDRICAL_HEIGHT_MIN.get().floatValue(),
                 CAMERA_CYLINDRICAL_HEIGHT_MAX.get().floatValue(),
-                CAMERA_CYLINDRICAL_RADIUS.get().floatValue());
+                CAMERA_CYLINDRICAL_RADIUS.get().floatValue(),
+                0.0F, 0.0F);
     }
 
     public static void markReloaded() {

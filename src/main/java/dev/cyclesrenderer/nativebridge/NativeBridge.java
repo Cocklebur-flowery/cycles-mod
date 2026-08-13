@@ -24,7 +24,7 @@ import static java.lang.foreign.ValueLayout.JAVA_INT;
 import static java.lang.foreign.ValueLayout.JAVA_LONG;
 
 public final class NativeBridge {
-    public static final int ABI_VERSION = 35;
+    public static final int ABI_VERSION = 36;
     public static final int DEVICE_UPDATE_PHASE_COUNT = 8;
     public static final int PIXEL_FORMAT_RGBA16_FLOAT = 2;
     public static final int PIXEL_FORMAT_RGBA32_FLOAT = 3;
@@ -206,7 +206,9 @@ public final class NativeBridge {
             JAVA_FLOAT.withName("central_cylindrical_longitude_max_degrees"),
             JAVA_FLOAT.withName("central_cylindrical_height_min"),
             JAVA_FLOAT.withName("central_cylindrical_height_max"),
-            JAVA_FLOAT.withName("central_cylindrical_radius"));
+            JAVA_FLOAT.withName("central_cylindrical_radius"),
+            JAVA_FLOAT.withName("camera_shift_x"),
+            JAVA_FLOAT.withName("camera_shift_y"));
     private static final MemoryLayout PASS_DESCRIPTOR_LAYOUT = MemoryLayout.structLayout(
             JAVA_INT.withName("struct_size"),
             JAVA_INT.withName("struct_version"),
@@ -365,7 +367,9 @@ public final class NativeBridge {
             MemoryLayout.sequenceLayout(
                     DEVICE_UPDATE_PHASE_COUNT, JAVA_INT).withName("ema_device_phase_micros"),
             MemoryLayout.sequenceLayout(
-                    DEVICE_UPDATE_PHASE_COUNT, JAVA_INT).withName("max_device_phase_micros"));
+                    DEVICE_UPDATE_PHASE_COUNT, JAVA_INT).withName("max_device_phase_micros"),
+            JAVA_FLOAT.withName("camera_shift_x"),
+            JAVA_FLOAT.withName("camera_shift_y"));
     private static final MemoryLayout VULKAN_INTEROP_BUFFER_LAYOUT =
             MemoryLayout.structLayout(
                     JAVA_INT.withName("struct_size"),
@@ -441,11 +445,11 @@ public final class NativeBridge {
                 || SECTION_LAYOUT.byteSize() != 48L
                 || FRAME_LAYOUT.byteSize() != 40L
                 || FRAME_VIEW_LAYOUT.byteSize() != 72L
-                || SETTINGS_LAYOUT.byteSize() != 360L
+                || SETTINGS_LAYOUT.byteSize() != 368L
                 || PASS_DESCRIPTOR_LAYOUT.byteSize() != 64L
                 || CAPABILITIES_LAYOUT.byteSize() != 64L
                 || COLOR_LUT_DESCRIPTOR_LAYOUT.byteSize() != 72L
-                || DIAGNOSTICS_LAYOUT.byteSize() != 616L
+                || DIAGNOSTICS_LAYOUT.byteSize() != 624L
                 || VULKAN_INTEROP_BUFFER_LAYOUT.byteSize() != 80L
                 || VULKAN_INTEROP_STATE_LAYOUT.byteSize() != 72L
                 || VERTEX_LAYOUT.byteSize() != 40L
@@ -1327,6 +1331,8 @@ public final class NativeBridge {
             settingsSegment.set(JAVA_FLOAT, 348L, settings.centralCylindricalHeightMin());
             settingsSegment.set(JAVA_FLOAT, 352L, settings.centralCylindricalHeightMax());
             settingsSegment.set(JAVA_FLOAT, 356L, settings.centralCylindricalRadius());
+            settingsSegment.set(JAVA_FLOAT, 360L, settings.cameraShiftX());
+            settingsSegment.set(JAVA_FLOAT, 364L, settings.cameraShiftY());
             checkRendererStatus(
                     (int) applySettings.invokeExact(renderer, settingsSegment),
                     "settings update");
@@ -1565,7 +1571,9 @@ public final class NativeBridge {
                     diagnosticsSegment.get(JAVA_INT, 516L),
                     intArray(diagnosticsSegment, 520L, DEVICE_UPDATE_PHASE_COUNT),
                     intArray(diagnosticsSegment, 552L, DEVICE_UPDATE_PHASE_COUNT),
-                    intArray(diagnosticsSegment, 584L, DEVICE_UPDATE_PHASE_COUNT));
+                    intArray(diagnosticsSegment, 584L, DEVICE_UPDATE_PHASE_COUNT),
+                    diagnosticsSegment.get(JAVA_FLOAT, 616L),
+                    diagnosticsSegment.get(JAVA_FLOAT, 620L));
         }
 
         private static int[] intArray(MemorySegment source, long offset, int count) {
@@ -2277,7 +2285,9 @@ public final class NativeBridge {
             int activeDevicePhaseMicros,
             int[] lastDevicePhaseMicros,
             int[] emaDevicePhaseMicros,
-            int[] maxDevicePhaseMicros) {
+            int[] maxDevicePhaseMicros,
+            float cameraShiftX,
+            float cameraShiftY) {
         public Diagnostics {
             lastDevicePhaseMicros = lastDevicePhaseMicros.clone();
             emaDevicePhaseMicros = emaDevicePhaseMicros.clone();

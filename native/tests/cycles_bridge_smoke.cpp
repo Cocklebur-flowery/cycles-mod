@@ -283,6 +283,8 @@ CyclesBridgeRenderSettings default_settings() {
     settings.central_cylindrical_height_min = -1.0F;
     settings.central_cylindrical_height_max = 1.0F;
     settings.central_cylindrical_radius = 1.0F;
+    settings.camera_shift_x = 0.0F;
+    settings.camera_shift_y = 0.0F;
     settings.interactive_samples = 1;
     settings.still_samples = 1;
     settings.stationary_delay_millis = 150;
@@ -481,7 +483,7 @@ bool verify_progressive_sampling(
 int main(int argc, char** argv) {
     const bool require_optix = argc > 1 && std::strcmp(argv[1], "--require-optix") == 0;
     std::cerr << "[smoke] ABI check\n";
-    if (cycles_bridge_abi_version() != 35U) {
+    if (cycles_bridge_abi_version() != 36U) {
         std::cerr << "unexpected native ABI " << cycles_bridge_abi_version() << '\n';
         return 1;
     }
@@ -1079,6 +1081,47 @@ int main(int argc, char** argv) {
     }
     if (!has_green_dominant_pixel(pixels)) {
         std::cerr << "completed frame did not preserve the green texture channel\n";
+        cycles_bridge_destroy_renderer(renderer);
+        return 1;
+    }
+
+    std::cerr << "[smoke] Applying camera shift\n";
+    const std::uint64_t unshifted_checksum = checksum(pixels);
+    settings.camera_shift_x = 0.01F;
+    settings.camera_shift_y = -0.005F;
+    settings.revision++;
+    CyclesBridgeDiagnostics shifted_diagnostics{};
+    shifted_diagnostics.struct_size = sizeof(shifted_diagnostics);
+    shifted_diagnostics.struct_version = 1;
+    if (!require_ok(
+            cycles_bridge_apply_settings(renderer, &settings),
+            "camera shift settings")
+        || !wait_for_settings(renderer, settings.revision)
+        || !wait_for_updated_frame(
+            renderer, camera, frame, pixels, "camera shift", info, false,
+            CYCLES_BRIDGE_PASS_COMBINED)
+        || !require_ok(
+            cycles_bridge_query_diagnostics(renderer, &shifted_diagnostics),
+            "camera shift diagnostics")
+        || std::abs(shifted_diagnostics.camera_shift_x - settings.camera_shift_x) > 1.0e-6F
+        || std::abs(shifted_diagnostics.camera_shift_y - settings.camera_shift_y) > 1.0e-6F
+        || checksum(pixels) == unshifted_checksum) {
+        std::cerr << "camera shift did not change the projection; shift="
+                  << shifted_diagnostics.camera_shift_x << '/'
+                  << shifted_diagnostics.camera_shift_y << '\n';
+        cycles_bridge_destroy_renderer(renderer);
+        return 1;
+    }
+    settings.camera_shift_x = 0.0F;
+    settings.camera_shift_y = 0.0F;
+    settings.revision++;
+    if (!require_ok(
+            cycles_bridge_apply_settings(renderer, &settings),
+            "camera shift restore")
+        || !wait_for_settings(renderer, settings.revision)
+        || !wait_for_updated_frame(
+            renderer, camera, frame, pixels, "camera shift restore", info, true,
+            CYCLES_BRIDGE_PASS_COMBINED)) {
         cycles_bridge_destroy_renderer(renderer);
         return 1;
     }

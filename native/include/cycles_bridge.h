@@ -450,6 +450,8 @@ struct CyclesBridgeRenderSettings {
     float central_cylindrical_height_min;
     float central_cylindrical_height_max;
     float central_cylindrical_radius;
+    float camera_shift_x;
+    float camera_shift_y;
 };
 
 struct CyclesBridgePassDescriptor {
@@ -612,6 +614,8 @@ struct CyclesBridgeDiagnostics {
     std::uint32_t last_device_phase_micros[CYCLES_BRIDGE_DEVICE_PHASE_COUNT];
     std::uint32_t ema_device_phase_micros[CYCLES_BRIDGE_DEVICE_PHASE_COUNT];
     std::uint32_t max_device_phase_micros[CYCLES_BRIDGE_DEVICE_PHASE_COUNT];
+    float camera_shift_x;
+    float camera_shift_y;
 };
 
 struct CyclesBridgeVulkanInteropBuffer {

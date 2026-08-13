@@ -430,7 +430,11 @@ final class CyclesDebugOverlay {
                             + "  lens/sensor=" + settings.focalLengthMm() + "/"
                             + settings.sensorWidthMm() + "mm"
                             + "  clip=" + diagnostics.effectiveCameraClipNear() + "/"
-                            + diagnostics.effectiveCameraClipFar(),
+                            + diagnostics.effectiveCameraClipFar()
+                            + "  shift=" + settings.cameraShiftX() + "/"
+                            + settings.cameraShiftY() + "/native "
+                            + diagnostics.cameraShiftX() + "/"
+                            + diagnostics.cameraShiftY(),
                     COLOR_STATIC);
             out.line(
                     "DOF configured/effective=" + settings.depthOfField() + "/"
