@@ -579,7 +579,15 @@ public final class CyclesClientConfig {
                 CyclesRenderSettings.ProjectionMode.values()));
         options.add(enumOption("camera.panoramaType", Category.CAMERA,
                 "config.cyclesrenderer.camera.panoramaType", CAMERA_PANORAMA_TYPE,
-                CyclesRenderSettings.PanoramaType.values()));
+                new CyclesRenderSettings.PanoramaType[] {
+                    CyclesRenderSettings.PanoramaType.EQUIRECTANGULAR,
+                    CyclesRenderSettings.PanoramaType.EQUIANGULAR_CUBEMAP_FACE,
+                    CyclesRenderSettings.PanoramaType.MIRRORBALL,
+                    CyclesRenderSettings.PanoramaType.FISHEYE_EQUIDISTANT,
+                    CyclesRenderSettings.PanoramaType.FISHEYE_EQUISOLID,
+                    CyclesRenderSettings.PanoramaType.FISHEYE_LENS_POLYNOMIAL,
+                    CyclesRenderSettings.PanoramaType.CENTRAL_CYLINDRICAL
+                }));
         options.add(doubleOption("camera.focalLength", Category.CAMERA,
                 "config.cyclesrenderer.camera.focalLength", CAMERA_FOCAL_LENGTH, 1.0D, 300.0D, 0.1D));
         options.add(doubleOption("camera.sensorWidth", Category.CAMERA,
