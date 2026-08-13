@@ -1161,6 +1161,21 @@ int main(int argc, char** argv) {
             cycles_bridge_destroy_renderer(renderer);
             return 1;
         }
+        const std::uint64_t dlss_checksum = checksum(pixels);
+        camera.position_x += 0.125;
+        if (!wait_for_checksum_change(
+                renderer,
+                camera,
+                frame,
+                pixels,
+                dlss_checksum,
+                "DLSS camera motion",
+                info)
+            || !wait_for_realtime_dlss(
+                renderer, camera, frame, pixels, diagnostics, info)) {
+            cycles_bridge_destroy_renderer(renderer);
+            return 1;
+        }
         settings.denoiser_mode = 0U;
         settings.revision++;
         if (!require_ok(

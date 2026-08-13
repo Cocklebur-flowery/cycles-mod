@@ -267,10 +267,10 @@ index 4e1dac4b6240588caf504bdb270bb9c2c963a2c5..b33c3a0e1e6167b371e1386d5449dd70
  
 diff --git a/src/integrator/denoiser_dlss.cpp b/src/integrator/denoiser_dlss.cpp
 new file mode 100644
-index 0000000000000000000000000000000000000000..8f1f1a38654f1ac3f7ebf6399806891307deb035
+index 0000000000000000000000000000000000000000..64ef18d39aa822de4b89b6a0e6a4fc3e9ae5b400
 --- /dev/null
 +++ b/src/integrator/denoiser_dlss.cpp
-@@ -0,0 +1,570 @@
+@@ -0,0 +1,572 @@
 +/* SPDX-FileCopyrightText: 2025 NVIDIA Corporation
 + * SPDX-FileCopyrightText: 2011-2022 Blender Foundation
 + *
@@ -809,6 +809,8 @@ index 0000000000000000000000000000000000000000..8f1f1a38654f1ac3f7ebf63998068913
 +
 +  params->Set(NVSDK_NGX_Parameter_Jitter_Offset_X, context.pixel_jitter.x);
 +  params->Set(NVSDK_NGX_Parameter_Jitter_Offset_Y, context.pixel_jitter.y);
++  params->Set(NVSDK_NGX_Parameter_MV_Scale_X, 1.0f / context.buffer_params.width);
++  params->Set(NVSDK_NGX_Parameter_MV_Scale_Y, 1.0f / context.buffer_params.height);
 +
 +  params->Set(NVSDK_NGX_Parameter_Color, &tex_color_.texture_handle);
 +  params->Set(NVSDK_NGX_Parameter_Depth, &tex_depth_.texture_handle);

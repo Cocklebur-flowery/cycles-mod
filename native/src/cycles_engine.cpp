@@ -1964,7 +1964,13 @@ ccl::BufferParams configure_camera(
     scene.origin_x = resources.origin_x;
     scene.origin_y = resources.origin_y;
     scene.origin_z = resources.origin_z;
-    camera->set_matrix(camera_transform(camera_request.camera, scene));
+    const ccl::Transform transform = camera_transform(camera_request.camera, scene);
+    camera->set_matrix(transform);
+    ccl::array<ccl::Transform> motion = camera->get_motion();
+    motion.resize(2, transform);
+    motion[1] = transform;
+    camera->set_motion(motion);
+    camera->set_use_perspective_motion(false);
     camera->compute_auto_viewplane();
     camera->need_flags_update = true;
     camera->need_device_update = true;
