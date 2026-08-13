@@ -33,6 +33,7 @@ public final class CyclesFramePresenter {
     private GpuTexture colorLutTexture;
     private GpuTextureView colorLutView;
     private NativeBridge.ColorLutDescriptor colorLutDescriptor;
+    private int colorLutDisplayDevice = -1;
     private int colorLutViewTransform = -1;
     private int colorLutLook = -1;
     private int colorLutWorkingSpace = -1;
@@ -149,7 +150,8 @@ public final class CyclesFramePresenter {
             DisplayPerformanceProbe performanceProbe) {
         long stageStart = performanceProbe.beginDisplayStage();
         GpuTextureView activeColorLut = updateColorLut(
-                settings.viewTransform(), settings.colorLook(), settings.workingSpace());
+                settings.displayDevice(), settings.viewTransform(), settings.colorLook(),
+                settings.workingSpace());
         performanceProbe.endDisplayStage(
                 DisplayPerformanceProbe.Stage.COLOR_LUT, stageStart);
         stageStart = performanceProbe.beginDisplayStage();
@@ -222,6 +224,7 @@ public final class CyclesFramePresenter {
         emaColorLutUploadMicros = 0L;
         maxColorLutUploadMicros = 0L;
         colorLutViewTransform = -1;
+        colorLutDisplayDevice = -1;
         colorLutLook = -1;
         colorLutWorkingSpace = -1;
         colorLutDescriptor = null;
@@ -247,35 +250,44 @@ public final class CyclesFramePresenter {
     }
 
     private GpuTextureView updateColorLut(
+            CyclesRenderSettings.DisplayDevice displayDevice,
             CyclesRenderSettings.ViewTransform viewTransform,
             CyclesRenderSettings.ColorLook colorLook,
             CyclesRenderSettings.WorkingSpace workingSpace) {
         ensureFallbackColorLut();
-        if (viewTransform == CyclesRenderSettings.ViewTransform.RAW) {
+        CyclesRenderSettings.ViewTransform effectiveView =
+                viewTransform.effectiveFor(displayDevice);
+        if (effectiveView == CyclesRenderSettings.ViewTransform.RAW) {
             return Objects.requireNonNull(fallbackColorLutView);
         }
-        int effectiveLook = colorLook.effectiveNativeId(viewTransform);
+        int effectiveLook = colorLook.effectiveNativeId(effectiveView);
         if (colorLutView != null
-                && colorLutViewTransform == viewTransform.nativeId()
+                && colorLutDisplayDevice == displayDevice.nativeId()
+                && colorLutViewTransform == effectiveView.nativeId()
                 && colorLutLook == effectiveLook
                 && colorLutWorkingSpace == workingSpace.nativeId()) {
             return colorLutView;
         }
         NativeBridge.Capabilities capabilities = NativeBridge.capabilities();
-        if (!capabilities.supportsViewTransform(viewTransform)) {
+        if (!capabilities.supportsViewTransform(effectiveView)) {
             throw new IllegalStateException(
-                    "native OCIO view transform is unavailable: " + viewTransform);
+                    "native OCIO view transform is unavailable: " + effectiveView);
         }
 
         long uploadStart = System.nanoTime();
         NativeBridge.ColorLut colorLut = NativeBridge.colorLut(
-                viewTransform, colorLook, workingSpace);
+                displayDevice, effectiveView, colorLook, workingSpace);
         NativeBridge.ColorLutDescriptor descriptor = colorLut.descriptor();
         validateColorLut(descriptor);
-        if (descriptor.viewTransform() != viewTransform.nativeId()) {
+        if (descriptor.displayDevice() != displayDevice.nativeId()) {
+            throw new IllegalStateException(
+                    "native color LUT display mismatch: " + descriptor.displayDevice()
+                            + " != " + displayDevice.nativeId());
+        }
+        if (descriptor.viewTransform() != effectiveView.nativeId()) {
             throw new IllegalStateException(
                     "native color LUT view mismatch: " + descriptor.viewTransform()
-                            + " != " + viewTransform.nativeId());
+                            + " != " + effectiveView.nativeId());
         }
         if (descriptor.colorLook() != effectiveLook) {
             throw new IllegalStateException(
@@ -288,7 +300,7 @@ public final class CyclesFramePresenter {
                             + " != " + workingSpace.nativeId());
         }
         GpuTexture nextTexture = RenderSystem.getDevice().createTexture(
-                "Cycles " + viewTransform + " color LUT",
+                "Cycles " + displayDevice + " " + effectiveView + " color LUT",
                 GpuTexture.USAGE_COPY_DST | GpuTexture.USAGE_TEXTURE_BINDING,
                 GpuFormat.RGBA32_FLOAT,
                 descriptor.width(),
@@ -318,7 +330,8 @@ public final class CyclesFramePresenter {
         colorLutTexture = nextTexture;
         colorLutView = nextView;
         colorLutDescriptor = descriptor;
-        colorLutViewTransform = viewTransform.nativeId();
+        colorLutDisplayDevice = displayDevice.nativeId();
+        colorLutViewTransform = effectiveView.nativeId();
         colorLutLook = effectiveLook;
         colorLutWorkingSpace = workingSpace.nativeId();
         lastColorLutUploadMicros = nanosToMicros(System.nanoTime() - uploadStart);
@@ -407,11 +420,13 @@ public final class CyclesFramePresenter {
         displayUniformData.putFloat(Math.max(depthFar, 1.0F));
         displayUniformData.putFloat(Math.max(settings.stillSamples(), 1));
         displayUniformData.putInt(settings.activePass().nativeId());
-        displayUniformData.putInt(settings.viewTransform().nativeId());
+        CyclesRenderSettings.ViewTransform effectiveView =
+                settings.viewTransform().effectiveFor(settings.displayDevice());
+        displayUniformData.putInt(effectiveView.nativeId());
         displayUniformData.putInt(0);
         displayUniformData.putInt(0);
         NativeBridge.ColorLutDescriptor descriptor = colorLutDescriptor;
-        if (settings.viewTransform() != CyclesRenderSettings.ViewTransform.RAW
+        if (effectiveView != CyclesRenderSettings.ViewTransform.RAW
                 && descriptor != null) {
             displayUniformData.putFloat(descriptor.edgeLength());
             displayUniformData.putFloat(descriptor.shaperLog2Min());

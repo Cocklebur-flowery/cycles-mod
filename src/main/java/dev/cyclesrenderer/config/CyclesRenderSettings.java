@@ -73,6 +73,7 @@ public record CyclesRenderSettings(
         boolean denoiserUseGpu,
         float exposureEv,
         float gamma,
+        DisplayDevice displayDevice,
         ViewTransform viewTransform,
         ColorLook colorLook,
         WorkingSpace workingSpace,
@@ -306,8 +307,32 @@ public record CyclesRenderSettings(
         }
     }
 
+    public enum DisplayDevice implements NativeEnum, NamedEnum {
+        SRGB(0), DISPLAY_P3(1), REC1886(2), REC2020(3), REC2100_PQ(4), REC2100_HLG(5);
+
+        private final int nativeId;
+
+        DisplayDevice(int nativeId) {
+            this.nativeId = nativeId;
+        }
+
+        @Override
+        public int nativeId() {
+            return nativeId;
+        }
+
+        @Override
+        public String translationGroup() {
+            return "display_device";
+        }
+    }
+
     public enum ViewTransform implements NativeEnum, NamedEnum {
-        STANDARD(0), RAW(1), AGX(2), KHRONOS_PBR_NEUTRAL(3), ACES_2(4);
+        STANDARD(0), RAW(1), AGX(2), KHRONOS_PBR_NEUTRAL(3), ACES_2(4),
+        ACES_1_3(5), FILMIC(6), FILMIC_LOG(7), FALSE_COLOR(8),
+        ACES_1_3_HDR_1000(9), ACES_1_3_HDR_2000(10), ACES_1_3_HDR_4000(11),
+        ACES_2_HDR_500(12), ACES_2_HDR_1000(13), ACES_2_HDR_2000(14),
+        ACES_2_HDR_4000(15), AGX_HDR_1000(16);
 
         private final int nativeId;
 
@@ -324,6 +349,25 @@ public record CyclesRenderSettings(
         public String translationGroup() {
             return "view_transform";
         }
+
+        public boolean supports(DisplayDevice display) {
+            return switch (display) {
+                case SRGB -> nativeId <= FALSE_COLOR.nativeId;
+                case DISPLAY_P3, REC1886, REC2020 -> this == STANDARD || this == RAW
+                        || this == AGX || this == ACES_1_3 || this == ACES_2
+                        || this == FALSE_COLOR;
+                case REC2100_PQ -> this != KHRONOS_PBR_NEUTRAL && this != FILMIC
+                        && this != FILMIC_LOG;
+                case REC2100_HLG -> this == STANDARD || this == RAW || this == AGX
+                        || this == ACES_1_3 || this == ACES_2 || this == FALSE_COLOR
+                        || this == ACES_1_3_HDR_1000 || this == ACES_2_HDR_1000
+                        || this == AGX_HDR_1000;
+            };
+        }
+
+        public ViewTransform effectiveFor(DisplayDevice display) {
+            return supports(display) ? this : AGX;
+        }
     }
 
     public enum ColorLook implements NativeEnum, NamedEnum {
@@ -336,7 +380,17 @@ public record CyclesRenderSettings(
         AGX_MEDIUM_LOW_CONTRAST(6),
         AGX_LOW_CONTRAST(7),
         AGX_VERY_LOW_CONTRAST(8),
-        AGX_GREYSCALE(9);
+        AGX_GREYSCALE(9),
+        FILMIC_VERY_HIGH_CONTRAST(10), FILMIC_HIGH_CONTRAST(11),
+        FILMIC_MEDIUM_HIGH_CONTRAST(12), FILMIC_MEDIUM_CONTRAST(13),
+        FILMIC_MEDIUM_LOW_CONTRAST(14), FILMIC_LOW_CONTRAST(15),
+        FILMIC_VERY_LOW_CONTRAST(16),
+        FALSE_COLOR_PUNCHY(17), FALSE_COLOR_VERY_HIGH_CONTRAST(18),
+        FALSE_COLOR_HIGH_CONTRAST(19), FALSE_COLOR_MEDIUM_HIGH_CONTRAST(20),
+        FALSE_COLOR_BASE_CONTRAST(21), FALSE_COLOR_MEDIUM_LOW_CONTRAST(22),
+        FALSE_COLOR_LOW_CONTRAST(23), FALSE_COLOR_VERY_LOW_CONTRAST(24),
+        FALSE_COLOR_GREYSCALE(25), ACES_1_3_GAMUT_COMPRESSION(26),
+        ACES_2_GAMUT_COMPRESSION(27);
 
         private final int nativeId;
 
@@ -355,7 +409,30 @@ public record CyclesRenderSettings(
         }
 
         public int effectiveNativeId(ViewTransform viewTransform) {
-            return viewTransform == ViewTransform.AGX ? nativeId : NONE.nativeId;
+            if (this == NONE) {
+                return nativeId;
+            }
+            if (nativeId <= AGX_GREYSCALE.nativeId) {
+                return viewTransform == ViewTransform.AGX
+                        || viewTransform == ViewTransform.AGX_HDR_1000 ? nativeId : NONE.nativeId;
+            }
+            if (nativeId <= FILMIC_VERY_LOW_CONTRAST.nativeId) {
+                return viewTransform == ViewTransform.FILMIC
+                        || viewTransform == ViewTransform.FILMIC_LOG ? nativeId : NONE.nativeId;
+            }
+            if (nativeId <= FALSE_COLOR_GREYSCALE.nativeId) {
+                return viewTransform == ViewTransform.FALSE_COLOR ? nativeId : NONE.nativeId;
+            }
+            if (this == ACES_1_3_GAMUT_COMPRESSION) {
+                return viewTransform == ViewTransform.ACES_1_3
+                        || viewTransform.nativeId >= ViewTransform.ACES_1_3_HDR_1000.nativeId
+                        && viewTransform.nativeId <= ViewTransform.ACES_1_3_HDR_4000.nativeId
+                        ? nativeId : NONE.nativeId;
+            }
+            return viewTransform == ViewTransform.ACES_2
+                    || viewTransform.nativeId >= ViewTransform.ACES_2_HDR_500.nativeId
+                    && viewTransform.nativeId <= ViewTransform.ACES_2_HDR_4000.nativeId
+                    ? nativeId : NONE.nativeId;
         }
     }
 

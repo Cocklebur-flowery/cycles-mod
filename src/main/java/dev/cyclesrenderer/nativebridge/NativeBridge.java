@@ -24,7 +24,7 @@ import static java.lang.foreign.ValueLayout.JAVA_INT;
 import static java.lang.foreign.ValueLayout.JAVA_LONG;
 
 public final class NativeBridge {
-    public static final int ABI_VERSION = 31;
+    public static final int ABI_VERSION = 33;
     public static final int PIXEL_FORMAT_RGBA16_FLOAT = 2;
     public static final int PIXEL_FORMAT_RGBA32_FLOAT = 3;
 
@@ -225,7 +225,9 @@ public final class NativeBridge {
             JAVA_FLOAT.withName("shaper_epsilon"),
             JAVA_INT.withName("interpolation"),
             JAVA_INT.withName("color_look"),
-            JAVA_INT.withName("working_space"));
+            JAVA_INT.withName("working_space"),
+            JAVA_INT.withName("display_device"),
+            JAVA_INT.withName("reserved"));
     private static final MemoryLayout DIAGNOSTICS_LAYOUT = MemoryLayout.structLayout(
             JAVA_INT.withName("struct_size"),
             JAVA_INT.withName("struct_version"),
@@ -410,7 +412,7 @@ public final class NativeBridge {
                 || SETTINGS_LAYOUT.byteSize() != 280L
                 || PASS_DESCRIPTOR_LAYOUT.byteSize() != 64L
                 || CAPABILITIES_LAYOUT.byteSize() != 64L
-                || COLOR_LUT_DESCRIPTOR_LAYOUT.byteSize() != 64L
+                || COLOR_LUT_DESCRIPTOR_LAYOUT.byteSize() != 72L
                 || DIAGNOSTICS_LAYOUT.byteSize() != 504L
                 || VULKAN_INTEROP_BUFFER_LAYOUT.byteSize() != 80L
                 || VULKAN_INTEROP_STATE_LAYOUT.byteSize() != 72L
@@ -542,12 +544,13 @@ public final class NativeBridge {
     }
 
     public static ColorLut colorLut(
+            CyclesRenderSettings.DisplayDevice displayDevice,
             CyclesRenderSettings.ViewTransform viewTransform,
             CyclesRenderSettings.ColorLook colorLook,
             CyclesRenderSettings.WorkingSpace workingSpace) {
         BridgeState state = requireState();
         try {
-            return state.colorLut(viewTransform, colorLook, workingSpace);
+            return state.colorLut(displayDevice, viewTransform, colorLook, workingSpace);
         } catch (Throwable error) {
             rethrowFatalError(error);
             throw new IllegalStateException("native color LUT query failed: "
@@ -865,7 +868,7 @@ public final class NativeBridge {
                 MethodHandle queryColorLut = downcall(linker, symbols,
                         "cycles_bridge_query_color_lut",
                         FunctionDescriptor.of(
-                                JAVA_INT, ADDRESS, JAVA_INT, JAVA_INT, JAVA_INT,
+                                JAVA_INT, ADDRESS, JAVA_INT, JAVA_INT, JAVA_INT, JAVA_INT,
                                 ADDRESS, ADDRESS, JAVA_LONG));
                 MethodHandle queryPassDescriptor = downcall(linker, symbols,
                         "cycles_bridge_query_pass_descriptor",
@@ -1307,15 +1310,18 @@ public final class NativeBridge {
         }
 
         private ColorLut colorLut(
+                CyclesRenderSettings.DisplayDevice displayDevice,
                 CyclesRenderSettings.ViewTransform viewTransform,
                 CyclesRenderSettings.ColorLook colorLook,
                 CyclesRenderSettings.WorkingSpace workingSpace)
                 throws Throwable {
-            if (viewTransform == CyclesRenderSettings.ViewTransform.RAW) {
+            CyclesRenderSettings.ViewTransform effectiveView =
+                    viewTransform.effectiveFor(displayDevice);
+            if (effectiveView == CyclesRenderSettings.ViewTransform.RAW) {
                 throw new IllegalArgumentException(
-                        viewTransform + " does not require an OCIO LUT");
+                        effectiveView + " does not require an OCIO LUT");
             }
-            int effectiveLook = colorLook.effectiveNativeId(viewTransform);
+            int effectiveLook = colorLook.effectiveNativeId(effectiveView);
             try (Arena arena = Arena.ofConfined()) {
                 MemorySegment descriptor = arena.allocate(COLOR_LUT_DESCRIPTOR_LAYOUT);
                 descriptor.set(
@@ -1324,7 +1330,8 @@ public final class NativeBridge {
                 checkRendererStatus(
                         (int) queryColorLut.invokeExact(
                                 renderer,
-                                viewTransform.nativeId(),
+                                displayDevice.nativeId(),
+                                effectiveView.nativeId(),
                                 effectiveLook,
                                 workingSpace.nativeId(),
                                 descriptor,
@@ -1342,7 +1349,8 @@ public final class NativeBridge {
                 checkRendererStatus(
                         (int) queryColorLut.invokeExact(
                                 renderer,
-                                viewTransform.nativeId(),
+                                displayDevice.nativeId(),
+                                effectiveView.nativeId(),
                                 effectiveLook,
                                 workingSpace.nativeId(),
                                 descriptor,
@@ -1364,7 +1372,8 @@ public final class NativeBridge {
                                 descriptor.get(JAVA_FLOAT, 48L),
                                 descriptor.get(JAVA_INT, 52L),
                                 descriptor.get(JAVA_INT, 56L),
-                                descriptor.get(JAVA_INT, 60L)),
+                                descriptor.get(JAVA_INT, 60L),
+                                descriptor.get(JAVA_INT, 64L)),
                         pixels.asReadOnlyBuffer().order(ByteOrder.nativeOrder()));
             }
         }
@@ -2009,7 +2018,8 @@ public final class NativeBridge {
             float shaperEpsilon,
             int interpolation,
             int colorLook,
-            int workingSpace) {
+            int workingSpace,
+            int displayDevice) {
     }
 
     public record ColorLut(ColorLutDescriptor descriptor, ByteBuffer pixels) {

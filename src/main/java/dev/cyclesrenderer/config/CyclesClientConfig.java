@@ -77,6 +77,7 @@ public final class CyclesClientConfig {
     private static final ModConfigSpec.BooleanValue DENOISER_USE_GPU;
     private static final ModConfigSpec.DoubleValue EXPOSURE_EV;
     private static final ModConfigSpec.DoubleValue GAMMA;
+    private static final ModConfigSpec.EnumValue<CyclesRenderSettings.DisplayDevice> DISPLAY_DEVICE;
     private static final ModConfigSpec.EnumValue<CyclesRenderSettings.ViewTransform> VIEW_TRANSFORM;
     private static final ModConfigSpec.EnumValue<CyclesRenderSettings.ColorLook> COLOR_LOOK;
     private static final ModConfigSpec.EnumValue<CyclesRenderSettings.WorkingSpace> WORKING_SPACE;
@@ -274,6 +275,8 @@ public final class CyclesClientConfig {
                 .defineInRange("exposureEv", 0.0D, -20.0D, 20.0D);
         GAMMA = builder.translation("config.cyclesrenderer.color.gamma")
                 .defineInRange("gamma", 1.0D, 0.1D, 5.0D);
+        DISPLAY_DEVICE = builder.translation("config.cyclesrenderer.color.display")
+                .defineEnum("display", CyclesRenderSettings.DisplayDevice.SRGB);
         VIEW_TRANSFORM = builder.translation("config.cyclesrenderer.color.viewTransform")
                 .comment("AgX and Khronos PBR Neutral require the packaged OCIO display pipeline.")
                 .defineEnum("viewTransform", CyclesRenderSettings.ViewTransform.AGX);
@@ -342,7 +345,8 @@ public final class CyclesClientConfig {
                 PBR_FALLBACK_F0.get().floatValue(),
                 DENOISER_MODE.get(), DENOISER_START_SAMPLE.get(), DENOISER_INPUT.get(),
                 DENOISER_PREFILTER.get(), DENOISER_QUALITY.get(), DENOISER_USE_GPU.get(),
-                EXPOSURE_EV.get().floatValue(), GAMMA.get().floatValue(), VIEW_TRANSFORM.get(),
+                EXPOSURE_EV.get().floatValue(), GAMMA.get().floatValue(), DISPLAY_DEVICE.get(),
+                VIEW_TRANSFORM.get(),
                 COLOR_LOOK.get(),
                 WORKING_SPACE.get(),
                 WHITE_BALANCE.get(), WHITE_BALANCE_TEMPERATURE.get().floatValue(),
