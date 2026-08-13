@@ -252,7 +252,8 @@ public final class SectionSceneManager {
                     viewDistance,
                     sectionX,
                     sectionY,
-                    sectionZ)) {
+                    sectionZ,
+                    cameraType == CyclesRenderSettings.CameraType.PANORAMA)) {
                 continue;
             }
             CachedSection previous = sections.get(snapshot.sectionNode());
@@ -303,7 +304,8 @@ public final class SectionSceneManager {
                     viewDistance,
                     SectionPos.x(sectionNode),
                     SectionPos.y(sectionNode),
-                    SectionPos.z(sectionNode))) {
+                    SectionPos.z(sectionNode),
+                    cameraType == CyclesRenderSettings.CameraType.PANORAMA)) {
                 continue;
             }
             iterator.remove();
@@ -422,10 +424,11 @@ public final class SectionSceneManager {
             int viewDistance,
             int sectionX,
             int sectionY,
-            int sectionZ) {
+            int sectionZ,
+            boolean fullHeight) {
         return sectionY >= level.getMinSectionY()
                 && sectionY <= level.getMaxSectionY()
-                && Math.abs(sectionY - cameraSectionY) <= viewDistance
+                && (fullHeight || Math.abs(sectionY - cameraSectionY) <= viewDistance)
                 && ChunkTrackingView.isInViewDistance(
                         cameraSectionX,
                         cameraSectionZ,
