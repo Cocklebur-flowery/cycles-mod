@@ -100,6 +100,13 @@ public final class CyclesSettingsScreen extends Screen {
     }
 
     @Override
+    public void tick() {
+        if (settingsList != null && settingsList.consumeRefreshRequest()) {
+            rebuildSettingsList(true);
+        }
+    }
+
+    @Override
     public void onClose() {
         draft.apply();
         minecraft.gui.setScreen(parent);
@@ -119,8 +126,12 @@ public final class CyclesSettingsScreen extends Screen {
     }
 
     private void rebuildSettingsList() {
+        rebuildSettingsList(false);
+    }
+
+    private void rebuildSettingsList(boolean preserveScroll) {
         if (settingsList != null) {
-            settingsList.rebuild(selectedCategory, searchQuery);
+            settingsList.rebuild(selectedCategory, searchQuery, preserveScroll);
         }
     }
 
