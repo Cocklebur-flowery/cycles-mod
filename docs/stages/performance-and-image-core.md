@@ -110,6 +110,7 @@ F10 叠加层采用“当前值 + 最近窗口统计”，不把目标值伪装�
 | RT-P2 | `perf: trace cycles scene update phases` | Scene queue/reset/device/geometry/BVH/首帧分项遥测 | 已完成自动验证；待游戏内对比 |
 | RT-P3 | `perf: prioritize realtime scene updates` | 场景变更不再等待旧帧发布后才进入 Cycles | 已完成自动验证；待游戏内对比 |
 | RT-P4 | `perf: coalesce locked scene updates` | Scene 锁忙时保留最新 revision，避免串行追赶旧更新 | 已完成实现；待自动验证与游戏内对比 |
+| PERF-P1.1 | `perf: capture realtime frame stalls` | CPU 全链路、延迟 Vulkan timestamp、显示阶段、GC 与前后帧 JSONL | 已完成自动验证；待游戏内 A/B 采集日志 |
 
 ## 5. 稳定契约和保持不动的范围
 

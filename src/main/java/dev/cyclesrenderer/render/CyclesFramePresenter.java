@@ -11,6 +11,7 @@ import com.mojang.blaze3d.textures.GpuTexture;
 import com.mojang.blaze3d.textures.GpuTextureView;
 import dev.cyclesrenderer.config.CyclesRenderSettings;
 import dev.cyclesrenderer.nativebridge.NativeBridge;
+import dev.cyclesrenderer.perf.DisplayPerformanceProbe;
 
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
@@ -96,7 +97,8 @@ public final class CyclesFramePresenter {
     public void present(
             RenderTarget output,
             CyclesRenderSettings settings,
-            float depthFar) {
+            float depthFar,
+            DisplayPerformanceProbe performanceProbe) {
         RenderSystem.assertOnRenderThread();
         if (!ready || nativeFrameTarget == null) {
             return;
@@ -105,7 +107,30 @@ public final class CyclesFramePresenter {
                 output,
                 settings,
                 depthFar,
-                Objects.requireNonNull(nativeFrameTarget.getColorTextureView()));
+                Objects.requireNonNull(nativeFrameTarget.getColorTextureView()),
+                performanceProbe);
+    }
+
+    public void present(
+            RenderTarget output,
+            CyclesRenderSettings settings,
+            float depthFar) {
+        present(output, settings, depthFar, DisplayPerformanceProbe.NONE);
+    }
+
+    public void presentExternal(
+            RenderTarget output,
+            CyclesRenderSettings settings,
+            float depthFar,
+            GpuTextureView source,
+            DisplayPerformanceProbe performanceProbe) {
+        RenderSystem.assertOnRenderThread();
+        presentTexture(
+                output,
+                settings,
+                depthFar,
+                Objects.requireNonNull(source),
+                performanceProbe);
     }
 
     public void presentExternal(
@@ -113,18 +138,25 @@ public final class CyclesFramePresenter {
             CyclesRenderSettings settings,
             float depthFar,
             GpuTextureView source) {
-        RenderSystem.assertOnRenderThread();
-        presentTexture(output, settings, depthFar, Objects.requireNonNull(source));
+        presentExternal(output, settings, depthFar, source, DisplayPerformanceProbe.NONE);
     }
 
     private void presentTexture(
             RenderTarget output,
             CyclesRenderSettings settings,
             float depthFar,
-            GpuTextureView source) {
+            GpuTextureView source,
+            DisplayPerformanceProbe performanceProbe) {
+        long stageStart = performanceProbe.beginDisplayStage();
         GpuTextureView activeColorLut = updateColorLut(
                 settings.viewTransform(), settings.colorLook(), settings.workingSpace());
+        performanceProbe.endDisplayStage(
+                DisplayPerformanceProbe.Stage.COLOR_LUT, stageStart);
+        stageStart = performanceProbe.beginDisplayStage();
         updateDisplayUniforms(settings, depthFar);
+        performanceProbe.endDisplayStage(
+                DisplayPerformanceProbe.Stage.UNIFORMS, stageStart);
+        stageStart = performanceProbe.beginDisplayStage();
         try (RenderPass renderPass = RenderSystem.getDevice()
                 .createCommandEncoder()
                 .createRenderPass(
@@ -146,6 +178,8 @@ public final class CyclesFramePresenter {
                     Objects.requireNonNull(displayUniformBuffer));
             renderPass.draw(3, 1, 0, 0);
         }
+        performanceProbe.endDisplayStage(
+                DisplayPerformanceProbe.Stage.RENDER_PASS, stageStart);
     }
 
     public boolean hasFrame() {

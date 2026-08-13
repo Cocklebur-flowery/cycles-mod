@@ -5,6 +5,8 @@ import dev.cyclesrenderer.client.CyclesSettingsScreen;
 import dev.cyclesrenderer.config.CyclesClientConfig;
 import dev.cyclesrenderer.config.CyclesRenderSettings;
 import dev.cyclesrenderer.nativebridge.NativeBridge;
+import dev.cyclesrenderer.perf.FramePerformanceMonitor;
+import dev.cyclesrenderer.perf.PerformanceSample;
 import dev.cyclesrenderer.render.CyclesFramePresenter;
 import dev.cyclesrenderer.render.CyclesRenderPipelines;
 import dev.cyclesrenderer.render.VulkanCapabilityProbe;
@@ -21,6 +23,7 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.resources.Identifier;
 import net.minecraft.server.packs.resources.ResourceManagerReloadListener;
 import net.neoforged.api.distmarker.Dist;
+import net.neoforged.bus.api.EventPriority;
 import net.neoforged.bus.api.IEventBus;
 import net.neoforged.fml.ModContainer;
 import net.neoforged.fml.common.Mod;
@@ -28,9 +31,11 @@ import net.neoforged.fml.config.ModConfig;
 import net.neoforged.fml.event.config.ModConfigEvent;
 import net.neoforged.neoforge.client.gui.IConfigScreenFactory;
 import net.neoforged.neoforge.client.event.ClientTickEvent;
+import net.neoforged.neoforge.client.event.FlipFrameEvent;
 import net.neoforged.neoforge.client.event.AddClientReloadListenersEvent;
 import net.neoforged.neoforge.client.event.RegisterKeyMappingsEvent;
 import net.neoforged.neoforge.client.event.RenderGuiEvent;
+import net.neoforged.neoforge.client.event.RenderFrameEvent;
 import net.neoforged.neoforge.client.event.RenderLevelStageEvent;
 import net.neoforged.neoforge.common.NeoForge;
 import net.neoforged.neoforge.event.GameShuttingDownEvent;
@@ -83,6 +88,8 @@ public final class CyclesRendererMod {
     private static final CyclesFramePresenter FRAME_PRESENTER = new CyclesFramePresenter();
     private static final VulkanExternalBufferPrototype INTEROP_BUFFER =
             new VulkanExternalBufferPrototype();
+    private static final FramePerformanceMonitor PERFORMANCE_MONITOR =
+            new FramePerformanceMonitor(FRAME_PRESENTER, INTEROP_BUFFER, SCENE_MANAGER);
 
     public CyclesRendererMod(IEventBus modEventBus, ModContainer container) {
         modContainer = container;
@@ -96,7 +103,16 @@ public final class CyclesRendererMod {
         modEventBus.addListener(CyclesRendererMod::addClientReloadListeners);
         modEventBus.addListener(CyclesRendererMod::onConfigLoading);
         modEventBus.addListener(CyclesRendererMod::onConfigReloading);
-        NeoForge.EVENT_BUS.addListener(CyclesRendererMod::onClientTick);
+        NeoForge.EVENT_BUS.addListener(
+                EventPriority.HIGHEST, CyclesRendererMod::onClientTickPre);
+        NeoForge.EVENT_BUS.addListener(
+                EventPriority.LOWEST, CyclesRendererMod::onClientTick);
+        NeoForge.EVENT_BUS.addListener(
+                EventPriority.HIGHEST, CyclesRendererMod::onRenderFramePre);
+        NeoForge.EVENT_BUS.addListener(
+                EventPriority.LOWEST, CyclesRendererMod::onRenderFramePost);
+        NeoForge.EVENT_BUS.addListener(
+                EventPriority.LOWEST, CyclesRendererMod::onFlipFrame);
         NeoForge.EVENT_BUS.addListener(CyclesRendererMod::onRenderLevelAfterLevel);
         NeoForge.EVENT_BUS.addListener(CyclesRendererMod::onRenderGui);
         NeoForge.EVENT_BUS.addListener(CyclesRendererMod::onChunkUnload);
@@ -117,6 +133,7 @@ public final class CyclesRendererMod {
     }
 
     private static void onClientTick(ClientTickEvent.Post event) {
+        PERFORMANCE_MONITOR.onClientTickPost();
         while (OPEN_SETTINGS.consumeClick()) {
             Minecraft minecraft = Minecraft.getInstance();
             minecraft.gui.setScreen(new CyclesSettingsScreen(
@@ -158,8 +175,13 @@ public final class CyclesRendererMod {
                     CyclesClientConfig.snapshot());
             SectionGeometryCollector.setEnabled(true);
             testFrameEnabled = true;
+            PERFORMANCE_MONITOR.activate(Minecraft.getInstance());
             LOGGER.info("Experimental renderer enabled; building the streamed Cycles scene");
         }
+    }
+
+    private static void onClientTickPre(ClientTickEvent.Pre event) {
+        PERFORMANCE_MONITOR.onClientTickPre();
     }
 
     public static boolean ensureNativeBridgeReady() {
@@ -258,6 +280,18 @@ public final class CyclesRendererMod {
                 && (INTEROP_BUFFER.hasActiveFrame() || FRAME_PRESENTER.hasFrame());
     }
 
+    private static void onRenderFramePre(RenderFrameEvent.Pre event) {
+        PERFORMANCE_MONITOR.onRenderFramePre();
+    }
+
+    private static void onRenderFramePost(RenderFrameEvent.Post event) {
+        PERFORMANCE_MONITOR.onRenderFramePost();
+    }
+
+    private static void onFlipFrame(FlipFrameEvent event) {
+        PERFORMANCE_MONITOR.onFlipFrame();
+    }
+
     private static void onRenderLevelAfterLevel(RenderLevelStageEvent.AfterLevel event) {
         if (!testFrameEnabled) {
             return;
@@ -271,29 +305,48 @@ public final class CyclesRendererMod {
         }
 
         var mainTarget = minecraft.gameRenderer.mainRenderTarget();
+        long cyclesStart = PERFORMANCE_MONITOR.beginCpuStage();
+        PERFORMANCE_MONITOR.gpuMarker(PerformanceSample.GpuMarker.CYCLES_BEGIN);
         try {
+            long sceneStart = PERFORMANCE_MONITOR.beginCpuStage();
             SectionSceneManager.UpdateResult update = SCENE_MANAGER.update(
                     minecraft,
                     level,
                     camera.pos,
                     resourceRevision);
+            PERFORMANCE_MONITOR.endCpuStage(
+                    PerformanceSample.CpuStage.SCENE_UPDATE, sceneStart);
             long frameId = nativeFrameId++;
             NativeBridge.CameraInput cameraInput = createCameraInput(camera);
             long cameraStart = System.nanoTime();
+            long cameraTraceStart = PERFORMANCE_MONITOR.beginCpuStage();
             NativeBridge.updateCamera(
                     mainTarget.width,
                     mainTarget.height,
                     frameId,
                     cameraInput);
             recordCameraCall(System.nanoTime() - cameraStart);
+            PERFORMANCE_MONITOR.endCpuStage(
+                    PerformanceSample.CpuStage.CAMERA_FFI, cameraTraceStart);
 
+            long interopStart = PERFORMANCE_MONITOR.beginCpuStage();
+            PERFORMANCE_MONITOR.gpuMarker(PerformanceSample.GpuMarker.INTEROP_BEGIN);
             INTEROP_BUFFER.pollCompletedFrame();
+            PERFORMANCE_MONITOR.gpuMarker(PerformanceSample.GpuMarker.INTEROP_END);
+            PERFORMANCE_MONITOR.endCpuStage(
+                    PerformanceSample.CpuStage.INTEROP_POLL, interopStart);
             if (INTEROP_BUFFER.hasActiveFrame()) {
+                long displayStart = PERFORMANCE_MONITOR.beginCpuStage();
+                PERFORMANCE_MONITOR.gpuMarker(PerformanceSample.GpuMarker.DISPLAY_BEGIN);
                 FRAME_PRESENTER.presentExternal(
                         mainTarget,
                         CyclesClientConfig.snapshot(),
                         cameraInput.depthFar(),
-                        INTEROP_BUFFER.frameTextureView());
+                        INTEROP_BUFFER.frameTextureView(),
+                        PERFORMANCE_MONITOR);
+                PERFORMANCE_MONITOR.gpuMarker(PerformanceSample.GpuMarker.DISPLAY_END);
+                PERFORMANCE_MONITOR.endCpuStage(
+                        PerformanceSample.CpuStage.DISPLAY_SUBMIT, displayStart);
                 return;
             }
 
@@ -305,23 +358,35 @@ public final class CyclesRendererMod {
             if (!FRAME_PRESENTER.hasFrame()
                     || now - lastFrameDeliveryNanos >= FRAME_DELIVERY_INTERVAL_NANOS) {
                 long bridgeStart = System.nanoTime();
+                long acquireStart = PERFORMANCE_MONITOR.beginCpuStage();
                 try (NativeBridge.AcquiredFrame frame = NativeBridge.acquireFrame(
                         FRAME_PRESENTER.generation())) {
                     recordBridgeCall(System.nanoTime() - bridgeStart);
+                    PERFORMANCE_MONITOR.endCpuStage(
+                            PerformanceSample.CpuStage.FRAME_ACQUIRE, acquireStart);
                     framePolled = true;
                     deliveredWidth = frame.width();
                     deliveredHeight = frame.height();
                     deliveredSamples = frame.sampleCount();
+                    long uploadStart = PERFORMANCE_MONITOR.beginCpuStage();
                     FRAME_PRESENTER.update(frame);
+                    PERFORMANCE_MONITOR.endCpuStage(
+                            PerformanceSample.CpuStage.FRAME_UPLOAD, uploadStart);
                 }
                 lastFrameDeliveryNanos = System.nanoTime();
             } else {
                 skippedFrameDeliveryCount++;
             }
+            long displayStart = PERFORMANCE_MONITOR.beginCpuStage();
+            PERFORMANCE_MONITOR.gpuMarker(PerformanceSample.GpuMarker.DISPLAY_BEGIN);
             FRAME_PRESENTER.present(
                     mainTarget,
                     CyclesClientConfig.snapshot(),
-                    cameraInput.depthFar());
+                    cameraInput.depthFar(),
+                    PERFORMANCE_MONITOR);
+            PERFORMANCE_MONITOR.gpuMarker(PerformanceSample.GpuMarker.DISPLAY_END);
+            PERFORMANCE_MONITOR.endCpuStage(
+                    PerformanceSample.CpuStage.DISPLAY_SUBMIT, displayStart);
 
             now = System.nanoTime();
             if (framePolled
@@ -350,6 +415,10 @@ public final class CyclesRendererMod {
             NativeBridge.close();
             nativeBridgeReady = false;
             appliedSettingsRevision = -1L;
+        } finally {
+            PERFORMANCE_MONITOR.gpuMarker(PerformanceSample.GpuMarker.CYCLES_END);
+            PERFORMANCE_MONITOR.endCpuStage(
+                    PerformanceSample.CpuStage.CYCLES_CALLBACK, cyclesStart);
         }
     }
 
@@ -393,6 +462,7 @@ public final class CyclesRendererMod {
 
     private static void disableExperimentalRenderer() {
         testFrameEnabled = false;
+        PERFORMANCE_MONITOR.deactivate();
         SectionGeometryCollector.setEnabled(false);
         SCENE_MANAGER.reset();
         FRAME_PRESENTER.reset();
@@ -417,6 +487,7 @@ public final class CyclesRendererMod {
     }
 
     private static void onGameShuttingDown(GameShuttingDownEvent event) {
+        PERFORMANCE_MONITOR.shutdown();
         INTEROP_BUFFER.drainPendingCopy();
         if (INTEROP_BUFFER.telemetry().nativeBound() && NativeBridge.isReady()) {
             NativeBridge.close();
