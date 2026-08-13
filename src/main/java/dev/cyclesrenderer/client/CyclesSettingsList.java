@@ -29,7 +29,9 @@ final class CyclesSettingsList
             "output.dynamicResolution",
             "sampling.adaptive",
             "denoise.mode",
+            "camera.type",
             "camera.projection",
+            "camera.panoramaType",
             "camera.depthOfField",
             "camera.apertureCircular",
             "materials.pbrMode",
@@ -90,8 +92,50 @@ final class CyclesSettingsList
                 && !booleanValue("output.dynamicResolution")) {
             return false;
         }
-        if ((id.equals("camera.focalLength") || id.equals("camera.sensorWidth"))
-                && enumValue("camera.projection") != CyclesRenderSettings.ProjectionMode.PHYSICAL_LENS) {
+        CyclesRenderSettings.CameraType cameraType = enumValue("camera.type");
+        CyclesRenderSettings.PanoramaType panoramaType = enumValue("camera.panoramaType");
+        if (id.equals("camera.projection")
+                && cameraType != CyclesRenderSettings.CameraType.PERSPECTIVE) {
+            return false;
+        }
+        if (id.equals("camera.panoramaType")
+                && cameraType != CyclesRenderSettings.CameraType.PANORAMA) {
+            return false;
+        }
+        if (id.equals("camera.focalLength")
+                && !booleanValue("camera.depthOfField")
+                && (cameraType != CyclesRenderSettings.CameraType.PERSPECTIVE
+                    || enumValue("camera.projection")
+                        != CyclesRenderSettings.ProjectionMode.PHYSICAL_LENS)) {
+            return false;
+        }
+        if (id.equals("camera.sensorWidth")
+                && !usesSensorWidth(cameraType, panoramaType,
+                    enumValue("camera.projection"))) {
+            return false;
+        }
+        if (id.equals("camera.fisheyeFov")
+                && !usesFisheye(panoramaType, cameraType)) {
+            return false;
+        }
+        if (id.equals("camera.fisheyeLens")
+                && panoramaType != CyclesRenderSettings.PanoramaType.FISHEYE_EQUISOLID) {
+            return false;
+        }
+        if ((id.startsWith("camera.latitude") || id.startsWith("camera.longitude"))
+                && (cameraType != CyclesRenderSettings.CameraType.PANORAMA
+                    || panoramaType != CyclesRenderSettings.PanoramaType.EQUIRECTANGULAR)) {
+            return false;
+        }
+        if (id.startsWith("camera.polynomial")
+                && (cameraType != CyclesRenderSettings.CameraType.PANORAMA
+                    || panoramaType
+                        != CyclesRenderSettings.PanoramaType.FISHEYE_LENS_POLYNOMIAL)) {
+            return false;
+        }
+        if (id.startsWith("camera.cylindrical")
+                && (cameraType != CyclesRenderSettings.CameraType.PANORAMA
+                    || panoramaType != CyclesRenderSettings.PanoramaType.CENTRAL_CYLINDRICAL)) {
             return false;
         }
         if (id.startsWith("camera.")
@@ -118,6 +162,29 @@ final class CyclesSettingsList
         }
         return !(id.equals("color.temperature") || id.equals("color.tint"))
                 || booleanValue("color.whiteBalance");
+    }
+
+    private static boolean usesSensorWidth(
+            CyclesRenderSettings.CameraType cameraType,
+            CyclesRenderSettings.PanoramaType panoramaType,
+            CyclesRenderSettings.ProjectionMode projectionMode) {
+        if (cameraType == CyclesRenderSettings.CameraType.PERSPECTIVE) {
+            return projectionMode == CyclesRenderSettings.ProjectionMode.PHYSICAL_LENS;
+        }
+        return panoramaType == CyclesRenderSettings.PanoramaType.FISHEYE_EQUISOLID
+                || panoramaType
+                    == CyclesRenderSettings.PanoramaType.FISHEYE_LENS_POLYNOMIAL;
+    }
+
+    private static boolean usesFisheye(
+            CyclesRenderSettings.PanoramaType panoramaType,
+            CyclesRenderSettings.CameraType cameraType) {
+        return cameraType == CyclesRenderSettings.CameraType.PANORAMA
+                && switch (panoramaType) {
+                    case FISHEYE_EQUIDISTANT, FISHEYE_EQUISOLID,
+                            FISHEYE_LENS_POLYNOMIAL -> true;
+                    default -> false;
+                };
     }
 
     private List<?> effectiveChoices(CyclesClientConfig.ConfigOption<?> option) {

@@ -41,9 +41,27 @@ public final class CyclesClientConfig {
     private static final ModConfigSpec.EnumValue<CyclesRenderSettings.SamplingPattern> SAMPLING_PATTERN;
     private static final ModConfigSpec.DoubleValue CAMERA_CLIP_NEAR;
     private static final ModConfigSpec.DoubleValue CAMERA_CLIP_FAR;
+    private static final ModConfigSpec.EnumValue<CyclesRenderSettings.CameraType> CAMERA_TYPE;
     private static final ModConfigSpec.EnumValue<CyclesRenderSettings.ProjectionMode> CAMERA_PROJECTION;
+    private static final ModConfigSpec.EnumValue<CyclesRenderSettings.PanoramaType> CAMERA_PANORAMA_TYPE;
     private static final ModConfigSpec.DoubleValue CAMERA_FOCAL_LENGTH;
     private static final ModConfigSpec.DoubleValue CAMERA_SENSOR_WIDTH;
+    private static final ModConfigSpec.DoubleValue CAMERA_FISHEYE_FOV;
+    private static final ModConfigSpec.DoubleValue CAMERA_FISHEYE_LENS;
+    private static final ModConfigSpec.DoubleValue CAMERA_LATITUDE_MIN;
+    private static final ModConfigSpec.DoubleValue CAMERA_LATITUDE_MAX;
+    private static final ModConfigSpec.DoubleValue CAMERA_LONGITUDE_MIN;
+    private static final ModConfigSpec.DoubleValue CAMERA_LONGITUDE_MAX;
+    private static final ModConfigSpec.DoubleValue CAMERA_POLYNOMIAL_K0;
+    private static final ModConfigSpec.DoubleValue CAMERA_POLYNOMIAL_K1;
+    private static final ModConfigSpec.DoubleValue CAMERA_POLYNOMIAL_K2;
+    private static final ModConfigSpec.DoubleValue CAMERA_POLYNOMIAL_K3;
+    private static final ModConfigSpec.DoubleValue CAMERA_POLYNOMIAL_K4;
+    private static final ModConfigSpec.DoubleValue CAMERA_CYLINDRICAL_LONGITUDE_MIN;
+    private static final ModConfigSpec.DoubleValue CAMERA_CYLINDRICAL_LONGITUDE_MAX;
+    private static final ModConfigSpec.DoubleValue CAMERA_CYLINDRICAL_HEIGHT_MIN;
+    private static final ModConfigSpec.DoubleValue CAMERA_CYLINDRICAL_HEIGHT_MAX;
+    private static final ModConfigSpec.DoubleValue CAMERA_CYLINDRICAL_RADIUS;
     private static final ModConfigSpec.BooleanValue CAMERA_DEPTH_OF_FIELD;
     private static final ModConfigSpec.DoubleValue CAMERA_FOCUS_DISTANCE;
     private static final ModConfigSpec.DoubleValue CAMERA_F_STOP;
@@ -165,15 +183,55 @@ public final class CyclesClientConfig {
         CAMERA_CLIP_FAR = builder.translation("config.cyclesrenderer.camera.clipFar")
                 .comment("Far clipping plane in blocks/meters; zero follows the Minecraft camera.")
                 .defineInRange("clipFar", 0.0D, 0.0D, 1000000.0D);
+        CAMERA_TYPE = builder.translation("config.cyclesrenderer.camera.type")
+                .defineEnum("type", CyclesRenderSettings.CameraType.PERSPECTIVE);
         CAMERA_PROJECTION = builder.translation("config.cyclesrenderer.camera.projection")
                 .comment("Minecraft FOV preserves gameplay camera effects; physical lens overrides FOV.")
                 .defineEnum("projection", CyclesRenderSettings.ProjectionMode.MINECRAFT_FOV);
+        CAMERA_PANORAMA_TYPE = builder.translation("config.cyclesrenderer.camera.panoramaType")
+                .defineEnum("panoramaType", CyclesRenderSettings.PanoramaType.EQUIRECTANGULAR);
         CAMERA_FOCAL_LENGTH = builder.translation("config.cyclesrenderer.camera.focalLength")
                 .comment("Physical focal length in millimeters; also controls DOF aperture size.")
                 .defineInRange("focalLengthMm", 50.0D, 1.0D, 300.0D);
         CAMERA_SENSOR_WIDTH = builder.translation("config.cyclesrenderer.camera.sensorWidth")
                 .comment("Horizontal sensor width in millimeters.")
                 .defineInRange("sensorWidthMm", 36.0D, 1.0D, 100.0D);
+        CAMERA_FISHEYE_FOV = builder.translation("config.cyclesrenderer.camera.fisheyeFov")
+                .defineInRange("fisheyeFovDegrees", 180.0D, 10.0D, 1800.0D);
+        CAMERA_FISHEYE_LENS = builder.translation("config.cyclesrenderer.camera.fisheyeLens")
+                .defineInRange("fisheyeLensMm", 10.5D, 0.01D, 100.0D);
+        CAMERA_LATITUDE_MIN = builder.translation("config.cyclesrenderer.camera.latitudeMin")
+                .defineInRange("latitudeMinDegrees", -90.0D, -90.0D, 90.0D);
+        CAMERA_LATITUDE_MAX = builder.translation("config.cyclesrenderer.camera.latitudeMax")
+                .defineInRange("latitudeMaxDegrees", 90.0D, -90.0D, 90.0D);
+        CAMERA_LONGITUDE_MIN = builder.translation("config.cyclesrenderer.camera.longitudeMin")
+                .defineInRange("longitudeMinDegrees", -180.0D, -180.0D, 180.0D);
+        CAMERA_LONGITUDE_MAX = builder.translation("config.cyclesrenderer.camera.longitudeMax")
+                .defineInRange("longitudeMaxDegrees", 180.0D, -180.0D, 180.0D);
+        CAMERA_POLYNOMIAL_K0 = builder.translation("config.cyclesrenderer.camera.polynomialK0")
+                .defineInRange("fisheyePolynomialK0", -1.1735143712967577e-05D, -1000000.0D, 1000000.0D);
+        CAMERA_POLYNOMIAL_K1 = builder.translation("config.cyclesrenderer.camera.polynomialK1")
+                .defineInRange("fisheyePolynomialK1", -0.019988736953434998D, -1000000.0D, 1000000.0D);
+        CAMERA_POLYNOMIAL_K2 = builder.translation("config.cyclesrenderer.camera.polynomialK2")
+                .defineInRange("fisheyePolynomialK2", -3.3525322965709175e-06D, -1000000.0D, 1000000.0D);
+        CAMERA_POLYNOMIAL_K3 = builder.translation("config.cyclesrenderer.camera.polynomialK3")
+                .defineInRange("fisheyePolynomialK3", 3.099275275886036e-06D, -1000000.0D, 1000000.0D);
+        CAMERA_POLYNOMIAL_K4 = builder.translation("config.cyclesrenderer.camera.polynomialK4")
+                .defineInRange("fisheyePolynomialK4", -2.6064646454854524e-08D, -1000000.0D, 1000000.0D);
+        CAMERA_CYLINDRICAL_LONGITUDE_MIN = builder.translation(
+                        "config.cyclesrenderer.camera.cylindricalLongitudeMin")
+                .defineInRange("centralCylindricalLongitudeMinDegrees", -180.0D, -180.0D, 180.0D);
+        CAMERA_CYLINDRICAL_LONGITUDE_MAX = builder.translation(
+                        "config.cyclesrenderer.camera.cylindricalLongitudeMax")
+                .defineInRange("centralCylindricalLongitudeMaxDegrees", 180.0D, -180.0D, 180.0D);
+        CAMERA_CYLINDRICAL_HEIGHT_MIN = builder.translation(
+                        "config.cyclesrenderer.camera.cylindricalHeightMin")
+                .defineInRange("centralCylindricalHeightMin", -1.0D, -10.0D, 10.0D);
+        CAMERA_CYLINDRICAL_HEIGHT_MAX = builder.translation(
+                        "config.cyclesrenderer.camera.cylindricalHeightMax")
+                .defineInRange("centralCylindricalHeightMax", 1.0D, -10.0D, 10.0D);
+        CAMERA_CYLINDRICAL_RADIUS = builder.translation("config.cyclesrenderer.camera.cylindricalRadius")
+                .defineInRange("centralCylindricalRadius", 1.0D, 0.00001D, 1000000.0D);
         CAMERA_DEPTH_OF_FIELD = builder.translation("config.cyclesrenderer.camera.depthOfField")
                 .define("depthOfField", false);
         CAMERA_FOCUS_DISTANCE = builder.translation("config.cyclesrenderer.camera.focusDistance")
@@ -369,16 +427,23 @@ public final class CyclesClientConfig {
                 WHITE_BALANCE.get(), WHITE_BALANCE_TEMPERATURE.get().floatValue(),
                 WHITE_BALANCE_TINT.get().floatValue(),
                 ACTIVE_PASS.get(), DEBUG_OVERLAY.get(),
-                CyclesRenderSettings.CameraType.PERSPECTIVE,
-                CyclesRenderSettings.PanoramaType.EQUIRECTANGULAR,
-                180.0F, 10.5F,
-                -90.0F, 90.0F, -180.0F, 180.0F,
-                -1.1735143712967577e-05F,
-                -0.019988736953434998F,
-                -3.3525322965709175e-06F,
-                3.099275275886036e-06F,
-                -2.6064646454854524e-08F,
-                -180.0F, 180.0F, -1.0F, 1.0F, 1.0F);
+                CAMERA_TYPE.get(), CAMERA_PANORAMA_TYPE.get(),
+                CAMERA_FISHEYE_FOV.get().floatValue(),
+                CAMERA_FISHEYE_LENS.get().floatValue(),
+                CAMERA_LATITUDE_MIN.get().floatValue(),
+                CAMERA_LATITUDE_MAX.get().floatValue(),
+                CAMERA_LONGITUDE_MIN.get().floatValue(),
+                CAMERA_LONGITUDE_MAX.get().floatValue(),
+                CAMERA_POLYNOMIAL_K0.get().floatValue(),
+                CAMERA_POLYNOMIAL_K1.get().floatValue(),
+                CAMERA_POLYNOMIAL_K2.get().floatValue(),
+                CAMERA_POLYNOMIAL_K3.get().floatValue(),
+                CAMERA_POLYNOMIAL_K4.get().floatValue(),
+                CAMERA_CYLINDRICAL_LONGITUDE_MIN.get().floatValue(),
+                CAMERA_CYLINDRICAL_LONGITUDE_MAX.get().floatValue(),
+                CAMERA_CYLINDRICAL_HEIGHT_MIN.get().floatValue(),
+                CAMERA_CYLINDRICAL_HEIGHT_MAX.get().floatValue(),
+                CAMERA_CYLINDRICAL_RADIUS.get().floatValue());
     }
 
     public static void markReloaded() {
@@ -506,13 +571,51 @@ public final class CyclesClientConfig {
                 "config.cyclesrenderer.camera.clipNear", CAMERA_CLIP_NEAR, 0.001D, 10.0D, 0.001D));
         options.add(doubleOption("camera.clipFar", Category.CAMERA,
                 "config.cyclesrenderer.camera.clipFar", CAMERA_CLIP_FAR, 0.0D, 1000000.0D, 1.0D));
+        options.add(enumOption("camera.type", Category.CAMERA,
+                "config.cyclesrenderer.camera.type", CAMERA_TYPE,
+                CyclesRenderSettings.CameraType.values()));
         options.add(enumOption("camera.projection", Category.CAMERA,
                 "config.cyclesrenderer.camera.projection", CAMERA_PROJECTION,
                 CyclesRenderSettings.ProjectionMode.values()));
+        options.add(enumOption("camera.panoramaType", Category.CAMERA,
+                "config.cyclesrenderer.camera.panoramaType", CAMERA_PANORAMA_TYPE,
+                CyclesRenderSettings.PanoramaType.values()));
         options.add(doubleOption("camera.focalLength", Category.CAMERA,
                 "config.cyclesrenderer.camera.focalLength", CAMERA_FOCAL_LENGTH, 1.0D, 300.0D, 0.1D));
         options.add(doubleOption("camera.sensorWidth", Category.CAMERA,
                 "config.cyclesrenderer.camera.sensorWidth", CAMERA_SENSOR_WIDTH, 1.0D, 100.0D, 0.1D));
+        options.add(doubleOption("camera.fisheyeFov", Category.CAMERA,
+                "config.cyclesrenderer.camera.fisheyeFov", CAMERA_FISHEYE_FOV, 10.0D, 1800.0D, 1.0D));
+        options.add(doubleOption("camera.fisheyeLens", Category.CAMERA,
+                "config.cyclesrenderer.camera.fisheyeLens", CAMERA_FISHEYE_LENS, 0.01D, 100.0D, 0.01D));
+        options.add(doubleOption("camera.latitudeMin", Category.CAMERA,
+                "config.cyclesrenderer.camera.latitudeMin", CAMERA_LATITUDE_MIN, -90.0D, 90.0D, 1.0D));
+        options.add(doubleOption("camera.latitudeMax", Category.CAMERA,
+                "config.cyclesrenderer.camera.latitudeMax", CAMERA_LATITUDE_MAX, -90.0D, 90.0D, 1.0D));
+        options.add(doubleOption("camera.longitudeMin", Category.CAMERA,
+                "config.cyclesrenderer.camera.longitudeMin", CAMERA_LONGITUDE_MIN, -180.0D, 180.0D, 1.0D));
+        options.add(doubleOption("camera.longitudeMax", Category.CAMERA,
+                "config.cyclesrenderer.camera.longitudeMax", CAMERA_LONGITUDE_MAX, -180.0D, 180.0D, 1.0D));
+        options.add(doubleOption("camera.polynomialK0", Category.CAMERA,
+                "config.cyclesrenderer.camera.polynomialK0", CAMERA_POLYNOMIAL_K0, -1000000.0D, 1000000.0D, 0.000001D));
+        options.add(doubleOption("camera.polynomialK1", Category.CAMERA,
+                "config.cyclesrenderer.camera.polynomialK1", CAMERA_POLYNOMIAL_K1, -1000000.0D, 1000000.0D, 0.000001D));
+        options.add(doubleOption("camera.polynomialK2", Category.CAMERA,
+                "config.cyclesrenderer.camera.polynomialK2", CAMERA_POLYNOMIAL_K2, -1000000.0D, 1000000.0D, 0.000001D));
+        options.add(doubleOption("camera.polynomialK3", Category.CAMERA,
+                "config.cyclesrenderer.camera.polynomialK3", CAMERA_POLYNOMIAL_K3, -1000000.0D, 1000000.0D, 0.000001D));
+        options.add(doubleOption("camera.polynomialK4", Category.CAMERA,
+                "config.cyclesrenderer.camera.polynomialK4", CAMERA_POLYNOMIAL_K4, -1000000.0D, 1000000.0D, 0.000001D));
+        options.add(doubleOption("camera.cylindricalLongitudeMin", Category.CAMERA,
+                "config.cyclesrenderer.camera.cylindricalLongitudeMin", CAMERA_CYLINDRICAL_LONGITUDE_MIN, -180.0D, 180.0D, 1.0D));
+        options.add(doubleOption("camera.cylindricalLongitudeMax", Category.CAMERA,
+                "config.cyclesrenderer.camera.cylindricalLongitudeMax", CAMERA_CYLINDRICAL_LONGITUDE_MAX, -180.0D, 180.0D, 1.0D));
+        options.add(doubleOption("camera.cylindricalHeightMin", Category.CAMERA,
+                "config.cyclesrenderer.camera.cylindricalHeightMin", CAMERA_CYLINDRICAL_HEIGHT_MIN, -10.0D, 10.0D, 0.1D));
+        options.add(doubleOption("camera.cylindricalHeightMax", Category.CAMERA,
+                "config.cyclesrenderer.camera.cylindricalHeightMax", CAMERA_CYLINDRICAL_HEIGHT_MAX, -10.0D, 10.0D, 0.1D));
+        options.add(doubleOption("camera.cylindricalRadius", Category.CAMERA,
+                "config.cyclesrenderer.camera.cylindricalRadius", CAMERA_CYLINDRICAL_RADIUS, 0.00001D, 1000000.0D, 0.01D));
         options.add(booleanOption("camera.depthOfField", Category.CAMERA,
                 "config.cyclesrenderer.camera.depthOfField", CAMERA_DEPTH_OF_FIELD));
         options.add(doubleOption("camera.focusDistance", Category.CAMERA,
