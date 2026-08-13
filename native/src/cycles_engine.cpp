@@ -1524,7 +1524,7 @@ std::vector<ccl::ImageHandle> create_images(
         ccl::ImageParams params;
         params.colorspace = texture.role == CYCLES_BRIDGE_TEXTURE_DATA_LINEAR
             ? ccl::u_colorspace_data
-            : ccl::u_colorspace_scene_linear_srgb;
+            : ccl::u_colorspace_srgb;
         params.alpha_type = ccl::IMAGE_ALPHA_UNASSOCIATED;
         params.interpolation = ccl::INTERPOLATION_CLOSEST;
         params.extension = ccl::EXTENSION_REPEAT;
@@ -1544,7 +1544,7 @@ ccl::Shader* create_material_shader(
         graph->create_node<ccl::TextureCoordinateNode>();
     ccl::ImageTextureNode* texture = graph->create_node<ccl::ImageTextureNode>();
     texture->handle = images[material.texture_index];
-    texture->set_colorspace(ccl::u_colorspace_scene_linear_srgb);
+    texture->set_colorspace(ccl::u_colorspace_srgb);
     texture->set_alpha_type(ccl::IMAGE_ALPHA_UNASSOCIATED);
     texture->set_interpolation(ccl::INTERPOLATION_CLOSEST);
     texture->set_extension(ccl::EXTENSION_REPEAT);
