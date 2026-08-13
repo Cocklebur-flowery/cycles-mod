@@ -420,7 +420,11 @@ final class CyclesDebugOverlay {
                             + settings.atmosphereOzoneDensity(),
                     COLOR_STATIC);
             out.line(
-                    "camera projection=" + settings.projectionMode().name() + "/"
+                    "camera type=" + settings.cameraType().name() + "/"
+                            + diagnostics.cameraTypeName()
+                            + "  panorama=" + settings.panoramaType().name() + "/"
+                            + diagnostics.panoramaTypeName()
+                            + "  projection=" + settings.projectionMode().name() + "/"
                             + diagnostics.projectionModeName()
                             + "  FOV=" + degrees(diagnostics.verticalFovRadians()) + "deg"
                             + "  lens/sensor=" + settings.focalLengthMm() + "/"

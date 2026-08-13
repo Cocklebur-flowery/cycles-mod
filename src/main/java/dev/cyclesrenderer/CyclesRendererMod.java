@@ -805,7 +805,11 @@ public final class CyclesRendererMod {
             y += 10;
             graphics.text(
                     minecraft.font,
-                    "camera projection=" + settings.projectionMode().name()
+                    "camera type=" + settings.cameraType().name()
+                            + "/" + diagnostics.cameraTypeName()
+                            + " panorama=" + settings.panoramaType().name()
+                            + "/" + diagnostics.panoramaTypeName()
+                            + " projection=" + settings.projectionMode().name()
                             + "/" + diagnostics.projectionModeName()
                             + " fov=" + oneDecimalDegrees(diagnostics.verticalFovRadians())
                             + "deg lens=" + settings.focalLengthMm()

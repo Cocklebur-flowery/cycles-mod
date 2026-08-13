@@ -480,7 +480,7 @@ bool verify_progressive_sampling(
 int main(int argc, char** argv) {
     const bool require_optix = argc > 1 && std::strcmp(argv[1], "--require-optix") == 0;
     std::cerr << "[smoke] ABI check\n";
-    if (cycles_bridge_abi_version() != 33U) {
+    if (cycles_bridge_abi_version() != 34U) {
         std::cerr << "unexpected native ABI " << cycles_bridge_abi_version() << '\n';
         return 1;
     }
@@ -1113,6 +1113,48 @@ int main(int argc, char** argv) {
         return 1;
     }
 
+    std::cerr << "[smoke] Rendering all Cycles panorama camera types\n";
+    settings.camera_type = CYCLES_BRIDGE_CAMERA_PANORAMA;
+    for (std::uint32_t panorama_type = CYCLES_BRIDGE_PANORAMA_EQUIRECTANGULAR;
+         panorama_type <= CYCLES_BRIDGE_PANORAMA_CENTRAL_CYLINDRICAL;
+         ++panorama_type) {
+        settings.panorama_type = panorama_type;
+        settings.revision++;
+        const std::string stage = "panorama " + std::to_string(panorama_type);
+        CyclesBridgeDiagnostics panorama_diagnostics{};
+        panorama_diagnostics.struct_size = sizeof(panorama_diagnostics);
+        panorama_diagnostics.struct_version = 1;
+        if (!require_ok(
+                cycles_bridge_apply_settings(renderer, &settings),
+                stage.c_str())
+            || !wait_for_settings(renderer, settings.revision)
+            || !wait_for_updated_frame(
+                renderer, camera, frame, pixels, stage.c_str(), info, false,
+                CYCLES_BRIDGE_PASS_COMBINED)
+            || !require_ok(
+                cycles_bridge_query_diagnostics(renderer, &panorama_diagnostics),
+                "panorama diagnostics")
+            || panorama_diagnostics.camera_type != CYCLES_BRIDGE_CAMERA_PANORAMA
+            || panorama_diagnostics.panorama_type != panorama_type) {
+            std::cerr << stage << " did not reach the native camera diagnostics\n";
+            cycles_bridge_destroy_renderer(renderer);
+            return 1;
+        }
+    }
+    settings.camera_type = CYCLES_BRIDGE_CAMERA_PERSPECTIVE;
+    settings.panorama_type = CYCLES_BRIDGE_PANORAMA_EQUIRECTANGULAR;
+    settings.revision++;
+    if (!require_ok(
+            cycles_bridge_apply_settings(renderer, &settings),
+            "perspective camera restore")
+        || !wait_for_settings(renderer, settings.revision)
+        || !wait_for_updated_frame(
+            renderer, camera, frame, pixels, "perspective camera restore", info,
+            true, CYCLES_BRIDGE_PASS_COMBINED)) {
+        cycles_bridge_destroy_renderer(renderer);
+        return 1;
+    }
+
     CyclesBridgeDiagnostics diagnostics{};
     diagnostics.struct_size = sizeof(diagnostics);
     diagnostics.struct_version = 1;
@@ -1130,6 +1172,8 @@ int main(int argc, char** argv) {
         || std::abs(diagnostics.effective_camera_clip_near - 0.125F) > 1.0e-6F
         || std::abs(diagnostics.effective_camera_clip_far - 50.0F) > 1.0e-6F
         || diagnostics.projection_mode != CYCLES_BRIDGE_PROJECTION_PHYSICAL_LENS
+        || diagnostics.camera_type != CYCLES_BRIDGE_CAMERA_PERSPECTIVE
+        || diagnostics.panorama_type != CYCLES_BRIDGE_PANORAMA_EQUIRECTANGULAR
         || std::abs(diagnostics.vertical_fov_radians - expected_physical_fov) > 1.0e-5F
         || diagnostics.depth_of_field != 1U
         || std::abs(diagnostics.focus_distance - 8.0F) > 1.0e-6F

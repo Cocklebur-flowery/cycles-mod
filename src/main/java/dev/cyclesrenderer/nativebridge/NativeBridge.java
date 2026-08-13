@@ -2339,6 +2339,27 @@ public final class NativeBridge {
             };
         }
 
+        public String cameraTypeName() {
+            return switch (cameraType) {
+                case 0 -> "PERSPECTIVE";
+                case 1 -> "PANORAMA";
+                default -> "UNKNOWN(" + cameraType + ")";
+            };
+        }
+
+        public String panoramaTypeName() {
+            return switch (panoramaType) {
+                case 0 -> "EQUIRECTANGULAR";
+                case 1 -> "FISHEYE_EQUIDISTANT";
+                case 2 -> "FISHEYE_EQUISOLID";
+                case 3 -> "MIRRORBALL";
+                case 4 -> "FISHEYE_LENS_POLYNOMIAL";
+                case 5 -> "EQUIANGULAR_CUBEMAP_FACE";
+                case 6 -> "CENTRAL_CYLINDRICAL";
+                default -> "UNKNOWN(" + panoramaType + ")";
+            };
+        }
+
         public String framePixelFormatName() {
             return switch (framePixelFormat) {
                 case 1 -> "RGBA8_UNORM";
