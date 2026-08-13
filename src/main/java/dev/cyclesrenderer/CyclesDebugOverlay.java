@@ -1,6 +1,5 @@
 package dev.cyclesrenderer;
 
-import dev.cyclesrenderer.config.CyclesClientConfig;
 import dev.cyclesrenderer.config.CyclesRenderSettings;
 import dev.cyclesrenderer.nativebridge.NativeBridge;
 import dev.cyclesrenderer.render.CyclesFramePresenter;
@@ -38,6 +37,9 @@ final class CyclesDebugOverlay {
             CyclesFramePresenter presenter,
             VulkanExternalBufferPrototype interopBuffer,
             SectionSceneManager sceneManager,
+            CyclesRenderSettings requestedSettings,
+            CyclesRenderSettings acceptedSettings,
+            long rejectedSettingsRevision,
             RuntimeStats runtime) {
         Writer out = new Writer(graphics, minecraft, TOP);
         if (!NativeBridge.isReady()) {
@@ -56,7 +58,7 @@ final class CyclesDebugOverlay {
             CyclesFramePresenter.Telemetry presentation = presenter.telemetry();
             SectionGeometryCollector.Telemetry capture = SectionGeometryCollector.telemetry();
             SectionSceneManager.Telemetry scene = sceneManager.telemetry();
-            CyclesRenderSettings settings = CyclesClientConfig.snapshot();
+            CyclesRenderSettings settings = acceptedSettings;
             NativeBridge.PassDescriptor pass =
                     NativeBridge.passDescriptor(diagnostics.activePassId());
             VulkanCapabilityProbe.Snapshot vulkan =
@@ -273,6 +275,21 @@ final class CyclesDebugOverlay {
                             + "  reset=" + diagnostics.resetName(),
                     COLOR_STATE);
             out.line(
+                    "config revision requested/accepted/rejected="
+                            + requestedSettings.revision() + "/"
+                            + acceptedSettings.revision() + "/"
+                            + (rejectedSettingsRevision >= 0L
+                            ? rejectedSettingsRevision : "-"),
+                    rejectedSettingsRevision == requestedSettings.revision()
+                            ? COLOR_WARNING : COLOR_STATE);
+            out.line(
+                    "working space requested/accepted="
+                            + requestedSettings.workingSpace().name() + "/"
+                            + acceptedSettings.workingSpace().name()
+                            + "  last native reset=" + diagnostics.resetName(),
+                    requestedSettings.workingSpace() == acceptedSettings.workingSpace()
+                            ? COLOR_STATE : COLOR_WARNING);
+            out.line(
                     "pass cache entries MiB used/budget=" + diagnostics.passCacheEntryCount()
                             + " " + mebibytes(diagnostics.passCacheBytes()) + "/"
                             + mebibytes(diagnostics.passCacheBudgetBytes())
@@ -361,7 +378,7 @@ final class CyclesDebugOverlay {
                             : "Vulkan probe unavailable: " + vulkan.error(),
                     vulkan.vulkan() ? COLOR_STATIC : COLOR_WARNING);
             out.line(
-                    "color display/view/look=" + settings.displayDevice().name()
+                    "color accepted display/view/look=" + settings.displayDevice().name()
                             + "/" + settings.viewTransform().name()
                             + "/" + settings.colorLook().name()
                             + " effective="

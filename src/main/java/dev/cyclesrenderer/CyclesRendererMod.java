@@ -219,9 +219,7 @@ public final class CyclesRendererMod {
                 return;
             }
             NativeBridge.applySettings(settings);
-            appliedSettings = settings;
-            appliedSettingsRevision = settings.revision();
-            rejectedSettingsRevision = -1L;
+            recordAcceptedSettings(settings);
         } catch (RuntimeException error) {
             if (appliedSettings != null && appliedSettingsRevision >= 0L) {
                 rejectedSettingsRevision = settings.revision();
@@ -267,9 +265,7 @@ public final class CyclesRendererMod {
         }
         nativeBridgeReady = true;
         NativeBridge.applySettings(settings);
-        appliedSettings = settings;
-        appliedSettingsRevision = settings.revision();
-        rejectedSettingsRevision = -1L;
+        recordAcceptedSettings(settings);
         INTEROP_BUFFER.initialize(Minecraft.getInstance(), settings);
         SCENE_MANAGER.reset();
         FRAME_PRESENTER.reset();
@@ -465,6 +461,19 @@ public final class CyclesRendererMod {
         return settings != null ? settings : CyclesClientConfig.snapshot();
     }
 
+    private static void recordAcceptedSettings(CyclesRenderSettings settings) {
+        CyclesRenderSettings previous = appliedSettings;
+        appliedSettings = settings;
+        appliedSettingsRevision = settings.revision();
+        rejectedSettingsRevision = -1L;
+        if (previous != null && previous.workingSpace() != settings.workingSpace()) {
+            LOGGER.info(
+                    "Cycles working space changed from {} to {}; native session rebuild queued",
+                    previous.workingSpace(),
+                    settings.workingSpace());
+        }
+    }
+
     private static void recordBridgeCall(long elapsedNanos) {
         long micros = Math.max(0L, (elapsedNanos + 999L) / 1_000L);
         lastBridgeCallMicros = micros;
@@ -554,6 +563,9 @@ public final class CyclesRendererMod {
                 FRAME_PRESENTER,
                 INTEROP_BUFFER,
                 SCENE_MANAGER,
+                CyclesClientConfig.snapshot(),
+                activeRenderSettings(),
+                rejectedSettingsRevision,
                 new CyclesDebugOverlay.RuntimeStats(
                         bridgeCallCount,
                         lastBridgeCallMicros,
