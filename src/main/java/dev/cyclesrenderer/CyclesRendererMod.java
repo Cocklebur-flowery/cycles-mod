@@ -72,6 +72,8 @@ public final class CyclesRendererMod {
     private static long nativeFrameId;
     private static long lastStatsLogNanos;
     private static long appliedSettingsRevision = -1L;
+    private static long rejectedSettingsRevision = -1L;
+    private static CyclesRenderSettings appliedSettings;
     private static long bridgeCallCount;
     private static long lastBridgeCallMicros;
     private static long emaBridgeCallMicros;
@@ -206,7 +208,9 @@ public final class CyclesRendererMod {
             return;
         }
         CyclesRenderSettings settings = CyclesClientConfig.snapshot();
-        if (settings.revision() == appliedSettingsRevision) {
+        if (settings.revision() == appliedSettingsRevision
+                || (appliedSettingsRevision >= 0L
+                        && settings.revision() == rejectedSettingsRevision)) {
             return;
         }
         try {
@@ -215,9 +219,21 @@ public final class CyclesRendererMod {
                 return;
             }
             NativeBridge.applySettings(settings);
+            appliedSettings = settings;
             appliedSettingsRevision = settings.revision();
+            rejectedSettingsRevision = -1L;
         } catch (RuntimeException error) {
-            LOGGER.error("Could not apply Cycles client settings", error);
+            if (appliedSettings != null && appliedSettingsRevision >= 0L) {
+                rejectedSettingsRevision = settings.revision();
+                LOGGER.error(
+                        "Could not apply Cycles client settings revision {}; "
+                                + "keeping accepted revision {}",
+                        settings.revision(),
+                        appliedSettings.revision(),
+                        error);
+                return;
+            }
+            LOGGER.error("Could not apply initial Cycles client settings", error);
             if (testFrameEnabled) {
                 disableExperimentalRenderer();
             }
@@ -251,7 +267,9 @@ public final class CyclesRendererMod {
         }
         nativeBridgeReady = true;
         NativeBridge.applySettings(settings);
+        appliedSettings = settings;
         appliedSettingsRevision = settings.revision();
+        rejectedSettingsRevision = -1L;
         INTEROP_BUFFER.initialize(Minecraft.getInstance(), settings);
         SCENE_MANAGER.reset();
         FRAME_PRESENTER.reset();
@@ -308,12 +326,14 @@ public final class CyclesRendererMod {
         long cyclesStart = PERFORMANCE_MONITOR.beginCpuStage();
         PERFORMANCE_MONITOR.gpuMarker(PerformanceSample.GpuMarker.CYCLES_BEGIN);
         try {
+            CyclesRenderSettings renderSettings = activeRenderSettings();
             long sceneStart = PERFORMANCE_MONITOR.beginCpuStage();
             SectionSceneManager.UpdateResult update = SCENE_MANAGER.update(
                     minecraft,
                     level,
                     camera.pos,
-                    resourceRevision);
+                    resourceRevision,
+                    renderSettings);
             PERFORMANCE_MONITOR.endCpuStage(
                     PerformanceSample.CpuStage.SCENE_UPDATE, sceneStart);
             long frameId = nativeFrameId++;
@@ -340,7 +360,7 @@ public final class CyclesRendererMod {
                 PERFORMANCE_MONITOR.gpuMarker(PerformanceSample.GpuMarker.DISPLAY_BEGIN);
                 FRAME_PRESENTER.presentExternal(
                         mainTarget,
-                        CyclesClientConfig.snapshot(),
+                        renderSettings,
                         cameraInput.depthFar(),
                         INTEROP_BUFFER.frameTextureView(),
                         PERFORMANCE_MONITOR);
@@ -381,7 +401,7 @@ public final class CyclesRendererMod {
             PERFORMANCE_MONITOR.gpuMarker(PerformanceSample.GpuMarker.DISPLAY_BEGIN);
             FRAME_PRESENTER.present(
                     mainTarget,
-                    CyclesClientConfig.snapshot(),
+                    renderSettings,
                     cameraInput.depthFar(),
                     PERFORMANCE_MONITOR);
             PERFORMANCE_MONITOR.gpuMarker(PerformanceSample.GpuMarker.DISPLAY_END);
@@ -438,6 +458,11 @@ public final class CyclesRendererMod {
                 camera.orientation.w(),
                 verticalFovRadians,
                 Math.max(camera.depthFar, 1.0F));
+    }
+
+    private static CyclesRenderSettings activeRenderSettings() {
+        CyclesRenderSettings settings = appliedSettings;
+        return settings != null ? settings : CyclesClientConfig.snapshot();
     }
 
     private static void recordBridgeCall(long elapsedNanos) {

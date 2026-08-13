@@ -1,6 +1,5 @@
 package dev.cyclesrenderer.scene;
 
-import dev.cyclesrenderer.config.CyclesClientConfig;
 import dev.cyclesrenderer.config.CyclesRenderSettings;
 import dev.cyclesrenderer.nativebridge.NativeBridge;
 import net.minecraft.client.Minecraft;
@@ -69,13 +68,13 @@ public final class SectionSceneManager {
             Minecraft minecraft,
             ClientLevel currentLevel,
             Vec3 cameraPosition,
-            long currentResourceRevision) {
+            long currentResourceRevision,
+            CyclesRenderSettings settings) {
         long updateStart = System.nanoTime();
         int cameraSectionX = SectionPos.blockToSectionCoord(Mth.floor(cameraPosition.x));
         int cameraSectionY = SectionPos.blockToSectionCoord(Mth.floor(cameraPosition.y));
         int cameraSectionZ = SectionPos.blockToSectionCoord(Mth.floor(cameraPosition.z));
         int viewDistance = minecraft.options.getEffectiveRenderDistance();
-        CyclesRenderSettings settings = CyclesClientConfig.snapshot();
         boolean reset = level != currentLevel
                 || resourceRevision != currentResourceRevision
                 || pbrResourceFingerprint != settings.pbrResourceFingerprint()
