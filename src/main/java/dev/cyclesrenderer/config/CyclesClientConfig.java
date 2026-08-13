@@ -368,7 +368,17 @@ public final class CyclesClientConfig {
                 WORKING_SPACE.get(),
                 WHITE_BALANCE.get(), WHITE_BALANCE_TEMPERATURE.get().floatValue(),
                 WHITE_BALANCE_TINT.get().floatValue(),
-                ACTIVE_PASS.get(), DEBUG_OVERLAY.get());
+                ACTIVE_PASS.get(), DEBUG_OVERLAY.get(),
+                CyclesRenderSettings.CameraType.PERSPECTIVE,
+                CyclesRenderSettings.PanoramaType.EQUIRECTANGULAR,
+                180.0F, 10.5F,
+                -90.0F, 90.0F, -180.0F, 180.0F,
+                -1.1735143712967577e-05F,
+                -0.019988736953434998F,
+                -3.3525322965709175e-06F,
+                3.099275275886036e-06F,
+                -2.6064646454854524e-08F,
+                -180.0F, 180.0F, -1.0F, 1.0F, 1.0F);
     }
 
     public static void markReloaded() {

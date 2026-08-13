@@ -24,7 +24,7 @@ import static java.lang.foreign.ValueLayout.JAVA_INT;
 import static java.lang.foreign.ValueLayout.JAVA_LONG;
 
 public final class NativeBridge {
-    public static final int ABI_VERSION = 33;
+    public static final int ABI_VERSION = 34;
     public static final int PIXEL_FORMAT_RGBA16_FLOAT = 2;
     public static final int PIXEL_FORMAT_RGBA32_FLOAT = 3;
 
@@ -187,7 +187,25 @@ public final class NativeBridge {
             JAVA_FLOAT.withName("pbr_emission_scale"),
             JAVA_INT.withName("working_space"),
             JAVA_INT.withName("dlss_quality_mode"),
-            JAVA_INT.withName("dlss_reserved"));
+            JAVA_INT.withName("dlss_reserved"),
+            JAVA_INT.withName("camera_type"),
+            JAVA_INT.withName("panorama_type"),
+            JAVA_FLOAT.withName("fisheye_fov_degrees"),
+            JAVA_FLOAT.withName("fisheye_lens_mm"),
+            JAVA_FLOAT.withName("latitude_min_degrees"),
+            JAVA_FLOAT.withName("latitude_max_degrees"),
+            JAVA_FLOAT.withName("longitude_min_degrees"),
+            JAVA_FLOAT.withName("longitude_max_degrees"),
+            JAVA_FLOAT.withName("fisheye_polynomial_k0"),
+            JAVA_FLOAT.withName("fisheye_polynomial_k1"),
+            JAVA_FLOAT.withName("fisheye_polynomial_k2"),
+            JAVA_FLOAT.withName("fisheye_polynomial_k3"),
+            JAVA_FLOAT.withName("fisheye_polynomial_k4"),
+            JAVA_FLOAT.withName("central_cylindrical_longitude_min_degrees"),
+            JAVA_FLOAT.withName("central_cylindrical_longitude_max_degrees"),
+            JAVA_FLOAT.withName("central_cylindrical_height_min"),
+            JAVA_FLOAT.withName("central_cylindrical_height_max"),
+            JAVA_FLOAT.withName("central_cylindrical_radius"));
     private static final MemoryLayout PASS_DESCRIPTOR_LAYOUT = MemoryLayout.structLayout(
             JAVA_INT.withName("struct_size"),
             JAVA_INT.withName("struct_version"),
@@ -336,7 +354,9 @@ public final class NativeBridge {
             JAVA_INT.withName("last_scene_first_frame_micros"),
             JAVA_INT.withName("ema_scene_first_frame_micros"),
             JAVA_INT.withName("max_scene_first_frame_micros"),
-            JAVA_INT.withName("timing_reserved"));
+            JAVA_INT.withName("timing_reserved"),
+            JAVA_INT.withName("camera_type"),
+            JAVA_INT.withName("panorama_type"));
     private static final MemoryLayout VULKAN_INTEROP_BUFFER_LAYOUT =
             MemoryLayout.structLayout(
                     JAVA_INT.withName("struct_size"),
@@ -412,11 +432,11 @@ public final class NativeBridge {
                 || SECTION_LAYOUT.byteSize() != 48L
                 || FRAME_LAYOUT.byteSize() != 40L
                 || FRAME_VIEW_LAYOUT.byteSize() != 72L
-                || SETTINGS_LAYOUT.byteSize() != 288L
+                || SETTINGS_LAYOUT.byteSize() != 360L
                 || PASS_DESCRIPTOR_LAYOUT.byteSize() != 64L
                 || CAPABILITIES_LAYOUT.byteSize() != 64L
                 || COLOR_LUT_DESCRIPTOR_LAYOUT.byteSize() != 72L
-                || DIAGNOSTICS_LAYOUT.byteSize() != 504L
+                || DIAGNOSTICS_LAYOUT.byteSize() != 512L
                 || VULKAN_INTEROP_BUFFER_LAYOUT.byteSize() != 80L
                 || VULKAN_INTEROP_STATE_LAYOUT.byteSize() != 72L
                 || VERTEX_LAYOUT.byteSize() != 40L
@@ -1278,6 +1298,26 @@ public final class NativeBridge {
             settingsSegment.set(JAVA_FLOAT, 272L, settings.pbrEmissionScale());
             settingsSegment.set(JAVA_INT, 276L, settings.workingSpace().nativeId());
             settingsSegment.set(JAVA_INT, 280L, settings.dlssQualityMode().nativeId());
+            settingsSegment.set(JAVA_INT, 288L, settings.cameraType().nativeId());
+            settingsSegment.set(JAVA_INT, 292L, settings.panoramaType().nativeId());
+            settingsSegment.set(JAVA_FLOAT, 296L, settings.fisheyeFovDegrees());
+            settingsSegment.set(JAVA_FLOAT, 300L, settings.fisheyeLensMm());
+            settingsSegment.set(JAVA_FLOAT, 304L, settings.latitudeMinDegrees());
+            settingsSegment.set(JAVA_FLOAT, 308L, settings.latitudeMaxDegrees());
+            settingsSegment.set(JAVA_FLOAT, 312L, settings.longitudeMinDegrees());
+            settingsSegment.set(JAVA_FLOAT, 316L, settings.longitudeMaxDegrees());
+            settingsSegment.set(JAVA_FLOAT, 320L, settings.fisheyePolynomialK0());
+            settingsSegment.set(JAVA_FLOAT, 324L, settings.fisheyePolynomialK1());
+            settingsSegment.set(JAVA_FLOAT, 328L, settings.fisheyePolynomialK2());
+            settingsSegment.set(JAVA_FLOAT, 332L, settings.fisheyePolynomialK3());
+            settingsSegment.set(JAVA_FLOAT, 336L, settings.fisheyePolynomialK4());
+            settingsSegment.set(JAVA_FLOAT, 340L,
+                    settings.centralCylindricalLongitudeMinDegrees());
+            settingsSegment.set(JAVA_FLOAT, 344L,
+                    settings.centralCylindricalLongitudeMaxDegrees());
+            settingsSegment.set(JAVA_FLOAT, 348L, settings.centralCylindricalHeightMin());
+            settingsSegment.set(JAVA_FLOAT, 352L, settings.centralCylindricalHeightMax());
+            settingsSegment.set(JAVA_FLOAT, 356L, settings.centralCylindricalRadius());
             checkRendererStatus(
                     (int) applySettings.invokeExact(renderer, settingsSegment),
                     "settings update");
@@ -1509,7 +1549,9 @@ public final class NativeBridge {
                     diagnosticsSegment.get(JAVA_INT, 472L),
                     diagnosticsSegment.get(JAVA_INT, 488L),
                     diagnosticsSegment.get(JAVA_INT, 492L),
-                    diagnosticsSegment.get(JAVA_INT, 496L));
+                    diagnosticsSegment.get(JAVA_INT, 496L),
+                    diagnosticsSegment.get(JAVA_INT, 504L),
+                    diagnosticsSegment.get(JAVA_INT, 508L));
         }
 
         private static String uuidString(MemorySegment bytes) {
@@ -2206,7 +2248,9 @@ public final class NativeBridge {
             int maxBvhUpdateMicros,
             int lastSceneFirstFrameMicros,
             int emaSceneFirstFrameMicros,
-            int maxSceneFirstFrameMicros) {
+            int maxSceneFirstFrameMicros,
+            int cameraType,
+            int panoramaType) {
         public String stateName() {
             return switch (stateCode) {
                 case 1 -> "scene-staging";

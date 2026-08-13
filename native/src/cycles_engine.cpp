@@ -110,6 +110,24 @@ CyclesBridgeRenderSettings default_settings() {
     settings.pbr_emission_scale = 1.0F;
     settings.working_space = CYCLES_BRIDGE_WORKING_SPACE_LINEAR_REC709;
     settings.dlss_quality_mode = CYCLES_BRIDGE_DLSS_QUALITY_QUALITY;
+    settings.camera_type = CYCLES_BRIDGE_CAMERA_PERSPECTIVE;
+    settings.panorama_type = CYCLES_BRIDGE_PANORAMA_EQUIRECTANGULAR;
+    settings.fisheye_fov_degrees = 180.0F;
+    settings.fisheye_lens_mm = 10.5F;
+    settings.latitude_min_degrees = -90.0F;
+    settings.latitude_max_degrees = 90.0F;
+    settings.longitude_min_degrees = -180.0F;
+    settings.longitude_max_degrees = 180.0F;
+    settings.fisheye_polynomial_k0 = -1.1735143712967577e-05F;
+    settings.fisheye_polynomial_k1 = -0.019988736953434998F;
+    settings.fisheye_polynomial_k2 = -3.3525322965709175e-06F;
+    settings.fisheye_polynomial_k3 = 3.099275275886036e-06F;
+    settings.fisheye_polynomial_k4 = -2.6064646454854524e-08F;
+    settings.central_cylindrical_longitude_min_degrees = -180.0F;
+    settings.central_cylindrical_longitude_max_degrees = 180.0F;
+    settings.central_cylindrical_height_min = -1.0F;
+    settings.central_cylindrical_height_max = 1.0F;
+    settings.central_cylindrical_radius = 1.0F;
     settings.interactive_samples = 1;
     settings.still_samples = 8;
     settings.stationary_delay_millis = 150;
@@ -1898,7 +1916,8 @@ void apply_scene_delta(
 
 ccl::Transform camera_transform(
     const CyclesBridgeCamera& camera,
-    const CyclesBridgeScene& scene) {
+    const CyclesBridgeScene& scene,
+    const CyclesBridgeRenderSettings& settings) {
     double qx = camera.rotation_x;
     double qy = camera.rotation_y;
     double qz = camera.rotation_z;
@@ -1927,14 +1946,33 @@ ccl::Transform camera_transform(
     const float py = static_cast<float>(camera.position_y - scene.origin_y);
     const float pz = static_cast<float>(camera.position_z - scene.origin_z);
 
-    // Minecraft rotates a camera whose local forward axis is -Z, while Cycles
-    // emits perspective rays along local +Z. Negate the local Z basis column,
-    // matching Cycles' own Hydra camera conversion.
-    return {
-        ccl::make_float4(1.0F - 2.0F * (yy + zz), 2.0F * (xy - zw), -2.0F * (xz + yw), px),
-        ccl::make_float4(2.0F * (xy + zw), 1.0F - 2.0F * (xx + zz), -2.0F * (yz - xw), py),
-        ccl::make_float4(2.0F * (xz - yw), 2.0F * (yz + xw), -(1.0F - 2.0F * (xx + yy)), pz),
+    const ccl::Transform minecraft_transform = {
+        ccl::make_float4(1.0F - 2.0F * (yy + zz), 2.0F * (xy - zw), 2.0F * (xz + yw), px),
+        ccl::make_float4(2.0F * (xy + zw), 1.0F - 2.0F * (xx + zz), 2.0F * (yz - xw), py),
+        ccl::make_float4(2.0F * (xz - yw), 2.0F * (yz + xw), 1.0F - 2.0F * (xx + yy), pz),
     };
+
+    // Minecraft and Blender cameras both point down local -Z. Match Blender's
+    // own Cycles adapter so every panorama subtype has the same visual heading
+    // as its Blender counterpart (mirror ball has a distinct convention).
+    if (settings.camera_type == CYCLES_BRIDGE_CAMERA_PANORAMA) {
+        if (settings.panorama_type == CYCLES_BRIDGE_PANORAMA_MIRRORBALL) {
+            return ccl::transform_clear_scale(
+                minecraft_transform
+                * ccl::make_transform(
+                    1.0F, 0.0F, 0.0F, 0.0F,
+                    0.0F, 0.0F, 1.0F, 0.0F,
+                    0.0F, 1.0F, 0.0F, 0.0F));
+        }
+        return ccl::transform_clear_scale(
+            minecraft_transform
+            * ccl::make_transform(
+                0.0F, -1.0F, 0.0F, 0.0F,
+                0.0F, 0.0F, 1.0F, 0.0F,
+                -1.0F, 0.0F, 0.0F, 0.0F));
+    }
+    return ccl::transform_clear_scale(
+        minecraft_transform * ccl::transform_scale(1.0F, 1.0F, -1.0F));
 }
 
 ccl::BufferParams configure_camera(
@@ -1943,7 +1981,9 @@ ccl::BufferParams configure_camera(
     const CameraRequest& camera_request,
     const CyclesBridgeRenderSettings& settings) {
     ccl::Camera* camera = session.scene->camera;
-    camera->set_camera_type(ccl::CAMERA_PERSPECTIVE);
+    const bool panorama = settings.camera_type == CYCLES_BRIDGE_CAMERA_PANORAMA;
+    camera->set_camera_type(panorama ? ccl::CAMERA_PANORAMA : ccl::CAMERA_PERSPECTIVE);
+    camera->set_panorama_type(static_cast<ccl::PanoramaType>(settings.panorama_type));
     camera->set_full_width(static_cast<int>(camera_request.render_width));
     camera->set_full_height(static_cast<int>(camera_request.render_height));
     const float aspect = static_cast<float>(camera_request.render_width)
@@ -1954,6 +1994,27 @@ ccl::BufferParams configure_camera(
             settings.sensor_width_mm / (2.0F * settings.focal_length_mm * aspect))
         : camera_request.camera.vertical_fov_radians;
     camera->set_fov(vertical_fov);
+    camera->set_fisheye_fov(settings.fisheye_fov_degrees * kDegreesToRadians);
+    camera->set_fisheye_lens(settings.fisheye_lens_mm);
+    camera->set_latitude_min(settings.latitude_min_degrees * kDegreesToRadians);
+    camera->set_latitude_max(settings.latitude_max_degrees * kDegreesToRadians);
+    camera->set_longitude_min(settings.longitude_min_degrees * kDegreesToRadians);
+    camera->set_longitude_max(settings.longitude_max_degrees * kDegreesToRadians);
+    camera->set_fisheye_polynomial_k0(settings.fisheye_polynomial_k0);
+    camera->set_fisheye_polynomial_k1(settings.fisheye_polynomial_k1);
+    camera->set_fisheye_polynomial_k2(settings.fisheye_polynomial_k2);
+    camera->set_fisheye_polynomial_k3(settings.fisheye_polynomial_k3);
+    camera->set_fisheye_polynomial_k4(settings.fisheye_polynomial_k4);
+    camera->set_central_cylindrical_range_u_min(
+        settings.central_cylindrical_longitude_min_degrees * kDegreesToRadians);
+    camera->set_central_cylindrical_range_u_max(
+        settings.central_cylindrical_longitude_max_degrees * kDegreesToRadians);
+    camera->set_central_cylindrical_range_v_min(
+        settings.central_cylindrical_height_min / settings.central_cylindrical_radius);
+    camera->set_central_cylindrical_range_v_max(
+        settings.central_cylindrical_height_max / settings.central_cylindrical_radius);
+    camera->set_sensorwidth(settings.sensor_width_mm);
+    camera->set_sensorheight(settings.sensor_width_mm / aspect);
     const float near_clip = settings.camera_clip_near;
     const float requested_far_clip = settings.camera_clip_far > 0.0F
         ? settings.camera_clip_far
@@ -1974,7 +2035,8 @@ ccl::BufferParams configure_camera(
     scene.origin_x = resources.origin_x;
     scene.origin_y = resources.origin_y;
     scene.origin_z = resources.origin_z;
-    const ccl::Transform transform = camera_transform(camera_request.camera, scene);
+    const ccl::Transform transform = camera_transform(
+        camera_request.camera, scene, settings);
     camera->set_matrix(transform);
     ccl::array<ccl::Transform> motion = camera->get_motion();
     motion.resize(2, transform);
@@ -2750,6 +2812,8 @@ class CyclesEngine::Impl final {
             diagnostics.aperture_blades = aperture_blades_diagnostic_;
             diagnostics.aperture_rotation_radians = aperture_rotation_diagnostic_;
             diagnostics.aperture_ratio = aperture_ratio_diagnostic_;
+            diagnostics.camera_type = camera_type_diagnostic_;
+            diagnostics.panorama_type = panorama_type_diagnostic_;
             if (selected_device_uuid_.has_value()) {
                 diagnostics.device_uuid_valid = 1U;
                 std::memcpy(
@@ -2885,8 +2949,9 @@ class CyclesEngine::Impl final {
                 || !same_camera(
                     *requested_camera_,
                     request,
-                    requested_settings_.projection_mode
-                        == CYCLES_BRIDGE_PROJECTION_MINECRAFT_FOV,
+                    requested_settings_.camera_type == CYCLES_BRIDGE_CAMERA_PERSPECTIVE
+                        && requested_settings_.projection_mode
+                            == CYCLES_BRIDGE_PROJECTION_MINECRAFT_FOV,
                     requested_settings_.camera_clip_far == 0.0F)) {
                 std::tie(request.render_width, request.render_height) = render_dimensions(
                     camera.viewport_width,
@@ -3257,6 +3322,8 @@ class CyclesEngine::Impl final {
                     ? settings.camera_clip_far
                     : camera_request.camera.depth_far);
             projection_mode_diagnostic_ = settings.projection_mode;
+            camera_type_diagnostic_ = settings.camera_type;
+            panorama_type_diagnostic_ = settings.panorama_type;
             const float aspect = static_cast<float>(camera_request.render_width)
                 / static_cast<float>(std::max(1U, camera_request.render_height));
             vertical_fov_diagnostic_ = settings.projection_mode
@@ -3678,6 +3745,8 @@ class CyclesEngine::Impl final {
     float camera_clip_near_diagnostic_ = 0.05F;
     float camera_clip_far_diagnostic_ = 0.0F;
     std::uint32_t projection_mode_diagnostic_ = CYCLES_BRIDGE_PROJECTION_MINECRAFT_FOV;
+    std::uint32_t camera_type_diagnostic_ = CYCLES_BRIDGE_CAMERA_PERSPECTIVE;
+    std::uint32_t panorama_type_diagnostic_ = CYCLES_BRIDGE_PANORAMA_EQUIRECTANGULAR;
     float vertical_fov_diagnostic_ = 0.0F;
     std::uint32_t depth_of_field_diagnostic_ = 0U;
     float focus_distance_diagnostic_ = 10.0F;

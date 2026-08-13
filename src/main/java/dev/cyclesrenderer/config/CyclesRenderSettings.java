@@ -82,7 +82,25 @@ public record CyclesRenderSettings(
         float whiteBalanceTemperature,
         float whiteBalanceTint,
         PassView activePass,
-        boolean debugOverlay) {
+        boolean debugOverlay,
+        CameraType cameraType,
+        PanoramaType panoramaType,
+        float fisheyeFovDegrees,
+        float fisheyeLensMm,
+        float latitudeMinDegrees,
+        float latitudeMaxDegrees,
+        float longitudeMinDegrees,
+        float longitudeMaxDegrees,
+        float fisheyePolynomialK0,
+        float fisheyePolynomialK1,
+        float fisheyePolynomialK2,
+        float fisheyePolynomialK3,
+        float fisheyePolynomialK4,
+        float centralCylindricalLongitudeMinDegrees,
+        float centralCylindricalLongitudeMaxDegrees,
+        float centralCylindricalHeightMin,
+        float centralCylindricalHeightMax,
+        float centralCylindricalRadius) {
 
     public int pbrResourceFingerprint() {
         int result = pbrMode.hashCode();
@@ -205,6 +223,52 @@ public record CyclesRenderSettings(
         @Override
         public String translationGroup() {
             return "projection_mode";
+        }
+    }
+
+    public enum CameraType implements NativeEnum, NamedEnum {
+        PERSPECTIVE(0), PANORAMA(1);
+
+        private final int nativeId;
+
+        CameraType(int nativeId) {
+            this.nativeId = nativeId;
+        }
+
+        @Override
+        public int nativeId() {
+            return nativeId;
+        }
+
+        @Override
+        public String translationGroup() {
+            return "camera_type";
+        }
+    }
+
+    public enum PanoramaType implements NativeEnum, NamedEnum {
+        EQUIRECTANGULAR(0),
+        FISHEYE_EQUIDISTANT(1),
+        FISHEYE_EQUISOLID(2),
+        MIRRORBALL(3),
+        FISHEYE_LENS_POLYNOMIAL(4),
+        EQUIANGULAR_CUBEMAP_FACE(5),
+        CENTRAL_CYLINDRICAL(6);
+
+        private final int nativeId;
+
+        PanoramaType(int nativeId) {
+            this.nativeId = nativeId;
+        }
+
+        @Override
+        public int nativeId() {
+            return nativeId;
+        }
+
+        @Override
+        public String translationGroup() {
+            return "panorama_type";
         }
     }
 

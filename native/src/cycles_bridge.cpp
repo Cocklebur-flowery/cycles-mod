@@ -18,9 +18,9 @@ struct CyclesBridgeRenderer {
 
 namespace {
 
-constexpr std::uint32_t kAbiVersion = 33;
+constexpr std::uint32_t kAbiVersion = 34;
 constexpr std::uint32_t kStructVersion = 1;
-constexpr char kBuildInfo[] = "cyclesrenderer-native/cycles-5.2;abi=33";
+constexpr char kBuildInfo[] = "cyclesrenderer-native/cycles-5.2;abi=34";
 
 static_assert(sizeof(CyclesBridgeCamera) == 80);
 static_assert(offsetof(CyclesBridgeCamera, frame_id) == 8);
@@ -36,17 +36,21 @@ static_assert(sizeof(CyclesBridgeFrame) == 40);
 static_assert(sizeof(CyclesBridgeFrameView) == 72);
 static_assert(offsetof(CyclesBridgeFrameView, generation) == 16);
 static_assert(offsetof(CyclesBridgeFrameView, pixels) == 48);
-static_assert(sizeof(CyclesBridgeRenderSettings) == 288);
+static_assert(sizeof(CyclesBridgeRenderSettings) == 360);
+static_assert(offsetof(CyclesBridgeRenderSettings, camera_type) == 288);
+static_assert(offsetof(CyclesBridgeRenderSettings, central_cylindrical_radius) == 356);
 static_assert(sizeof(CyclesBridgePassDescriptor) == 64);
 static_assert(sizeof(CyclesBridgeCapabilities) == 64);
 static_assert(sizeof(CyclesBridgeColorLutDescriptor) == 72);
 static_assert(offsetof(CyclesBridgeColorLutDescriptor, pixel_byte_count) == 32);
-static_assert(sizeof(CyclesBridgeDiagnostics) == 504);
+static_assert(sizeof(CyclesBridgeDiagnostics) == 512);
 static_assert(offsetof(CyclesBridgeDiagnostics, device_uuid_valid) == 376);
 static_assert(offsetof(CyclesBridgeDiagnostics, device_uuid) == 380);
 static_assert(offsetof(CyclesBridgeDiagnostics, scene_timing_revision) == 400);
 static_assert(offsetof(CyclesBridgeDiagnostics, last_scene_queue_micros) == 416);
 static_assert(offsetof(CyclesBridgeDiagnostics, timing_reserved) == 500);
+static_assert(offsetof(CyclesBridgeDiagnostics, camera_type) == 504);
+static_assert(offsetof(CyclesBridgeDiagnostics, panorama_type) == 508);
 static_assert(sizeof(CyclesBridgeVulkanInteropBuffer) == 80);
 static_assert(offsetof(CyclesBridgeVulkanInteropBuffer, allocation_byte_count) == 24);
 static_assert(offsetof(CyclesBridgeVulkanInteropBuffer, memory_handle) == 32);
@@ -248,6 +252,45 @@ bool valid_settings(const CyclesBridgeRenderSettings& settings) {
         && settings.focal_length_mm >= 1.0F && settings.focal_length_mm <= 300.0F
         && std::isfinite(settings.sensor_width_mm)
         && settings.sensor_width_mm >= 1.0F && settings.sensor_width_mm <= 100.0F
+        && settings.camera_type <= CYCLES_BRIDGE_CAMERA_PANORAMA
+        && settings.panorama_type <= CYCLES_BRIDGE_PANORAMA_CENTRAL_CYLINDRICAL
+        && std::isfinite(settings.fisheye_fov_degrees)
+        && settings.fisheye_fov_degrees >= 10.0F
+        && settings.fisheye_fov_degrees <= 1800.0F
+        && std::isfinite(settings.fisheye_lens_mm)
+        && settings.fisheye_lens_mm >= 0.01F && settings.fisheye_lens_mm <= 100.0F
+        && std::isfinite(settings.latitude_min_degrees)
+        && settings.latitude_min_degrees >= -90.0F
+        && settings.latitude_min_degrees <= 90.0F
+        && std::isfinite(settings.latitude_max_degrees)
+        && settings.latitude_max_degrees >= -90.0F
+        && settings.latitude_max_degrees <= 90.0F
+        && std::isfinite(settings.longitude_min_degrees)
+        && settings.longitude_min_degrees >= -180.0F
+        && settings.longitude_min_degrees <= 180.0F
+        && std::isfinite(settings.longitude_max_degrees)
+        && settings.longitude_max_degrees >= -180.0F
+        && settings.longitude_max_degrees <= 180.0F
+        && std::isfinite(settings.fisheye_polynomial_k0)
+        && std::isfinite(settings.fisheye_polynomial_k1)
+        && std::isfinite(settings.fisheye_polynomial_k2)
+        && std::isfinite(settings.fisheye_polynomial_k3)
+        && std::isfinite(settings.fisheye_polynomial_k4)
+        && std::isfinite(settings.central_cylindrical_longitude_min_degrees)
+        && settings.central_cylindrical_longitude_min_degrees >= -180.0F
+        && settings.central_cylindrical_longitude_min_degrees <= 180.0F
+        && std::isfinite(settings.central_cylindrical_longitude_max_degrees)
+        && settings.central_cylindrical_longitude_max_degrees >= -180.0F
+        && settings.central_cylindrical_longitude_max_degrees <= 180.0F
+        && std::isfinite(settings.central_cylindrical_height_min)
+        && settings.central_cylindrical_height_min >= -10.0F
+        && settings.central_cylindrical_height_min <= 10.0F
+        && std::isfinite(settings.central_cylindrical_height_max)
+        && settings.central_cylindrical_height_max >= -10.0F
+        && settings.central_cylindrical_height_max <= 10.0F
+        && std::isfinite(settings.central_cylindrical_radius)
+        && settings.central_cylindrical_radius >= 1.0e-5F
+        && settings.central_cylindrical_radius <= 1000000.0F
         && valid_bool(settings.depth_of_field)
         && std::isfinite(settings.focus_distance)
         && settings.focus_distance >= 0.01F && settings.focus_distance <= 1000000.0F

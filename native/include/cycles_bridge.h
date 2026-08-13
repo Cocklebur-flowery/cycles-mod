@@ -235,6 +235,22 @@ enum CyclesBridgeProjectionMode : std::uint32_t {
     CYCLES_BRIDGE_PROJECTION_PHYSICAL_LENS = 1,
 };
 
+enum CyclesBridgeCameraType : std::uint32_t {
+    CYCLES_BRIDGE_CAMERA_PERSPECTIVE = 0,
+    CYCLES_BRIDGE_CAMERA_PANORAMA = 1,
+};
+
+// Values intentionally match ccl::PanoramaType in Cycles 5.2.
+enum CyclesBridgePanoramaType : std::uint32_t {
+    CYCLES_BRIDGE_PANORAMA_EQUIRECTANGULAR = 0,
+    CYCLES_BRIDGE_PANORAMA_FISHEYE_EQUIDISTANT = 1,
+    CYCLES_BRIDGE_PANORAMA_FISHEYE_EQUISOLID = 2,
+    CYCLES_BRIDGE_PANORAMA_MIRRORBALL = 3,
+    CYCLES_BRIDGE_PANORAMA_FISHEYE_LENS_POLYNOMIAL = 4,
+    CYCLES_BRIDGE_PANORAMA_EQUIANGULAR_CUBEMAP_FACE = 5,
+    CYCLES_BRIDGE_PANORAMA_CENTRAL_CYLINDRICAL = 6,
+};
+
 enum CyclesBridgeVulkanInteropFlags : std::uint32_t {
     CYCLES_BRIDGE_VULKAN_INTEROP_OWNERSHIP_TRANSFER = 1U << 0U,
 };
@@ -404,6 +420,24 @@ struct CyclesBridgeRenderSettings {
     std::uint32_t working_space;
     std::uint32_t dlss_quality_mode;
     std::uint32_t dlss_reserved;
+    std::uint32_t camera_type;
+    std::uint32_t panorama_type;
+    float fisheye_fov_degrees;
+    float fisheye_lens_mm;
+    float latitude_min_degrees;
+    float latitude_max_degrees;
+    float longitude_min_degrees;
+    float longitude_max_degrees;
+    float fisheye_polynomial_k0;
+    float fisheye_polynomial_k1;
+    float fisheye_polynomial_k2;
+    float fisheye_polynomial_k3;
+    float fisheye_polynomial_k4;
+    float central_cylindrical_longitude_min_degrees;
+    float central_cylindrical_longitude_max_degrees;
+    float central_cylindrical_height_min;
+    float central_cylindrical_height_max;
+    float central_cylindrical_radius;
 };
 
 struct CyclesBridgePassDescriptor {
@@ -559,6 +593,8 @@ struct CyclesBridgeDiagnostics {
     std::uint32_t ema_scene_first_frame_micros;
     std::uint32_t max_scene_first_frame_micros;
     std::uint32_t timing_reserved;
+    std::uint32_t camera_type;
+    std::uint32_t panorama_type;
 };
 
 struct CyclesBridgeVulkanInteropBuffer {
