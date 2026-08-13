@@ -1,6 +1,6 @@
 # OCIO 色彩管理（P11）
 
-状态：P11a-P11d、P17b1-P17c 已实现；P17c 等待游戏内工作空间切换验收
+状态：P11a-P11d、P17b1-P17d 已实现；P17d 等待游戏内显示/View/Look 切换验收
 目标平台：Blender 5.2.0 / OpenColorIO 2.5 / Minecraft Vulkan sRGB SDR swapchain
 
 ## 1. 固定来源
@@ -80,3 +80,10 @@ Minecraft 26.2 的图形封装目前不开放 3D 纹理，因此 P11 的 GPU LUT
 - LUT 只在 View Transform 第一次选择或切换到另一高级变换时构建和上传；相机移动、新 sample、场景更新和 Pass cache 不会重新上传 LUT，也不会因显示变换清空 Cycles 累积。
 - F10 增加 LUT 构建加上传的 last/EMA/max、次数、当前 View ID 和累计 MiB。该耗时是切换色彩变换的一次性成本，不参与逐帧热点判断。
 - 自动验证覆盖 Java 编译、资源打包、Native OCIO 基准与完整构建。当前环境没有独立 GLSL 编译器，因此 pipeline layout、shader 编译及游戏内高光梯度仍需下一次客户端启动验收。
+
+## 9. P17d 显示、查看变换与 Look 矩阵
+
+- ABI v33 将 LUT 查询扩展为 `Display + View + Look + Working Space`，LUT 描述符为 72 字节；诊断结构仍为 504 字节。
+- 显示设备枚举包含 sRGB、Display P3、Rec.1886、Rec.2020、Rec.2100-PQ 和 Rec.2100-HLG。View 与 Look 均来自固定的 Blender 5.2 OCIO 配置，不使用手写近似曲线。
+- F9 暴露显示、View 与对应 Look。组合不兼容时仅在运行时回退到 AgX/None，不修改持久配置；F10 同时显示请求组合和实际组合。
+- 本阶段只完成 OCIO 数据与显示端 LUT 契约。Rec.2100-PQ/HLG 的真实窗口输出仍由后续 Vulkan 交换链阶段负责，包括 surface format、色彩空间协商、HDR 元数据和系统显示状态验证。

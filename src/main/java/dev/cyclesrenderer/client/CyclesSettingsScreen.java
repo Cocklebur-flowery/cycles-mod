@@ -125,7 +125,8 @@ public final class CyclesSettingsScreen extends Screen {
         lines.add(Component.translatable(
                 "screen.cyclesrenderer.settings.color_pipeline",
                 settings.workingSpace().getTranslatedName(),
-                settings.viewTransform().getTranslatedName()));
+                settings.displayDevice().getTranslatedName(),
+                settings.viewTransform().effectiveFor(settings.displayDevice()).getTranslatedName()));
         lines.add(Component.translatable(
                 "screen.cyclesrenderer.settings.color_look",
                 settings.colorLook().getTranslatedName()));
