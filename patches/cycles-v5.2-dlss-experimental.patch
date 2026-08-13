@@ -267,10 +267,10 @@ index 4e1dac4b6240588caf504bdb270bb9c2c963a2c5..b33c3a0e1e6167b371e1386d5449dd70
  
 diff --git a/src/integrator/denoiser_dlss.cpp b/src/integrator/denoiser_dlss.cpp
 new file mode 100644
-index 0000000000000000000000000000000000000000..64ef18d39aa822de4b89b6a0e6a4fc3e9ae5b400
+index 0000000000000000000000000000000000000000..8d1affc2e635904b3cd01a4816acd9d857e9eaa7
 --- /dev/null
 +++ b/src/integrator/denoiser_dlss.cpp
-@@ -0,0 +1,572 @@
+@@ -0,0 +1,579 @@
 +/* SPDX-FileCopyrightText: 2025 NVIDIA Corporation
 + * SPDX-FileCopyrightText: 2011-2022 Blender Foundation
 + *
@@ -287,6 +287,8 @@ index 0000000000000000000000000000000000000000..64ef18d39aa822de4b89b6a0e6a4fc3e
 +
 +#  include <nvsdk_ngx.h>
 +#  include <nvsdk_ngx_defs_dlssd.h>
++
++#  include <atomic>
 +
 +#  ifdef _WIN32
 +#    include "util/windows.h"
@@ -400,6 +402,12 @@ index 0000000000000000000000000000000000000000..64ef18d39aa822de4b89b6a0e6a4fc3e
 +CCL_NAMESPACE_BEGIN
 +
 +static const int ApplicationId = 100334311;
++static std::atomic_bool reset_history{false};
++
++void request_dlss_history_reset()
++{
++  reset_history.store(true, std::memory_order_release);
++}
 +
 +void DLSSDenoiser::CUDATexture::init(Device *device, int width, int height, int num_components)
 +{
@@ -805,12 +813,11 @@ index 0000000000000000000000000000000000000000..64ef18d39aa822de4b89b6a0e6a4fc3e
 +  CUDADevice *const cuda_device = static_cast<CUDADevice *>(denoiser_device_);
 +  const CUDAContextScope scope(cuda_device);
 +
-+  params->Set(NVSDK_NGX_Parameter_Reset, 0);
++  params->Set(NVSDK_NGX_Parameter_Reset,
++              reset_history.exchange(false, std::memory_order_acq_rel) ? 1 : 0);
 +
 +  params->Set(NVSDK_NGX_Parameter_Jitter_Offset_X, context.pixel_jitter.x);
 +  params->Set(NVSDK_NGX_Parameter_Jitter_Offset_Y, context.pixel_jitter.y);
-+  params->Set(NVSDK_NGX_Parameter_MV_Scale_X, 1.0f / context.buffer_params.width);
-+  params->Set(NVSDK_NGX_Parameter_MV_Scale_Y, 1.0f / context.buffer_params.height);
 +
 +  params->Set(NVSDK_NGX_Parameter_Color, &tex_color_.texture_handle);
 +  params->Set(NVSDK_NGX_Parameter_Depth, &tex_depth_.texture_handle);

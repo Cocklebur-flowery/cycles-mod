@@ -28,6 +28,11 @@
 
 #include "device/device.h"
 #include "device/cuda/device.h"
+#if defined(CYCLESRENDERER_DLSS_EXPERIMENTAL)
+namespace ccl {
+void request_dlss_history_reset();
+}
+#endif
 #if defined(WITH_CUDA)
 #include "cuew.h"
 #endif
@@ -1884,6 +1889,11 @@ void apply_scene_delta(
         mesh->tag_update(scene, true);
         current->second.source = entry.second.section;
     }
+#if defined(CYCLESRENDERER_DLSS_EXPERIMENTAL)
+    // Scene topology has no usable per-pixel velocity. Reject the previous
+    // temporal image once so DLSS does not reproject removed or replaced voxels.
+    ccl::request_dlss_history_reset();
+#endif
 }
 
 ccl::Transform camera_transform(
