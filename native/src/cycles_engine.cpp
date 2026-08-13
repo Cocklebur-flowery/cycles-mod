@@ -55,6 +55,7 @@ void request_dlss_history_reset();
 #include "session/display_driver.h"
 #include "session/session.h"
 #include "util/colorspace.h"
+#include "util/half.h"
 #include "util/log.h"
 #include "util/image_metadata.h"
 #include "util/path.h"
@@ -1487,19 +1488,42 @@ class MemoryImageLoader final : public ccl::ImageLoader {
         metadata.height = height_;
         metadata.channels = 4;
         metadata.type = ccl::IMAGE_DATA_TYPE_BYTE4;
-        metadata.is_compressible_as_srgb =
-            role_ == CYCLES_BRIDGE_TEXTURE_COLOR_SRGB;
+        metadata.is_compressible_as_srgb = false;
         return true;
     }
 
     bool load_pixels(const ccl::ImageMetaData& metadata, void* pixels) override {
-        if (metadata.memory_size() != pixel_size_) {
+        const std::size_t source_size = static_cast<std::size_t>(width_)
+            * static_cast<std::size_t>(height_) * 4U;
+        if (pixel_size_ != source_size) {
             return false;
         }
-        std::memcpy(
-            pixels,
-            resources_->texture_pixels.data() + pixel_offset_,
-            pixel_size_);
+
+        const std::uint8_t* source =
+            resources_->texture_pixels.data() + pixel_offset_;
+        if (metadata.type == ccl::IMAGE_DATA_TYPE_BYTE4) {
+            if (metadata.memory_size() != source_size) {
+                return false;
+            }
+            std::memcpy(pixels, source, source_size);
+        }
+        else if (metadata.type == ccl::IMAGE_DATA_TYPE_HALF4
+                 && role_ == CYCLES_BRIDGE_TEXTURE_COLOR_SRGB) {
+            ccl::half4* destination = static_cast<ccl::half4*>(pixels);
+            const std::size_t pixel_count = source_size / 4U;
+            constexpr float kByteToFloat = 1.0F / 255.0F;
+            for (std::size_t index = 0; index < pixel_count; ++index) {
+                const std::size_t channel = index * 4U;
+                destination[index] = ccl::float4_to_half4(ccl::make_float4(
+                    static_cast<float>(source[channel]) * kByteToFloat,
+                    static_cast<float>(source[channel + 1U]) * kByteToFloat,
+                    static_cast<float>(source[channel + 2U]) * kByteToFloat,
+                    static_cast<float>(source[channel + 3U]) * kByteToFloat));
+            }
+        }
+        else {
+            return false;
+        }
         metadata.conform_pixels(pixels);
         return true;
     }
