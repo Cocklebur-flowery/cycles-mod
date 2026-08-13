@@ -62,6 +62,18 @@ public final class CyclesClientConfig {
     private static final ModConfigSpec.DoubleValue CAMERA_CYLINDRICAL_HEIGHT_MIN;
     private static final ModConfigSpec.DoubleValue CAMERA_CYLINDRICAL_HEIGHT_MAX;
     private static final ModConfigSpec.DoubleValue CAMERA_CYLINDRICAL_RADIUS;
+    private static final ModConfigSpec.DoubleValue CAMERA_SHIFT_X;
+    private static final ModConfigSpec.DoubleValue CAMERA_SHIFT_Y;
+    private static final ModConfigSpec.BooleanValue CAMERA_SAFE_AREAS;
+    private static final ModConfigSpec.DoubleValue CAMERA_TITLE_SAFE_X;
+    private static final ModConfigSpec.DoubleValue CAMERA_TITLE_SAFE_Y;
+    private static final ModConfigSpec.DoubleValue CAMERA_ACTION_SAFE_X;
+    private static final ModConfigSpec.DoubleValue CAMERA_ACTION_SAFE_Y;
+    private static final ModConfigSpec.BooleanValue CAMERA_CENTER_CUT_SAFE_AREAS;
+    private static final ModConfigSpec.DoubleValue CAMERA_CENTER_TITLE_SAFE_X;
+    private static final ModConfigSpec.DoubleValue CAMERA_CENTER_TITLE_SAFE_Y;
+    private static final ModConfigSpec.DoubleValue CAMERA_CENTER_ACTION_SAFE_X;
+    private static final ModConfigSpec.DoubleValue CAMERA_CENTER_ACTION_SAFE_Y;
     private static final ModConfigSpec.BooleanValue CAMERA_DEPTH_OF_FIELD;
     private static final ModConfigSpec.DoubleValue CAMERA_FOCUS_DISTANCE;
     private static final ModConfigSpec.DoubleValue CAMERA_F_STOP;
@@ -232,6 +244,31 @@ public final class CyclesClientConfig {
                 .defineInRange("centralCylindricalHeightMax", 1.0D, -10.0D, 10.0D);
         CAMERA_CYLINDRICAL_RADIUS = builder.translation("config.cyclesrenderer.camera.cylindricalRadius")
                 .defineInRange("centralCylindricalRadius", 1.0D, 0.00001D, 1000000.0D);
+        CAMERA_SHIFT_X = builder.translation("config.cyclesrenderer.camera.shiftX")
+                .defineInRange("shiftX", 0.0D, -10.0D, 10.0D);
+        CAMERA_SHIFT_Y = builder.translation("config.cyclesrenderer.camera.shiftY")
+                .defineInRange("shiftY", 0.0D, -10.0D, 10.0D);
+        CAMERA_SAFE_AREAS = builder.translation("config.cyclesrenderer.camera.safeAreas")
+                .define("safeAreas", false);
+        CAMERA_TITLE_SAFE_X = builder.translation("config.cyclesrenderer.camera.titleSafeX")
+                .defineInRange("titleSafeX", 0.10D, 0.0D, 0.5D);
+        CAMERA_TITLE_SAFE_Y = builder.translation("config.cyclesrenderer.camera.titleSafeY")
+                .defineInRange("titleSafeY", 0.05D, 0.0D, 0.5D);
+        CAMERA_ACTION_SAFE_X = builder.translation("config.cyclesrenderer.camera.actionSafeX")
+                .defineInRange("actionSafeX", 0.035D, 0.0D, 0.5D);
+        CAMERA_ACTION_SAFE_Y = builder.translation("config.cyclesrenderer.camera.actionSafeY")
+                .defineInRange("actionSafeY", 0.035D, 0.0D, 0.5D);
+        CAMERA_CENTER_CUT_SAFE_AREAS = builder.translation(
+                        "config.cyclesrenderer.camera.centerCutSafeAreas")
+                .define("centerCutSafeAreas", false);
+        CAMERA_CENTER_TITLE_SAFE_X = builder.translation("config.cyclesrenderer.camera.centerTitleSafeX")
+                .defineInRange("centerTitleSafeX", 0.175D, 0.0D, 0.5D);
+        CAMERA_CENTER_TITLE_SAFE_Y = builder.translation("config.cyclesrenderer.camera.centerTitleSafeY")
+                .defineInRange("centerTitleSafeY", 0.05D, 0.0D, 0.5D);
+        CAMERA_CENTER_ACTION_SAFE_X = builder.translation("config.cyclesrenderer.camera.centerActionSafeX")
+                .defineInRange("centerActionSafeX", 0.15D, 0.0D, 0.5D);
+        CAMERA_CENTER_ACTION_SAFE_Y = builder.translation("config.cyclesrenderer.camera.centerActionSafeY")
+                .defineInRange("centerActionSafeY", 0.05D, 0.0D, 0.5D);
         CAMERA_DEPTH_OF_FIELD = builder.translation("config.cyclesrenderer.camera.depthOfField")
                 .define("depthOfField", false);
         CAMERA_FOCUS_DISTANCE = builder.translation("config.cyclesrenderer.camera.focusDistance")
@@ -444,7 +481,17 @@ public final class CyclesClientConfig {
                 CAMERA_CYLINDRICAL_HEIGHT_MIN.get().floatValue(),
                 CAMERA_CYLINDRICAL_HEIGHT_MAX.get().floatValue(),
                 CAMERA_CYLINDRICAL_RADIUS.get().floatValue(),
-                0.0F, 0.0F);
+                CAMERA_SHIFT_X.get().floatValue(), CAMERA_SHIFT_Y.get().floatValue(),
+                CAMERA_SAFE_AREAS.get(),
+                CAMERA_TITLE_SAFE_X.get().floatValue(),
+                CAMERA_TITLE_SAFE_Y.get().floatValue(),
+                CAMERA_ACTION_SAFE_X.get().floatValue(),
+                CAMERA_ACTION_SAFE_Y.get().floatValue(),
+                CAMERA_CENTER_CUT_SAFE_AREAS.get(),
+                CAMERA_CENTER_TITLE_SAFE_X.get().floatValue(),
+                CAMERA_CENTER_TITLE_SAFE_Y.get().floatValue(),
+                CAMERA_CENTER_ACTION_SAFE_X.get().floatValue(),
+                CAMERA_CENTER_ACTION_SAFE_Y.get().floatValue());
     }
 
     public static void markReloaded() {
@@ -625,6 +672,10 @@ public final class CyclesClientConfig {
                 "config.cyclesrenderer.camera.cylindricalHeightMax", CAMERA_CYLINDRICAL_HEIGHT_MAX, -10.0D, 10.0D, 0.1D));
         options.add(doubleOption("camera.cylindricalRadius", Category.CAMERA,
                 "config.cyclesrenderer.camera.cylindricalRadius", CAMERA_CYLINDRICAL_RADIUS, 0.00001D, 1000000.0D, 0.01D));
+        options.add(doubleOption("camera.shiftX", Category.CAMERA,
+                "config.cyclesrenderer.camera.shiftX", CAMERA_SHIFT_X, -10.0D, 10.0D, 0.001D));
+        options.add(doubleOption("camera.shiftY", Category.CAMERA,
+                "config.cyclesrenderer.camera.shiftY", CAMERA_SHIFT_Y, -10.0D, 10.0D, 0.001D));
         options.add(booleanOption("camera.depthOfField", Category.CAMERA,
                 "config.cyclesrenderer.camera.depthOfField", CAMERA_DEPTH_OF_FIELD));
         options.add(doubleOption("camera.focusDistance", Category.CAMERA,
@@ -639,6 +690,26 @@ public final class CyclesClientConfig {
                 "config.cyclesrenderer.camera.apertureRotation", CAMERA_APERTURE_ROTATION, -360.0D, 360.0D, 1.0D));
         options.add(doubleOption("camera.apertureRatio", Category.CAMERA,
                 "config.cyclesrenderer.camera.apertureRatio", CAMERA_APERTURE_RATIO, 0.1D, 10.0D, 0.01D));
+        options.add(booleanOption("camera.safeAreas", Category.CAMERA,
+                "config.cyclesrenderer.camera.safeAreas", CAMERA_SAFE_AREAS));
+        options.add(doubleOption("camera.titleSafeX", Category.CAMERA,
+                "config.cyclesrenderer.camera.titleSafeX", CAMERA_TITLE_SAFE_X, 0.0D, 0.5D, 0.001D));
+        options.add(doubleOption("camera.titleSafeY", Category.CAMERA,
+                "config.cyclesrenderer.camera.titleSafeY", CAMERA_TITLE_SAFE_Y, 0.0D, 0.5D, 0.001D));
+        options.add(doubleOption("camera.actionSafeX", Category.CAMERA,
+                "config.cyclesrenderer.camera.actionSafeX", CAMERA_ACTION_SAFE_X, 0.0D, 0.5D, 0.001D));
+        options.add(doubleOption("camera.actionSafeY", Category.CAMERA,
+                "config.cyclesrenderer.camera.actionSafeY", CAMERA_ACTION_SAFE_Y, 0.0D, 0.5D, 0.001D));
+        options.add(booleanOption("camera.centerCutSafeAreas", Category.CAMERA,
+                "config.cyclesrenderer.camera.centerCutSafeAreas", CAMERA_CENTER_CUT_SAFE_AREAS));
+        options.add(doubleOption("camera.centerTitleSafeX", Category.CAMERA,
+                "config.cyclesrenderer.camera.centerTitleSafeX", CAMERA_CENTER_TITLE_SAFE_X, 0.0D, 0.5D, 0.001D));
+        options.add(doubleOption("camera.centerTitleSafeY", Category.CAMERA,
+                "config.cyclesrenderer.camera.centerTitleSafeY", CAMERA_CENTER_TITLE_SAFE_Y, 0.0D, 0.5D, 0.001D));
+        options.add(doubleOption("camera.centerActionSafeX", Category.CAMERA,
+                "config.cyclesrenderer.camera.centerActionSafeX", CAMERA_CENTER_ACTION_SAFE_X, 0.0D, 0.5D, 0.001D));
+        options.add(doubleOption("camera.centerActionSafeY", Category.CAMERA,
+                "config.cyclesrenderer.camera.centerActionSafeY", CAMERA_CENTER_ACTION_SAFE_Y, 0.0D, 0.5D, 0.001D));
 
         options.add(booleanOption("atmosphere.sunDisc", Category.ATMOSPHERE,
                 "config.cyclesrenderer.atmosphere.sunDisc", ATMOSPHERE_SUN_DISC));

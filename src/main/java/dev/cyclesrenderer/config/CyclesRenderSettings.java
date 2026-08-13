@@ -102,7 +102,17 @@ public record CyclesRenderSettings(
         float centralCylindricalHeightMax,
         float centralCylindricalRadius,
         float cameraShiftX,
-        float cameraShiftY) {
+        float cameraShiftY,
+        boolean safeAreas,
+        float titleSafeX,
+        float titleSafeY,
+        float actionSafeX,
+        float actionSafeY,
+        boolean centerCutSafeAreas,
+        float centerTitleSafeX,
+        float centerTitleSafeY,
+        float centerActionSafeX,
+        float centerActionSafeY) {
 
     public int pbrResourceFingerprint() {
         int result = pbrMode.hashCode();

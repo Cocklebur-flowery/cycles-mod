@@ -34,6 +34,8 @@ final class CyclesSettingsList
             "camera.panoramaType",
             "camera.depthOfField",
             "camera.apertureCircular",
+            "camera.safeAreas",
+            "camera.centerCutSafeAreas",
             "materials.pbrMode",
             "color.display",
             "color.viewTransform",
@@ -146,6 +148,16 @@ final class CyclesSettingsList
             return false;
         }
         if (id.equals("camera.apertureBlades") && booleanValue("camera.apertureCircular")) {
+            return false;
+        }
+        if ((id.startsWith("camera.titleSafe") || id.startsWith("camera.actionSafe")
+                || id.equals("camera.centerCutSafeAreas"))
+                && !booleanValue("camera.safeAreas")) {
+            return false;
+        }
+        if ((id.startsWith("camera.centerTitleSafe") || id.startsWith("camera.centerActionSafe"))
+                && (!booleanValue("camera.safeAreas")
+                    || !booleanValue("camera.centerCutSafeAreas"))) {
             return false;
         }
         if (id.startsWith("denoise.") && !id.equals("denoise.mode")
