@@ -2905,7 +2905,7 @@ class CyclesEngine::Impl final {
                 settling_remaining_millis = requested_settings_.stationary_delay_millis;
             } else if (requested_camera_->sampling_state
                            != CYCLES_BRIDGE_SAMPLING_STILL
-                       && frames_.produced_camera_revision()
+                       && produced_camera_revision()
                            == requested_camera_->revision) {
                 const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
                     now - last_camera_change_);
@@ -3438,6 +3438,9 @@ class CyclesEngine::Impl final {
                         session->cancel(true);
                     }
                     if (requested_settings_reset >= CYCLES_BRIDGE_RESET_ACCUMULATION) {
+#if defined(CYCLESRENDERER_DLSS_EXPERIMENTAL)
+                        ccl::request_dlss_history_reset();
+#endif
                         active_camera_revision = 0;
                         render_in_flight = false;
                         if (!requested_pass_only_change) {

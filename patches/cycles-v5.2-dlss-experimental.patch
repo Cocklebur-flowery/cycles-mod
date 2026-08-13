@@ -267,10 +267,10 @@ index 4e1dac4b6240588caf504bdb270bb9c2c963a2c5..b33c3a0e1e6167b371e1386d5449dd70
  
 diff --git a/src/integrator/denoiser_dlss.cpp b/src/integrator/denoiser_dlss.cpp
 new file mode 100644
-index 0000000000000000000000000000000000000000..8d1affc2e635904b3cd01a4816acd9d857e9eaa7
+index 0000000000000000000000000000000000000000..1f98ae6e97a9f97ededd7a0141889bdc67c525e2
 --- /dev/null
 +++ b/src/integrator/denoiser_dlss.cpp
-@@ -0,0 +1,579 @@
+@@ -0,0 +1,583 @@
 +/* SPDX-FileCopyrightText: 2025 NVIDIA Corporation
 + * SPDX-FileCopyrightText: 2011-2022 Blender Foundation
 + *
@@ -818,6 +818,10 @@ index 0000000000000000000000000000000000000000..8d1affc2e635904b3cd01a4816acd9d8
 +
 +  params->Set(NVSDK_NGX_Parameter_Jitter_Offset_X, context.pixel_jitter.x);
 +  params->Set(NVSDK_NGX_Parameter_Jitter_Offset_Y, context.pixel_jitter.y);
++  params->Set(NVSDK_NGX_Parameter_MV_Scale_X, 1.0f);
++  params->Set(NVSDK_NGX_Parameter_MV_Scale_Y, 1.0f);
++  params->Set(NVSDK_NGX_Parameter_DLSS_Pre_Exposure, 1.0f);
++  params->Set(NVSDK_NGX_Parameter_DLSS_Exposure_Scale, 1.0f);
 +
 +  params->Set(NVSDK_NGX_Parameter_Color, &tex_color_.texture_handle);
 +  params->Set(NVSDK_NGX_Parameter_Depth, &tex_depth_.texture_handle);
@@ -1146,10 +1150,10 @@ index b1333a8a8b0855af5293646818aaa25c6500b840..cda78449d48a4a94f30e34fc8e4d06d4
  /* AOVs. */
  KERNEL_STRUCT_MEMBER(film, int, pass_aov_color)
 diff --git a/src/kernel/device/cuda/kernel.cu b/src/kernel/device/cuda/kernel.cu
-index 2033add259ce63547ab58f30118db6cd45261580..5410dfb6118c9931ca7f1492af3334a253bddedb 100644
+index 2033add259ce63547ab58f30118db6cd45261580..371c3a6a28781576273c40df6fdb921a9d85f988 100644
 --- a/src/kernel/device/cuda/kernel.cu
 +++ b/src/kernel/device/cuda/kernel.cu
-@@ -13,4 +13,248 @@
+@@ -13,4 +13,242 @@
  #  include "kernel/device/gpu/image.h"
  #  include "kernel/device/gpu/kernel.h"
  
@@ -1229,13 +1233,10 @@ index 2033add259ce63547ab58f30118db6cd45261580..5410dfb6118c9931ca7f1492af3334a2
 +  const uint64_t render_pixel_index = render_offset + (x + full_x) + (y + full_y) * render_stride;
 +  const ccl_global float *buffer = render_buffer + render_pixel_index * render_pass_stride;
 +
-+  float pixel_scale;
-+  if (render_pass_sample_count == PASS_UNUSED) {
-+    pixel_scale = 1.0f / num_samples;
-+  }
-+  else {
-+    pixel_scale = 1.0f / __float_as_uint(buffer[render_pass_sample_count]);
-+  }
++  const uint sample_count = render_pass_sample_count == PASS_UNUSED ?
++                                max(num_samples, 0) :
++                                __float_as_uint(buffer[render_pass_sample_count]);
++  const float pixel_scale = sample_count > 0 ? 1.0f / sample_count : 0.0f;
 +
 +  /* Depth pass. */
 +  if (render_pass_depth != PASS_UNUSED) {
@@ -1251,15 +1252,10 @@ index 2033add259ce63547ab58f30118db6cd45261580..5410dfb6118c9931ca7f1492af3334a2
 +    const ccl_global float *albedo_in = buffer + render_pass_albedo;
 +
 +    float4 albedo_value;
-+    albedo_value.x = albedo_in[0] * pixel_scale;
-+    albedo_value.y = albedo_in[1] * pixel_scale;
-+    albedo_value.z = albedo_in[2] * pixel_scale;
++    albedo_value.x = clamp(albedo_in[0] * pixel_scale, 0.0f, 1.0f);
++    albedo_value.y = clamp(albedo_in[1] * pixel_scale, 0.0f, 1.0f);
++    albedo_value.z = clamp(albedo_in[2] * pixel_scale, 0.0f, 1.0f);
 +    albedo_value.w = 1.0;
-+
-+    /* Tonemap the albedo with simple reinhard operator. */
-+    albedo_value.x = clamp(albedo_value.x / (1.0f + albedo_value.x), 0.0f, 1.0f);
-+    albedo_value.y = clamp(albedo_value.y / (1.0f + albedo_value.y), 0.0f, 1.0f);
-+    albedo_value.z = clamp(albedo_value.z / (1.0f + albedo_value.z), 0.0f, 1.0f);
 +
 +    surf2Dwrite(albedo_value, albedo_surface, x * sizeof(float4), y);
 +  }
@@ -1269,9 +1265,9 @@ index 2033add259ce63547ab58f30118db6cd45261580..5410dfb6118c9931ca7f1492af3334a2
 +    const ccl_global float *albedo_in = buffer + render_pass_specular_albedo;
 +
 +    float4 specular_albedo_value;
-+    specular_albedo_value.x = albedo_in[0] * pixel_scale;
-+    specular_albedo_value.y = albedo_in[1] * pixel_scale;
-+    specular_albedo_value.z = albedo_in[2] * pixel_scale;
++    specular_albedo_value.x = clamp(albedo_in[0] * pixel_scale, 0.0f, 1.0f);
++    specular_albedo_value.y = clamp(albedo_in[1] * pixel_scale, 0.0f, 1.0f);
++    specular_albedo_value.z = clamp(albedo_in[2] * pixel_scale, 0.0f, 1.0f);
 +    specular_albedo_value.w = 1.0;
 +
 +    surf2Dwrite(specular_albedo_value, specular_albedo_surface, x * sizeof(float4), y);
@@ -1282,11 +1278,13 @@ index 2033add259ce63547ab58f30118db6cd45261580..5410dfb6118c9931ca7f1492af3334a2
 +    const ccl_global float *normal_in = buffer + render_pass_normal;
 +    const ccl_global float *roughness_in = buffer + render_pass_roughness;
 +
++    const float3 normal_value = safe_normalize(make_float3(normal_in[0], normal_in[1], normal_in[2]) *
++                                                pixel_scale);
 +    float4 normal_roughness_value;
-+    normal_roughness_value.x = normal_in[0] * pixel_scale;
-+    normal_roughness_value.y = normal_in[1] * pixel_scale;
-+    normal_roughness_value.z = normal_in[2] * pixel_scale;
-+    normal_roughness_value.w = roughness_in[0] * pixel_scale;
++    normal_roughness_value.x = normal_value.x;
++    normal_roughness_value.y = normal_value.y;
++    normal_roughness_value.z = normal_value.z;
++    normal_roughness_value.w = clamp(roughness_in[0] * pixel_scale, 0.0f, 1.0f);
 +
 +    surf2Dwrite(normal_roughness_value, normal_roughness_surface, x * sizeof(float4), y);
 +  }
