@@ -10,16 +10,22 @@ final class LabPbrConfig {
     private final ModConfigSpec.DoubleValue subsurfaceScale;
     private final ModConfigSpec.DoubleValue heightStrength;
     private final ModConfigSpec.DoubleValue heightDistance;
+    private final ModConfigSpec.EnumValue<CyclesRenderSettings.HeightMappingMode> heightMappingMode;
+    private final ModConfigSpec.IntValue parallaxSteps;
 
     private LabPbrConfig(
             ModConfigSpec.DoubleValue wetness,
             ModConfigSpec.DoubleValue subsurfaceScale,
             ModConfigSpec.DoubleValue heightStrength,
-            ModConfigSpec.DoubleValue heightDistance) {
+            ModConfigSpec.DoubleValue heightDistance,
+            ModConfigSpec.EnumValue<CyclesRenderSettings.HeightMappingMode> heightMappingMode,
+            ModConfigSpec.IntValue parallaxSteps) {
         this.wetness = wetness;
         this.subsurfaceScale = subsurfaceScale;
         this.heightStrength = heightStrength;
         this.heightDistance = heightDistance;
+        this.heightMappingMode = heightMappingMode;
+        this.parallaxSteps = parallaxSteps;
     }
 
     static LabPbrConfig define(ModConfigSpec.Builder builder) {
@@ -39,7 +45,17 @@ final class LabPbrConfig {
                 .translation("config.cyclesrenderer.materials.heightDistance")
                 .comment("Maximum LabPBR bump distance in Minecraft block units.")
                 .defineInRange("heightDistance", 0.05D, 0.0D, 1.0D);
-        return new LabPbrConfig(wetness, subsurfaceScale, heightStrength, heightDistance);
+        ModConfigSpec.EnumValue<CyclesRenderSettings.HeightMappingMode> heightMappingMode = builder
+                .translation("config.cyclesrenderer.materials.heightMappingMode")
+                .comment("Height-map shading method; parallax offsets every LabPBR texture consistently.")
+                .defineEnum("heightMappingMode", CyclesRenderSettings.HeightMappingMode.BUMP);
+        ModConfigSpec.IntValue parallaxSteps = builder
+                .translation("config.cyclesrenderer.materials.parallaxSteps")
+                .comment("Fixed ray-march steps used by parallax occlusion mapping.")
+                .defineInRange("parallaxSteps", 16, 4, 64);
+        return new LabPbrConfig(
+                wetness, subsurfaceScale, heightStrength, heightDistance,
+                heightMappingMode, parallaxSteps);
     }
 
     float wetness() {
@@ -56,6 +72,14 @@ final class LabPbrConfig {
 
     float heightDistance() {
         return heightDistance.get().floatValue();
+    }
+
+    CyclesRenderSettings.HeightMappingMode heightMappingMode() {
+        return heightMappingMode.get();
+    }
+
+    int parallaxSteps() {
+        return parallaxSteps.get();
     }
 
     void appendOptions(List<CyclesClientConfig.ConfigOption<?>> options) {
@@ -75,5 +99,13 @@ final class LabPbrConfig {
                 "materials.heightDistance", CyclesClientConfig.Category.MATERIALS,
                 "config.cyclesrenderer.materials.heightDistance", heightDistance,
                 0.0D, 1.0D, 0.005D));
+        options.add(CyclesClientConfig.enumOption(
+                "materials.heightMappingMode", CyclesClientConfig.Category.MATERIALS,
+                "config.cyclesrenderer.materials.heightMappingMode", heightMappingMode,
+                CyclesRenderSettings.HeightMappingMode.values()));
+        options.add(CyclesClientConfig.intOption(
+                "materials.parallaxSteps", CyclesClientConfig.Category.MATERIALS,
+                "config.cyclesrenderer.materials.parallaxSteps", parallaxSteps,
+                4, 64, 1));
     }
 }

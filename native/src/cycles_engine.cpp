@@ -200,7 +200,9 @@ bool same_material_shader_settings(
         && first.pbr_wetness == second.pbr_wetness
         && first.pbr_subsurface_scale == second.pbr_subsurface_scale
         && first.pbr_height_strength == second.pbr_height_strength
-        && first.pbr_height_distance == second.pbr_height_distance;
+        && first.pbr_height_distance == second.pbr_height_distance
+        && first.pbr_height_mapping_mode == second.pbr_height_mapping_mode
+        && first.pbr_parallax_steps == second.pbr_parallax_steps;
 }
 
 ccl::Transform rec709_to_working_space(std::uint32_t working_space) {

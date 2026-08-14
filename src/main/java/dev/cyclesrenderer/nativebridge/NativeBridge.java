@@ -24,7 +24,7 @@ import static java.lang.foreign.ValueLayout.JAVA_INT;
 import static java.lang.foreign.ValueLayout.JAVA_LONG;
 
 public final class NativeBridge {
-    public static final int ABI_VERSION = 40;
+    public static final int ABI_VERSION = 41;
     public static final int DEVICE_UPDATE_PHASE_COUNT = 8;
     public static final int PIXEL_FORMAT_RGBA16_FLOAT = 2;
     public static final int PIXEL_FORMAT_RGBA32_FLOAT = 3;
@@ -213,7 +213,9 @@ public final class NativeBridge {
             JAVA_FLOAT.withName("pbr_wetness"),
             JAVA_FLOAT.withName("pbr_subsurface_scale"),
             JAVA_FLOAT.withName("pbr_height_strength"),
-            JAVA_FLOAT.withName("pbr_height_distance"));
+            JAVA_FLOAT.withName("pbr_height_distance"),
+            JAVA_INT.withName("pbr_height_mapping_mode"),
+            JAVA_INT.withName("pbr_parallax_steps"));
     private static final MemoryLayout PASS_DESCRIPTOR_LAYOUT = MemoryLayout.structLayout(
             JAVA_INT.withName("struct_size"),
             JAVA_INT.withName("struct_version"),
@@ -450,7 +452,7 @@ public final class NativeBridge {
                 || SECTION_LAYOUT.byteSize() != 48L
                 || FRAME_LAYOUT.byteSize() != 40L
                 || FRAME_VIEW_LAYOUT.byteSize() != 72L
-                || SETTINGS_LAYOUT.byteSize() != 384L
+                || SETTINGS_LAYOUT.byteSize() != 392L
                 || PASS_DESCRIPTOR_LAYOUT.byteSize() != 64L
                 || CAPABILITIES_LAYOUT.byteSize() != 64L
                 || COLOR_LUT_DESCRIPTOR_LAYOUT.byteSize() != 72L
@@ -1342,6 +1344,8 @@ public final class NativeBridge {
             settingsSegment.set(JAVA_FLOAT, 372L, settings.pbrSubsurfaceScale());
             settingsSegment.set(JAVA_FLOAT, 376L, settings.pbrHeightStrength());
             settingsSegment.set(JAVA_FLOAT, 380L, settings.pbrHeightDistance());
+            settingsSegment.set(JAVA_INT, 384L, settings.pbrHeightMappingMode().nativeId());
+            settingsSegment.set(JAVA_INT, 388L, settings.pbrParallaxSteps());
             checkRendererStatus(
                     (int) applySettings.invokeExact(renderer, settingsSegment),
                     "settings update");

@@ -459,6 +459,7 @@ public final class CyclesClientConfig {
                 PBR_EMISSION_SCALE.get().floatValue(),
                 LAB_PBR.wetness(), LAB_PBR.subsurfaceScale(),
                 LAB_PBR.heightStrength(), LAB_PBR.heightDistance(),
+                LAB_PBR.heightMappingMode(), LAB_PBR.parallaxSteps(),
                 PBR_FALLBACK_ROUGHNESS.get().floatValue(),
                 PBR_FALLBACK_F0.get().floatValue(),
                 DENOISER_MODE.get(), DENOISER_START_SAMPLE.get(), DENOISER_INPUT.get(),

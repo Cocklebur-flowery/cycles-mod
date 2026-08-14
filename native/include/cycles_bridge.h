@@ -45,6 +45,11 @@ enum CyclesBridgePbrFormat : std::uint32_t {
     CYCLES_BRIDGE_PBR_LAB_1_3 = 1,
 };
 
+enum CyclesBridgeHeightMappingMode : std::uint32_t {
+    CYCLES_BRIDGE_HEIGHT_MAPPING_BUMP = 0,
+    CYCLES_BRIDGE_HEIGHT_MAPPING_PARALLAX_OCCLUSION = 1,
+};
+
 enum CyclesBridgeTextureRole : std::uint32_t {
     CYCLES_BRIDGE_TEXTURE_COLOR_SRGB = 0,
     CYCLES_BRIDGE_TEXTURE_DATA_LINEAR = 1,
@@ -461,6 +466,8 @@ struct CyclesBridgeRenderSettings {
     float pbr_subsurface_scale;
     float pbr_height_strength;
     float pbr_height_distance;
+    std::uint32_t pbr_height_mapping_mode;
+    std::uint32_t pbr_parallax_steps;
 };
 
 struct CyclesBridgePassDescriptor {

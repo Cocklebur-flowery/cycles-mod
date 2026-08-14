@@ -67,6 +67,8 @@ public record CyclesRenderSettings(
         float pbrSubsurfaceScale,
         float pbrHeightStrength,
         float pbrHeightDistance,
+        HeightMappingMode pbrHeightMappingMode,
+        int pbrParallaxSteps,
         float pbrFallbackRoughness,
         float pbrFallbackF0,
         DenoiserMode denoiserMode,
@@ -333,6 +335,26 @@ public record CyclesRenderSettings(
         @Override
         public String translationGroup() {
             return "pbr_mode";
+        }
+    }
+
+    public enum HeightMappingMode implements NativeEnum, NamedEnum {
+        BUMP(0), PARALLAX_OCCLUSION(1);
+
+        private final int nativeId;
+
+        HeightMappingMode(int nativeId) {
+            this.nativeId = nativeId;
+        }
+
+        @Override
+        public int nativeId() {
+            return nativeId;
+        }
+
+        @Override
+        public String translationGroup() {
+            return "height_mapping";
         }
     }
 

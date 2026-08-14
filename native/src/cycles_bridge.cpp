@@ -18,9 +18,9 @@ struct CyclesBridgeRenderer {
 
 namespace {
 
-constexpr std::uint32_t kAbiVersion = 40;
+constexpr std::uint32_t kAbiVersion = 41;
 constexpr std::uint32_t kStructVersion = 1;
-constexpr char kBuildInfo[] = "cyclesrenderer-native/cycles-5.2;abi=40";
+constexpr char kBuildInfo[] = "cyclesrenderer-native/cycles-5.2;abi=41";
 
 static_assert(sizeof(CyclesBridgeCamera) == 80);
 static_assert(offsetof(CyclesBridgeCamera, frame_id) == 8);
@@ -38,7 +38,7 @@ static_assert(sizeof(CyclesBridgeFrame) == 40);
 static_assert(sizeof(CyclesBridgeFrameView) == 72);
 static_assert(offsetof(CyclesBridgeFrameView, generation) == 16);
 static_assert(offsetof(CyclesBridgeFrameView, pixels) == 48);
-static_assert(sizeof(CyclesBridgeRenderSettings) == 384);
+static_assert(sizeof(CyclesBridgeRenderSettings) == 392);
 static_assert(offsetof(CyclesBridgeRenderSettings, camera_type) == 288);
 static_assert(offsetof(CyclesBridgeRenderSettings, central_cylindrical_radius) == 356);
 static_assert(offsetof(CyclesBridgeRenderSettings, camera_shift_x) == 360);
@@ -47,6 +47,8 @@ static_assert(offsetof(CyclesBridgeRenderSettings, pbr_wetness) == 368);
 static_assert(offsetof(CyclesBridgeRenderSettings, pbr_subsurface_scale) == 372);
 static_assert(offsetof(CyclesBridgeRenderSettings, pbr_height_strength) == 376);
 static_assert(offsetof(CyclesBridgeRenderSettings, pbr_height_distance) == 380);
+static_assert(offsetof(CyclesBridgeRenderSettings, pbr_height_mapping_mode) == 384);
+static_assert(offsetof(CyclesBridgeRenderSettings, pbr_parallax_steps) == 388);
 static_assert(sizeof(CyclesBridgePassDescriptor) == 64);
 static_assert(sizeof(CyclesBridgeCapabilities) == 64);
 static_assert(sizeof(CyclesBridgeColorLutDescriptor) == 72);
@@ -371,6 +373,10 @@ bool valid_settings(const CyclesBridgeRenderSettings& settings) {
         && std::isfinite(settings.pbr_height_distance)
         && settings.pbr_height_distance >= 0.0F
         && settings.pbr_height_distance <= 1.0F
+        && settings.pbr_height_mapping_mode
+            <= CYCLES_BRIDGE_HEIGHT_MAPPING_PARALLAX_OCCLUSION
+        && settings.pbr_parallax_steps >= 4U
+        && settings.pbr_parallax_steps <= 64U
         && settings.working_space <= CYCLES_BRIDGE_WORKING_SPACE_ACESCG
         && settings.interactive_samples >= 1U && settings.interactive_samples <= 4096U
         && settings.still_samples >= 1U && settings.still_samples <= 4096U
