@@ -273,6 +273,8 @@ public final class SectionGeometryCollector {
             }
         }
 
+        CoplanarOverlayResolver.separate(vertices, triangles, quadCount);
+
         FoliageSolidifier.Result solidified = FoliageSolidifier.apply(
                 vertices, colors, triangles, foliageQuads);
 
