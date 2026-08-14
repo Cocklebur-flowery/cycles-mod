@@ -2,6 +2,7 @@
 
 #include "color_management.h"
 #include "cycles_scene_timing.h"
+#include "realtime_section_mesh.h"
 #include "scene_update.h"
 
 #include <Windows.h>
@@ -248,16 +249,13 @@ using SceneResourcesData = cyclesrenderer::scene::ResourcesData;
 using SceneRequest = cyclesrenderer::scene::SceneSnapshot;
 using SceneUpdate = cyclesrenderer::scene::SceneUpdate;
 
-struct SectionSceneNodes {
-    ccl::Mesh* mesh = nullptr;
-    ccl::Object* object = nullptr;
-    std::shared_ptr<const SectionRequest> source;
-};
-
 struct SceneRuntime {
     std::shared_ptr<const SceneResourcesData> resources;
     std::vector<ccl::Shader*> shaders;
-    std::unordered_map<std::int64_t, SectionSceneNodes> sections;
+    std::unordered_map<
+        std::int64_t,
+        cyclesrenderer::realtime::SectionMeshSlot> sections;
+    std::vector<cyclesrenderer::realtime::SectionMeshSlot> free_sections;
     ccl::BackgroundLight* background_light = nullptr;
     ccl::Object* background_light_object = nullptr;
     ccl::Transform rec709_to_working = ccl::transform_identity();
@@ -266,6 +264,7 @@ struct SceneRuntime {
         resources.reset();
         shaders.clear();
         sections.clear();
+        free_sections.clear();
         background_light = nullptr;
         background_light_object = nullptr;
         rec709_to_working = ccl::transform_identity();
@@ -488,14 +487,6 @@ float linear_to_srgb(float value) {
         return value * 12.92F;
     }
     return 1.055F * std::pow(value, 1.0F / 2.4F) - 0.055F;
-}
-
-float srgb_to_linear(std::uint32_t value) {
-    const float channel = static_cast<float>(value) / 255.0F;
-    if (channel <= 0.04045F) {
-        return channel / 12.92F;
-    }
-    return std::pow((channel + 0.055F) / 1.055F, 2.4F);
 }
 
 std::uint8_t to_unorm(float value) {
@@ -1122,7 +1113,10 @@ class FrameStore final {
 
 class FrameDisplayDriver final : public ccl::DisplayDriver {
  public:
-    explicit FrameDisplayDriver(FrameStore& frames) : frames_(frames) {}
+    FrameDisplayDriver(
+        FrameStore& frames,
+        std::condition_variable& worker_changed)
+        : frames_(frames), worker_changed_(worker_changed) {}
 
     void next_tile_begin() override {}
 
@@ -1135,6 +1129,7 @@ class FrameDisplayDriver final : public ccl::DisplayDriver {
 
     void update_end() override {
         frames_.display_update_end();
+        worker_changed_.notify_all();
     }
 
     ccl::half4* map_texture_buffer() override {
@@ -1151,6 +1146,7 @@ class FrameDisplayDriver final : public ccl::DisplayDriver {
 
  private:
     FrameStore& frames_;
+    std::condition_variable& worker_changed_;
 };
 
 struct VulkanInteropSnapshot {
@@ -1200,6 +1196,41 @@ struct VulkanInteropSnapshot {
         }
         return *this;
     }
+
+    static VulkanInteropSnapshot duplicate(
+        HANDLE memory_handle,
+        HANDLE ready_semaphore_handle,
+        HANDLE release_semaphore_handle,
+        const CyclesBridgeVulkanInteropBuffer& descriptor) {
+        VulkanInteropSnapshot snapshot;
+        snapshot.descriptor = descriptor;
+        snapshot.memory_handle = duplicate_handle(memory_handle, "memory");
+        snapshot.ready_semaphore_handle = duplicate_handle(
+            ready_semaphore_handle, "ready semaphore");
+        snapshot.release_semaphore_handle = duplicate_handle(
+            release_semaphore_handle, "release semaphore");
+        return snapshot;
+    }
+
+ private:
+    static HANDLE duplicate_handle(HANDLE source, const char* label) {
+        HANDLE duplicate = nullptr;
+        if (source == nullptr
+            || DuplicateHandle(
+                GetCurrentProcess(),
+                source,
+                GetCurrentProcess(),
+                &duplicate,
+                0U,
+                FALSE,
+                DUPLICATE_SAME_ACCESS) == FALSE) {
+            const DWORD error = GetLastError();
+            throw std::runtime_error(
+                std::string("failed to duplicate Vulkan interop ") + label
+                + " handle (Win32 error " + std::to_string(error) + ")");
+        }
+        return duplicate;
+    }
 };
 
 enum class VulkanInteropSlotOwner : std::uint8_t {
@@ -1247,6 +1278,7 @@ class VulkanInteropDisplayDriver final : public ccl::DisplayDriver {
         VulkanInteropSlots& slots,
         std::mutex& state_mutex,
         std::condition_variable& state_changed,
+        std::condition_variable& worker_changed,
         bool& stopping,
         std::uint64_t& configured_camera_revision,
         std::uint64_t& produced_camera_revision)
@@ -1256,6 +1288,7 @@ class VulkanInteropDisplayDriver final : public ccl::DisplayDriver {
           slots_(slots),
           state_mutex_(state_mutex),
           state_changed_(state_changed),
+          worker_changed_(worker_changed),
           stopping_(stopping),
           configured_camera_revision_(configured_camera_revision),
           produced_camera_revision_(produced_camera_revision) {}
@@ -1270,7 +1303,21 @@ class VulkanInteropDisplayDriver final : public ccl::DisplayDriver {
                 return slot.owner == VulkanInteropSlotOwner::ACQUIRED;
             });
         });
-        state_.flags = 0U;
+        for (VulkanInteropSlot& slot : slots_) {
+            const std::uint64_t release_wait_value = slot.release_wait_value;
+            slot = {};
+            slot.release_wait_value = release_wait_value;
+        }
+        state_.flags &= ~(
+            CYCLES_BRIDGE_VULKAN_INTEROP_ACTIVE
+            | CYCLES_BRIDGE_VULKAN_INTEROP_FRAME_READY
+            | CYCLES_BRIDGE_VULKAN_INTEROP_FAILED
+            | CYCLES_BRIDGE_VULKAN_INTEROP_SESSION_ATTACHED
+            | CYCLES_BRIDGE_VULKAN_INTEROP_FRAME_ACQUIRED);
+        state_.ready_slot_count = 0U;
+        state_.slot_index = 0U;
+        lock.unlock();
+        state_changed_.notify_all();
     }
 
     void next_tile_begin() override {}
@@ -1337,38 +1384,42 @@ class VulkanInteropDisplayDriver final : public ccl::DisplayDriver {
         if (!used_interop_) {
             release_writing_slot();
             frames_.display_update_end();
+            worker_changed_.notify_all();
             return;
         }
         frames_.display_update_cancel();
         const std::uint32_t elapsed = elapsed_micros(
             update_started_, std::chrono::steady_clock::now());
-        std::lock_guard lock(state_mutex_);
-        state_.flags |= CYCLES_BRIDGE_VULKAN_INTEROP_ACTIVE;
-        state_.flags |= CYCLES_BRIDGE_VULKAN_INTEROP_FRAME_READY;
-        state_.generation++;
-        state_.completed_frame_count++;
-        state_.width = current_width_;
-        state_.height = current_height_;
-        state_.last_sync_micros = elapsed;
-        state_.ema_sync_micros = update_ema(state_.ema_sync_micros, elapsed);
-        state_.max_sync_micros = std::max(state_.max_sync_micros, elapsed);
-        VulkanInteropSlot& slot = slots_[current_slot_];
-        slot.owner = VulkanInteropSlotOwner::READY;
-        slot.generation = state_.generation;
-        slot.width = current_width_;
-        slot.height = current_height_;
-        slot.sample_count = state_.sample_count;
-        state_.slot_index = static_cast<std::uint32_t>(current_slot_);
-        state_.ready_slot_count = static_cast<std::uint32_t>(std::count_if(
-            slots_.begin(),
-            slots_.begin() + snapshot_.descriptor.slot_count,
-            [](const auto& candidate) {
-                return candidate.owner == VulkanInteropSlotOwner::READY;
-            }));
-        refresh_vulkan_interop_slot_flags(
-            state_, slots_, snapshot_.descriptor.slot_count);
-        current_slot_ = -1;
-        produced_camera_revision_ = configured_camera_revision_;
+        {
+            std::lock_guard lock(state_mutex_);
+            state_.flags |= CYCLES_BRIDGE_VULKAN_INTEROP_ACTIVE;
+            state_.flags |= CYCLES_BRIDGE_VULKAN_INTEROP_FRAME_READY;
+            state_.generation++;
+            state_.completed_frame_count++;
+            state_.width = current_width_;
+            state_.height = current_height_;
+            state_.last_sync_micros = elapsed;
+            state_.ema_sync_micros = update_ema(state_.ema_sync_micros, elapsed);
+            state_.max_sync_micros = std::max(state_.max_sync_micros, elapsed);
+            VulkanInteropSlot& slot = slots_[current_slot_];
+            slot.owner = VulkanInteropSlotOwner::READY;
+            slot.generation = state_.generation;
+            slot.width = current_width_;
+            slot.height = current_height_;
+            slot.sample_count = state_.sample_count;
+            state_.slot_index = static_cast<std::uint32_t>(current_slot_);
+            state_.ready_slot_count = static_cast<std::uint32_t>(std::count_if(
+                slots_.begin(),
+                slots_.begin() + snapshot_.descriptor.slot_count,
+                [](const auto& candidate) {
+                    return candidate.owner == VulkanInteropSlotOwner::READY;
+                }));
+            refresh_vulkan_interop_slot_flags(
+                state_, slots_, snapshot_.descriptor.slot_count);
+            current_slot_ = -1;
+            produced_camera_revision_ = configured_camera_revision_;
+        }
+        worker_changed_.notify_all();
     }
 
     ccl::half4* map_texture_buffer() override {
@@ -1452,6 +1503,7 @@ class VulkanInteropDisplayDriver final : public ccl::DisplayDriver {
     VulkanInteropSlots& slots_;
     std::mutex& state_mutex_;
     std::condition_variable& state_changed_;
+    std::condition_variable& worker_changed_;
     bool& stopping_;
     std::uint64_t& configured_camera_revision_;
     std::uint64_t& produced_camera_revision_;
@@ -1734,92 +1786,6 @@ void configure_background(
     runtime.background_light_object->tag_update(scene);
 }
 
-void populate_section_mesh(
-    ccl::Mesh* mesh,
-    const SectionRequest& section,
-    const ccl::Transform& rec709_to_working) {
-    mesh->resize_mesh(
-        static_cast<int>(section.vertices.size()),
-        static_cast<int>(section.triangles.size()));
-
-    ccl::packed_float3* positions = mesh->get_position_for_write();
-    int* triangles = mesh->get_triangles().data();
-    int* triangle_shaders = mesh->get_shader().data();
-    bool* smooth = mesh->get_smooth().data();
-    ccl::Attribute* normal_attribute = mesh->attributes.add(ccl::ATTR_STD_VERTEX_NORMAL);
-    ccl::packed_normal* normals = normal_attribute->data_for_write<ccl::packed_normal>();
-    ccl::Attribute* uv_attribute = mesh->attributes.add(ccl::ATTR_STD_UV);
-    ccl::float2* uvs = uv_attribute->data_for_write<ccl::float2>();
-    ccl::Attribute* color_attribute = mesh->attributes.add(ccl::ATTR_STD_VERTEX_COLOR);
-    ccl::uchar4* colors = color_attribute->data_for_write<ccl::uchar4>();
-
-    for (std::size_t index = 0; index < section.vertices.size(); ++index) {
-        const CyclesBridgeVertex& vertex = section.vertices[index];
-        positions[index] = ccl::make_float3(
-            vertex.position_x, vertex.position_y, vertex.position_z);
-        ccl::float3 normal = ccl::make_float3(
-            vertex.normal_x, vertex.normal_y, vertex.normal_z);
-        const float length = ccl::len(normal);
-        normal = length <= 1.0e-8F
-            ? ccl::make_float3(0.0F, 1.0F, 0.0F)
-            : normal / length;
-        normals[index] = ccl::packed_normal(normal);
-    }
-    for (std::size_t index = 0; index < section.triangles.size(); ++index) {
-        const CyclesBridgeTriangle& triangle = section.triangles[index];
-        const std::uint32_t indices[3] = {
-            triangle.vertex_0, triangle.vertex_1, triangle.vertex_2};
-        for (std::size_t corner = 0; corner < 3; ++corner) {
-            const std::size_t output_index = index * 3U + corner;
-            const CyclesBridgeVertex& vertex = section.vertices[indices[corner]];
-            triangles[output_index] = static_cast<int>(indices[corner]);
-            uvs[output_index] = ccl::make_float2(vertex.texture_u, vertex.texture_v);
-            const std::uint32_t rgba = vertex.packed_rgba;
-            const ccl::float3 linear_rec709 = ccl::make_float3(
-                srgb_to_linear(rgba & 0xFFU),
-                srgb_to_linear((rgba >> 8U) & 0xFFU),
-                srgb_to_linear((rgba >> 16U) & 0xFFU));
-            const ccl::float3 working = ccl::transform_direction(
-                &rec709_to_working, linear_rec709);
-            colors[output_index] = ccl::make_uchar4(
-                to_unorm(working.x),
-                to_unorm(working.y),
-                to_unorm(working.z),
-                static_cast<std::uint8_t>((rgba >> 24U) & 0xFFU));
-        }
-        triangle_shaders[index] = static_cast<int>(triangle.material_index);
-        smooth[index] = false;
-    }
-
-    mesh->tag_position_modified();
-    mesh->tag_triangles_modified();
-    mesh->tag_shader_modified();
-    mesh->tag_smooth_modified();
-}
-
-SectionSceneNodes create_section_nodes(
-    ccl::Scene* scene,
-    const SceneRequest& request,
-    const std::shared_ptr<const SectionRequest>& section,
-    const std::vector<ccl::Shader*>& shaders,
-    const ccl::Transform& rec709_to_working) {
-    ccl::Mesh* mesh = scene->create_node<ccl::Mesh>();
-    ccl::array<ccl::Node*> used_shaders;
-    for (ccl::Shader* shader : shaders) {
-        used_shaders.push_back_slow(shader);
-    }
-    mesh->set_used_shaders(used_shaders);
-    populate_section_mesh(mesh, *section, rec709_to_working);
-
-    ccl::Object* object = scene->create_node<ccl::Object>();
-    object->set_geometry(mesh);
-    object->set_tfm(ccl::transform_translate(ccl::make_float3(
-        static_cast<float>(section->section.origin_x - request.resources->resources.origin_x),
-        static_cast<float>(section->section.origin_y - request.resources->resources.origin_y),
-        static_cast<float>(section->section.origin_z - request.resources->resources.origin_z))));
-    return {mesh, object, section};
-}
-
 void build_scene(
     ccl::Scene* scene,
     const SceneRequest& request,
@@ -1848,9 +1814,9 @@ void build_scene(
     for (const auto& entry : request.sections) {
         runtime.sections.emplace(
             entry.first,
-            create_section_nodes(
+            cyclesrenderer::realtime::create_section_mesh_slot(
                 scene,
-                request,
+                resources,
                 entry.second,
                 runtime.shaders,
                 runtime.rec709_to_working));
@@ -1865,49 +1831,95 @@ void apply_scene_delta(
     if (runtime.resources != request.resources) {
         throw std::logic_error("incremental scene update changed shared resources");
     }
+    const auto deactivate = [&](std::int64_t section_id) {
+        const auto current = runtime.sections.find(section_id);
+        if (current == runtime.sections.end()) {
+            return;
+        }
+        cyclesrenderer::realtime::deactivate_section_mesh_slot(
+            scene, current->second);
+        runtime.free_sections.push_back(std::move(current->second));
+        runtime.sections.erase(current);
+    };
 
     if (update.replace_all) {
-        for (auto current = runtime.sections.begin(); current != runtime.sections.end();) {
-            if (request.sections.contains(current->first)) {
-                ++current;
-                continue;
+        std::vector<std::int64_t> removed;
+        removed.reserve(runtime.sections.size());
+        for (const auto& current : runtime.sections) {
+            if (!request.sections.contains(current.first)) {
+                removed.push_back(current.first);
             }
-            scene->delete_node(current->second.object);
-            scene->delete_node(current->second.mesh);
-            current = runtime.sections.erase(current);
+        }
+        for (std::int64_t section_id : removed) {
+            deactivate(section_id);
+        }
+    }
+
+    // Retire old sections before additions so walking can reuse the slots
+    // unloaded by the same coalesced scene update.
+    for (const auto& entry : update.mutations) {
+        if (!entry.second.section) {
+            deactivate(entry.first);
         }
     }
 
     for (const auto& entry : update.mutations) {
-        auto current = runtime.sections.find(entry.first);
         if (!entry.second.section) {
-            if (current != runtime.sections.end()) {
-                scene->delete_node(current->second.object);
-                scene->delete_node(current->second.mesh);
-                runtime.sections.erase(current);
-            }
             continue;
         }
-        if (current == runtime.sections.end()) {
-            runtime.sections.emplace(
-                entry.first, create_section_nodes(
-                    scene,
-                    request,
-                    entry.second.section,
-                    runtime.shaders,
-                    runtime.rec709_to_working));
+        auto current = runtime.sections.find(entry.first);
+        if (current != runtime.sections.end()
+            && current->second.source == entry.second.section) {
             continue;
         }
-        if (current->second.source == entry.second.section) {
+        if (current != runtime.sections.end()) {
+            static_cast<void>(cyclesrenderer::realtime::update_section_mesh_slot(
+                scene,
+                current->second,
+                *runtime.resources,
+                entry.second.section,
+                runtime.rec709_to_working));
             continue;
         }
 
-        ccl::Mesh* mesh = current->second.mesh;
-        mesh->clear(true);
-        populate_section_mesh(
-            mesh, *entry.second.section, runtime.rec709_to_working);
-        mesh->tag_update(scene, true);
-        current->second.source = entry.second.section;
+        const std::size_t required = entry.second.section->triangles.size();
+        auto reusable = runtime.free_sections.end();
+        for (auto candidate = runtime.free_sections.begin();
+             candidate != runtime.free_sections.end(); ++candidate) {
+            if (candidate->triangle_capacity >= required
+                && (reusable == runtime.free_sections.end()
+                    || candidate->triangle_capacity < reusable->triangle_capacity)) {
+                reusable = candidate;
+            }
+        }
+        if (reusable == runtime.free_sections.end() && !runtime.free_sections.empty()) {
+            reusable = std::max_element(
+                runtime.free_sections.begin(),
+                runtime.free_sections.end(),
+                [](const auto& first, const auto& second) {
+                    return first.triangle_capacity < second.triangle_capacity;
+                });
+        }
+        if (reusable != runtime.free_sections.end()) {
+            auto slot = std::move(*reusable);
+            runtime.free_sections.erase(reusable);
+            static_cast<void>(cyclesrenderer::realtime::update_section_mesh_slot(
+                scene,
+                slot,
+                *runtime.resources,
+                entry.second.section,
+                runtime.rec709_to_working));
+            runtime.sections.emplace(entry.first, std::move(slot));
+        } else {
+            runtime.sections.emplace(
+                entry.first,
+                cyclesrenderer::realtime::create_section_mesh_slot(
+                    scene,
+                    *runtime.resources,
+                    entry.second.section,
+                    runtime.shaders,
+                    runtime.rec709_to_working));
+        }
     }
 #if defined(CYCLESRENDERER_DLSS_EXPERIMENTAL)
     // Scene topology has no usable per-pixel velocity. Reject the previous
@@ -3127,15 +3139,11 @@ class CyclesEngine::Impl final {
                     device_uuid->data(),
                     device_uuid->size()) == 0;
             if (interop_memory_handle_ != nullptr && compatible_device) {
-                interop_snapshot.memory_handle = interop_memory_handle_;
-                interop_snapshot.ready_semaphore_handle =
-                    interop_ready_semaphore_handle_;
-                interop_snapshot.release_semaphore_handle =
-                    interop_release_semaphore_handle_;
-                interop_snapshot.descriptor = interop_descriptor_;
-                interop_memory_handle_ = nullptr;
-                interop_ready_semaphore_handle_ = nullptr;
-                interop_release_semaphore_handle_ = nullptr;
+                interop_snapshot = VulkanInteropSnapshot::duplicate(
+                    interop_memory_handle_,
+                    interop_ready_semaphore_handle_,
+                    interop_release_semaphore_handle_,
+                    interop_descriptor_);
             }
         }
         const bool use_graphics_interop = interop_snapshot.memory_handle != nullptr;
@@ -3164,6 +3172,7 @@ class CyclesEngine::Impl final {
                     interop_slots_,
                     interop_mutex_,
                     interop_changed_,
+                    request_changed_,
                     interop_stopping_,
                     interop_configured_camera_revision_,
                     interop_produced_camera_revision_));
@@ -3173,7 +3182,8 @@ class CyclesEngine::Impl final {
                     CYCLES_BRIDGE_VULKAN_INTEROP_SESSION_ATTACHED;
             }
         } else {
-            session->set_display_driver(ccl::make_unique<FrameDisplayDriver>(frames_));
+            session->set_display_driver(
+                ccl::make_unique<FrameDisplayDriver>(frames_, request_changed_));
         }
         create_output_passes(session->scene.get(), registered_pass_mask);
         build_scene(session->scene.get(), scene_request, settings, runtime);
@@ -3474,14 +3484,19 @@ class CyclesEngine::Impl final {
                     request_changed_.wait_for(lock, 16ms, [this, observed_scene_revision,
                                                            observed_camera_revision,
                                                            active_reset_revision,
-                                                           active_settings_revision] {
+                                                           active_settings_revision,
+                                                           &render_in_flight,
+                                                           &render_camera_revision] {
                         return stopping_
                             || scene_reset_revision_ != active_reset_revision
                             || settings_revision_ != active_settings_revision
                             || (requested_scene_
                                 && requested_scene_->revision != observed_scene_revision)
                             || (requested_camera_
-                                && requested_camera_->revision != observed_camera_revision);
+                                && requested_camera_->revision != observed_camera_revision)
+                            || (render_in_flight
+                                && produced_camera_revision()
+                                    == render_camera_revision);
                     });
                     if (stopping_) {
                         break;

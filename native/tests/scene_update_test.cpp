@@ -157,6 +157,20 @@ std::uint64_t checksum(const std::vector<std::uint8_t>& pixels) {
     return result;
 }
 
+bool has_rgb_variation(const std::vector<std::uint8_t>& pixels) {
+    if (pixels.size() < 8U) {
+        return false;
+    }
+    for (std::size_t offset = 4U; offset + 2U < pixels.size(); offset += 4U) {
+        if (pixels[offset] != pixels[0]
+            || pixels[offset + 1U] != pixels[1U]
+            || pixels[offset + 2U] != pixels[2U]) {
+            return true;
+        }
+    }
+    return false;
+}
+
 bool wait_for_changed_frame(
     CyclesBridgeRenderer* renderer,
     CyclesBridgeCamera& camera,
@@ -183,6 +197,7 @@ bool wait_for_changed_frame(
         }
         if ((frame.flags & CYCLES_BRIDGE_FRAME_UPDATED) != 0U
             && checksum(pixels) != previous_checksum
+            && (expected_section_count == 0U || has_rgb_variation(pixels))
             && diagnostics.section_count == expected_section_count
             && diagnostics.scene_commit_count >= minimum_commit_count) {
             return true;
@@ -231,8 +246,8 @@ bool run_scene_update_integration_test() {
     resources.struct_size = sizeof(resources);
     resources.struct_version = 1;
     resources.material_count = 1;
-    resources.texture_count = 1;
-    resources.texture_byte_count = 4;
+    resources.texture_count = static_cast<std::uint32_t>(textures.size());
+    resources.texture_byte_count = static_cast<std::uint32_t>(texture_pixels.size());
     CyclesBridgeSection section{};
     section.struct_size = sizeof(section);
     section.struct_version = 1;
@@ -323,6 +338,33 @@ bool run_scene_update_integration_test() {
     }
 
     const std::uint64_t expanded_checksum = checksum(pixels);
+    std::vector<CyclesBridgeVertex> overflow_vertices = expanded_vertices;
+    for (CyclesBridgeVertex& vertex : overflow_vertices) {
+        vertex.position_x += 1.0F;
+    }
+    std::vector<CyclesBridgeTriangle> overflow_triangles = expanded_triangles;
+    overflow_triangles.resize(129U, {0U, 0U, 0U, 0U});
+    CyclesBridgeSection overflow = expanded;
+    overflow.triangle_count = static_cast<std::uint32_t>(overflow_triangles.size());
+    if (!require_ok(
+            cycles_bridge_upsert_section(
+                renderer, &overflow, overflow_vertices.data(), overflow_triangles.data()),
+            "capacity overflow update")
+        || !require_ok(
+            cycles_bridge_commit_scene(renderer), "capacity overflow commit")
+        || !wait_for_changed_frame(
+            renderer,
+            camera,
+            frame,
+            pixels,
+            expanded_checksum,
+            1U,
+            2U + kBurstCommitCount)) {
+        cycles_bridge_destroy_renderer(renderer);
+        return false;
+    }
+
+    const std::uint64_t overflow_checksum = checksum(pixels);
     const bool removed = require_ok(
             cycles_bridge_remove_section(renderer, section.section_id), "final removal")
         && require_ok(cycles_bridge_commit_scene(renderer), "final removal commit")
@@ -331,11 +373,33 @@ bool run_scene_update_integration_test() {
             camera,
             frame,
             pixels,
-            expanded_checksum,
+            overflow_checksum,
             0U,
-            2U + kBurstCommitCount);
+            3U + kBurstCommitCount);
+    if (!removed) {
+        cycles_bridge_destroy_renderer(renderer);
+        return false;
+    }
+
+    const std::uint64_t removed_checksum = checksum(pixels);
+    CyclesBridgeSection reused = expanded;
+    reused.section_id = 43;
+    reused.origin_x = -3;
+    const bool reused_slot = require_ok(
+            cycles_bridge_upsert_section(
+                renderer, &reused, expanded_vertices.data(), expanded_triangles.data()),
+            "reused slot upsert")
+        && require_ok(cycles_bridge_commit_scene(renderer), "reused slot commit")
+        && wait_for_changed_frame(
+            renderer,
+            camera,
+            frame,
+            pixels,
+            removed_checksum,
+            1U,
+            4U + kBurstCommitCount);
     cycles_bridge_destroy_renderer(renderer);
-    return removed;
+    return reused_slot;
 }
 
 int main() {

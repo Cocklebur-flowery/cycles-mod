@@ -42,6 +42,7 @@ add_library(cyclesrenderer_native SHARED
     src/color_management.cpp
     src/cycles_bridge.cpp
     src/cycles_engine.cpp
+    src/realtime_section_mesh.cpp
     src/scene_update.cpp
 )
 

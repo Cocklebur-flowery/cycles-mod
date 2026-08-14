@@ -278,3 +278,12 @@ P1 至 P4 完成后进行一次 1080p 游戏人工里程碑：观察实际 sampl
 - `PathTrace::cancel` 仍只能等待当前已提交的 OptiX kernel batch 返回，不能抢占 GPU 内部正在执行的单个 batch。实时交互 sample 必须保持小批次；本阶段不修改 Cycles 5.2 内核调度或 Section Mesh 格式。
 - RT-P2 的 BVH 状态捕获补充 `Updating Geometry BVH`、`Updating Scene BVH` 以及 OptiX acceleration-structure substatus。旧版本 F10 中的 `BVH 0` 不代表没有 BVH 更新。
 - 预期游戏内表现是 `scene queue` 不再随连续跑图长期增长，`scene -> first frame` 主要反映当前 revision 的 device/BVH 更新与第一帧成本。若修复后 `device update` 或 BVH 仍出现数百毫秒尖峰，下一阶段再优化 BLAS/TLAS 更新粒度。
+
+### RT-P5：固定拓扑 Section 与动态 BVH refit
+
+- 游戏内遥测把剩余数百毫秒热点定位到 Cycles device geometry/BVH。旧路径每次用 `Mesh::clear(true)` 重建 Section 网格，三角形数量、索引和后续 Mesh 的 primitive offset 都可能改变，OptiX 因而只能重建 BLAS/TLAS。
+- Native 为每个活动 Section 分配带约 12.5% 余量并按 64 个三角形对齐的固定容量槽位。每个槽位使用稳定的独立三角形顶点/索引；未使用容量写成透明退化三角形。普通方块更新只改顶点、法线、UV、颜色和 shader index，不再改变拓扑。
+- Section 卸载后不删除 Cycles Mesh/Object，而是退化隐藏并进入空闲池；走路加载的新 Section 优先复用能够容纳它的最小槽位。只有新网格超过所有可复用容量时才扩大槽位并走一次真正拓扑重建，之后重新保留余量。
+- Section 世界偏移烘焙到顶点，Object 始终保持 identity。固定 Mesh/Object 数、索引和 primitive offset 让 Cycles 5.2 的动态 BVH 路径对 BLAS 使用 OptiX `UPDATE`，对已有 TLAS 使用 refit；实现不修改 Cycles 固定源码或补丁。
+- Public C ABI、Section/Vertex/Triangle/材质布局、shader graph、Java 上传、Vulkan interop、DLSS 历史失效和 Session reset 边界保持不变。新增逻辑隔离在 `realtime_section_mesh.*`，便于未来切换 Cycles 5.3 时单独验证动态 BVH 标志、refit 条件和 OptiX update 行为；几何材质与发光采样不属于本阶段。
+- Native Scene integration 继续覆盖 32 次 latest-only 突发更新，并增加 128→129 三角形的容量溢出重建、删除以及以新 Section ID/原点复用扩容后驻留槽位的回归。游戏内仍需对比单方块更新和连续跑图时 `device/geometry/BVH/first-frame` 的 last/EMA/max；容量溢出时允许单次重建，但不能让 queue 持续累积。
