@@ -44,6 +44,7 @@ add_library(cyclesrenderer_native SHARED
     src/cycles_engine.cpp
     src/labpbr_material.cpp
     src/labpbr_height.cpp
+    src/labpbr_parallax.cpp
     src/labpbr_metals.cpp
     src/labpbr_surface.cpp
     src/realtime_section_mesh.cpp

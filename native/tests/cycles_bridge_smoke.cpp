@@ -274,6 +274,10 @@ CyclesBridgeRenderSettings default_settings() {
     settings.atmosphere_ozone_density = 2.0F;
     settings.pbr_normal_strength = 1.0F;
     settings.pbr_emission_scale = 1.0F;
+    settings.pbr_height_strength = 1.0F;
+    settings.pbr_height_distance = 0.05F;
+    settings.pbr_height_mapping_mode = CYCLES_BRIDGE_HEIGHT_MAPPING_PARALLAX_OCCLUSION;
+    settings.pbr_parallax_steps = 4U;
     settings.working_space = CYCLES_BRIDGE_WORKING_SPACE_LINEAR_REC709;
     settings.dlss_quality_mode = CYCLES_BRIDGE_DLSS_QUALITY_QUALITY;
     settings.camera_type = CYCLES_BRIDGE_CAMERA_PERSPECTIVE;

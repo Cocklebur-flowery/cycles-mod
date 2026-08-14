@@ -1,6 +1,7 @@
 #include "labpbr_material.h"
 #include "labpbr_height.h"
 #include "labpbr_metals.h"
+#include "labpbr_parallax.h"
 #include "labpbr_surface.h"
 
 #include "scene/shader_graph.h"
@@ -31,9 +32,21 @@ ccl::unique_ptr<ccl::ShaderGraph> build_material_graph(
     auto graph = ccl::make_unique<ccl::ShaderGraph>();
     ccl::TextureCoordinateNode* coordinates =
         graph->create_node<ccl::TextureCoordinateNode>();
+    ccl::ShaderOutput* texture_vector = coordinates->output("UV");
+    if (material.pbr_format == CYCLES_BRIDGE_PBR_LAB_1_3
+        && settings.pbr_height_mapping_mode
+            == CYCLES_BRIDGE_HEIGHT_MAPPING_PARALLAX_OCCLUSION) {
+        texture_vector = connect_parallax_uv(
+            graph.get(),
+            texture_vector,
+            images[material.auxiliary_texture_index],
+            settings.pbr_height_strength,
+            settings.pbr_height_distance,
+            settings.pbr_parallax_steps);
+    }
     ccl::ImageTextureNode* texture = create_texture_node(
         graph.get(), images[material.texture_index], ccl::u_colorspace_scene_linear_srgb);
-    graph->connect(coordinates->output("UV"), texture->input("Vector"));
+    graph->connect(texture_vector, texture->input("Vector"));
 
     ccl::VertexColorNode* vertex_color = graph->create_node<ccl::VertexColorNode>();
     ccl::VectorMathNode* albedo = graph->create_node<ccl::VectorMathNode>();
@@ -48,7 +61,7 @@ ccl::unique_ptr<ccl::ShaderGraph> build_material_graph(
     if (material.pbr_format == CYCLES_BRIDGE_PBR_LAB_1_3) {
         ccl::ImageTextureNode* normal_texture = create_texture_node(
             graph.get(), images[material.normal_texture_index], ccl::u_colorspace_data);
-        graph->connect(coordinates->output("UV"), normal_texture->input("Vector"));
+        graph->connect(texture_vector, normal_texture->input("Vector"));
 
         ccl::NormalMapNode* normal_map = graph->create_node<ccl::NormalMapNode>();
         normal_map->set_space(ccl::NODE_NORMAL_MAP_TANGENT);
@@ -58,7 +71,7 @@ ccl::unique_ptr<ccl::ShaderGraph> build_material_graph(
 
         ccl::ImageTextureNode* material_texture = create_texture_node(
             graph.get(), images[material.material_texture_index], ccl::u_colorspace_data);
-        graph->connect(coordinates->output("UV"), material_texture->input("Vector"));
+        graph->connect(texture_vector, material_texture->input("Vector"));
 
         ccl::SeparateColorNode* material_channels =
             graph->create_node<ccl::SeparateColorNode>();
@@ -74,7 +87,7 @@ ccl::unique_ptr<ccl::ShaderGraph> build_material_graph(
 
         ccl::ImageTextureNode* auxiliary_texture = create_texture_node(
             graph.get(), images[material.auxiliary_texture_index], ccl::u_colorspace_data);
-        graph->connect(coordinates->output("UV"), auxiliary_texture->input("Vector"));
+        graph->connect(texture_vector, auxiliary_texture->input("Vector"));
 
         ccl::SeparateColorNode* auxiliary_channels =
             graph->create_node<ccl::SeparateColorNode>();
