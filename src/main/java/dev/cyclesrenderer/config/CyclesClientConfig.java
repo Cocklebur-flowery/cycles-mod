@@ -345,11 +345,11 @@ public final class CyclesClientConfig {
         GLOSSY_BOUNCES = builder.translation("config.cyclesrenderer.lightPaths.glossyBounces")
                 .defineInRange("glossyBounces", 1, 0, 64);
         TRANSMISSION_BOUNCES = builder.translation("config.cyclesrenderer.lightPaths.transmissionBounces")
-                .defineInRange("transmissionBounces", 0, 0, 64);
+                .defineInRange("transmissionBounces", 2, 0, 64);
         VOLUME_BOUNCES = builder.translation("config.cyclesrenderer.lightPaths.volumeBounces")
                 .defineInRange("volumeBounces", 0, 0, 64);
         TRANSPARENT_BOUNCES = builder.translation("config.cyclesrenderer.lightPaths.transparentBounces")
-                .defineInRange("transparentBounces", 0, 0, 64);
+                .defineInRange("transparentBounces", 32, 0, 64);
         CLAMP_DIRECT = builder.translation("config.cyclesrenderer.lightPaths.clampDirect")
                 .defineInRange("clampDirect", 0.0D, 0.0D, 100000.0D);
         CLAMP_INDIRECT = builder.translation("config.cyclesrenderer.lightPaths.clampIndirect")
