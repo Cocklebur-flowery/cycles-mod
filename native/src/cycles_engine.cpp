@@ -3207,6 +3207,9 @@ class CyclesEngine::Impl final {
         DenoiserSchedule denoiser_schedule{};
         ccl::SessionParams render_params = params;
         std::uint32_t reset_wait_micros = 0U;
+        std::uint32_t render_configure_micros = 0U;
+        std::uint32_t render_prepare_micros = 0U;
+        std::uint32_t session_start_micros = 0U;
         std::uint32_t scene_delta_micros = 0U;
         const bool apply_delta = scene_update != nullptr && scene_runtime != nullptr;
         if (apply_delta) {
@@ -3214,6 +3217,7 @@ class CyclesEngine::Impl final {
         }
         const auto delta_start = std::chrono::steady_clock::now();
         auto start_time = std::chrono::steady_clock::now();
+        auto reset_end = start_time;
         ccl::thread_scoped_lock local_scene_lock(
             session.scene->mutex, std::defer_lock);
         if (acquired_scene_lock == nullptr) {
@@ -3243,9 +3247,10 @@ class CyclesEngine::Impl final {
                 : settings.interactive_time_limit_millis;
             render_params.time_limit = static_cast<double>(time_limit_millis) / 1000.0;
             const auto reset_start = std::chrono::steady_clock::now();
+            render_configure_micros = elapsed_micros(start_time, reset_start);
             session.reset(render_params, buffer);
-            reset_wait_micros = elapsed_micros(
-                reset_start, std::chrono::steady_clock::now());
+            reset_end = std::chrono::steady_clock::now();
+            reset_wait_micros = elapsed_micros(reset_start, reset_end);
             {
                 std::lock_guard lock(interop_mutex_);
                 interop_configured_camera_revision_ = camera_request.revision;
@@ -3323,9 +3328,18 @@ class CyclesEngine::Impl final {
             sample_rate_diagnostic_ = 0.0F;
         }
         scene_timing_.record_reset_wait(scene_revision, reset_wait_micros);
+        const auto session_start_time = std::chrono::steady_clock::now();
+        render_prepare_micros = elapsed_micros(reset_end, session_start_time);
         session.start();
+        const auto session_started_time = std::chrono::steady_clock::now();
+        session_start_micros = elapsed_micros(session_start_time, session_started_time);
+        scene_timing_.record_render_start_phases(
+            render_configure_micros,
+            reset_wait_micros,
+            render_prepare_micros,
+            session_start_micros);
         record_render_start(elapsed_micros(
-            start_time, std::chrono::steady_clock::now()));
+            start_time, session_started_time));
         set_state("rendering", {});
     }
 

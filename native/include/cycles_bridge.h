@@ -632,6 +632,18 @@ struct CyclesBridgeDiagnostics {
     std::uint32_t max_device_phase_micros[CYCLES_BRIDGE_DEVICE_PHASE_COUNT];
     float camera_shift_x;
     float camera_shift_y;
+    std::uint32_t last_render_configure_micros;
+    std::uint32_t ema_render_configure_micros;
+    std::uint32_t max_render_configure_micros;
+    std::uint32_t last_render_reset_micros;
+    std::uint32_t ema_render_reset_micros;
+    std::uint32_t max_render_reset_micros;
+    std::uint32_t last_render_prepare_micros;
+    std::uint32_t ema_render_prepare_micros;
+    std::uint32_t max_render_prepare_micros;
+    std::uint32_t last_session_start_micros;
+    std::uint32_t ema_session_start_micros;
+    std::uint32_t max_session_start_micros;
 };
 
 struct CyclesBridgeVulkanInteropBuffer {

@@ -62,6 +62,18 @@ class CyclesSceneTiming final {
         }
     }
 
+    void record_render_start_phases(
+        std::uint32_t configure_micros,
+        std::uint32_t reset_micros,
+        std::uint32_t prepare_micros,
+        std::uint32_t session_start_micros) {
+        std::lock_guard lock(mutex_);
+        render_configure_.record(configure_micros);
+        render_reset_.record(reset_micros);
+        render_prepare_.record(prepare_micros);
+        session_start_.record(session_start_micros);
+    }
+
     void observe_status(std::string_view status, std::string_view substatus) {
         const auto now = Clock::now();
         std::lock_guard lock(mutex_);
@@ -151,6 +163,22 @@ class CyclesSceneTiming final {
                 diagnostics.ema_device_phase_micros[index],
                 diagnostics.max_device_phase_micros[index]);
         }
+        render_configure_.fill(
+            diagnostics.last_render_configure_micros,
+            diagnostics.ema_render_configure_micros,
+            diagnostics.max_render_configure_micros);
+        render_reset_.fill(
+            diagnostics.last_render_reset_micros,
+            diagnostics.ema_render_reset_micros,
+            diagnostics.max_render_reset_micros);
+        render_prepare_.fill(
+            diagnostics.last_render_prepare_micros,
+            diagnostics.ema_render_prepare_micros,
+            diagnostics.max_render_prepare_micros);
+        session_start_.fill(
+            diagnostics.last_session_start_micros,
+            diagnostics.ema_session_start_micros,
+            diagnostics.max_session_start_micros);
     }
 
  private:
@@ -291,6 +319,10 @@ class CyclesSceneTiming final {
     Metric bvh_update_;
     Metric first_frame_;
     std::array<Metric, kDevicePhaseCount> device_phases_{};
+    Metric render_configure_;
+    Metric render_reset_;
+    Metric render_prepare_;
+    Metric session_start_;
 };
 
 }  // namespace cyclesrenderer::timing

@@ -114,7 +114,7 @@ final class PerformanceLogWriter {
     }
 
     private void writeMetadata(BufferedWriter writer) throws IOException {
-        writer.write("{\"type\":\"metadata\",\"schema\":3"
+        writer.write("{\"type\":\"metadata\",\"schema\":4"
                 + ",\"clock\":\"monotonic_ns\""
                 + ",\"absolute_stall_us\":20000"
                 + ",\"adaptive_min_us\":12000"
@@ -124,7 +124,8 @@ final class PerformanceLogWriter {
                 + ",\"gpu_result_grace_frames\":64"
                 + ",\"cycles_gpu\":\"wall_clock_and_revision_context_only\""
                 + ",\"cycles_device_phases\":\"progress_status_wall_clock\""
-                + ",\"note\":\"CUDA/OptiX kernel time is not measured in schema 3\"}\n");
+                + ",\"cycles_render_start_phases\":\"configure_reset_prepare_session_start\""
+                + ",\"note\":\"CUDA/OptiX kernel time is not measured in schema 4\"}\n");
     }
 
     private void writeCapture(BufferedWriter writer, Capture capture) throws IOException {
@@ -230,6 +231,18 @@ final class PerformanceLogWriter {
                 .append(",\"scene_commit_native_last_us\":").append(value.lastSceneCommitMicros())
                 .append(",\"scene_delta_last_us\":").append(value.lastSceneDeltaMicros())
                 .append(",\"render_start_last_us\":").append(value.lastRenderStartMicros())
+                .append(",\"render_configure_last_us\":").append(value.lastRenderConfigureMicros())
+                .append(",\"render_configure_ema_us\":").append(value.emaRenderConfigureMicros())
+                .append(",\"render_configure_max_us\":").append(value.maxRenderConfigureMicros())
+                .append(",\"render_reset_last_us\":").append(value.lastRenderResetMicros())
+                .append(",\"render_reset_ema_us\":").append(value.emaRenderResetMicros())
+                .append(",\"render_reset_max_us\":").append(value.maxRenderResetMicros())
+                .append(",\"render_prepare_last_us\":").append(value.lastRenderPrepareMicros())
+                .append(",\"render_prepare_ema_us\":").append(value.emaRenderPrepareMicros())
+                .append(",\"render_prepare_max_us\":").append(value.maxRenderPrepareMicros())
+                .append(",\"session_start_last_us\":").append(value.lastSessionStartMicros())
+                .append(",\"session_start_ema_us\":").append(value.emaSessionStartMicros())
+                .append(",\"session_start_max_us\":").append(value.maxSessionStartMicros())
                 .append(",\"scene_queue_last_us\":").append(value.lastSceneQueueMicros())
                 .append(",\"reset_wait_last_us\":").append(value.lastResetWaitMicros())
                 .append(",\"device_update_last_us\":").append(value.lastDeviceUpdateMicros())

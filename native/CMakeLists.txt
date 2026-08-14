@@ -186,6 +186,11 @@ add_custom_command(TARGET cyclesrenderer_native POST_BUILD
 
 add_executable(cyclesrenderer_smoke
     tests/cycles_bridge_smoke.cpp
+    tests/cycles_bridge_smoke_color.cpp
+    tests/cycles_bridge_smoke_contract.cpp
+    tests/cycles_bridge_smoke_denoiser.cpp
+    tests/cycles_bridge_smoke_render_scene.cpp
+    tests/cycles_bridge_smoke_support.cpp
 )
 target_compile_features(cyclesrenderer_smoke PRIVATE cxx_std_20)
 target_link_libraries(cyclesrenderer_smoke PRIVATE cyclesrenderer_native)

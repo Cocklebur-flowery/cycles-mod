@@ -18,9 +18,9 @@ struct CyclesBridgeRenderer {
 
 namespace {
 
-constexpr std::uint32_t kAbiVersion = 41;
+constexpr std::uint32_t kAbiVersion = 42;
 constexpr std::uint32_t kStructVersion = 1;
-constexpr char kBuildInfo[] = "cyclesrenderer-native/cycles-5.2;abi=41";
+constexpr char kBuildInfo[] = "cyclesrenderer-native/cycles-5.2;abi=42";
 
 static_assert(sizeof(CyclesBridgeCamera) == 80);
 static_assert(offsetof(CyclesBridgeCamera, frame_id) == 8);
@@ -53,7 +53,7 @@ static_assert(sizeof(CyclesBridgePassDescriptor) == 64);
 static_assert(sizeof(CyclesBridgeCapabilities) == 64);
 static_assert(sizeof(CyclesBridgeColorLutDescriptor) == 72);
 static_assert(offsetof(CyclesBridgeColorLutDescriptor, pixel_byte_count) == 32);
-static_assert(sizeof(CyclesBridgeDiagnostics) == 624);
+static_assert(sizeof(CyclesBridgeDiagnostics) == 672);
 static_assert(offsetof(CyclesBridgeDiagnostics, device_uuid_valid) == 376);
 static_assert(offsetof(CyclesBridgeDiagnostics, device_uuid) == 380);
 static_assert(offsetof(CyclesBridgeDiagnostics, scene_timing_revision) == 400);
@@ -67,6 +67,10 @@ static_assert(offsetof(CyclesBridgeDiagnostics, ema_device_phase_micros) == 552)
 static_assert(offsetof(CyclesBridgeDiagnostics, max_device_phase_micros) == 584);
 static_assert(offsetof(CyclesBridgeDiagnostics, camera_shift_x) == 616);
 static_assert(offsetof(CyclesBridgeDiagnostics, camera_shift_y) == 620);
+static_assert(offsetof(CyclesBridgeDiagnostics, last_render_configure_micros) == 624);
+static_assert(offsetof(CyclesBridgeDiagnostics, last_render_reset_micros) == 636);
+static_assert(offsetof(CyclesBridgeDiagnostics, last_render_prepare_micros) == 648);
+static_assert(offsetof(CyclesBridgeDiagnostics, last_session_start_micros) == 660);
 static_assert(sizeof(CyclesBridgeVulkanInteropBuffer) == 80);
 static_assert(offsetof(CyclesBridgeVulkanInteropBuffer, allocation_byte_count) == 24);
 static_assert(offsetof(CyclesBridgeVulkanInteropBuffer, memory_handle) == 32);

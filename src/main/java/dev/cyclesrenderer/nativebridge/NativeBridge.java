@@ -24,7 +24,7 @@ import static java.lang.foreign.ValueLayout.JAVA_INT;
 import static java.lang.foreign.ValueLayout.JAVA_LONG;
 
 public final class NativeBridge {
-    public static final int ABI_VERSION = 41;
+    public static final int ABI_VERSION = 42;
     public static final int DEVICE_UPDATE_PHASE_COUNT = 8;
     public static final int PIXEL_FORMAT_RGBA16_FLOAT = 2;
     public static final int PIXEL_FORMAT_RGBA32_FLOAT = 3;
@@ -376,7 +376,19 @@ public final class NativeBridge {
             MemoryLayout.sequenceLayout(
                     DEVICE_UPDATE_PHASE_COUNT, JAVA_INT).withName("max_device_phase_micros"),
             JAVA_FLOAT.withName("camera_shift_x"),
-            JAVA_FLOAT.withName("camera_shift_y"));
+            JAVA_FLOAT.withName("camera_shift_y"),
+            JAVA_INT.withName("last_render_configure_micros"),
+            JAVA_INT.withName("ema_render_configure_micros"),
+            JAVA_INT.withName("max_render_configure_micros"),
+            JAVA_INT.withName("last_render_reset_micros"),
+            JAVA_INT.withName("ema_render_reset_micros"),
+            JAVA_INT.withName("max_render_reset_micros"),
+            JAVA_INT.withName("last_render_prepare_micros"),
+            JAVA_INT.withName("ema_render_prepare_micros"),
+            JAVA_INT.withName("max_render_prepare_micros"),
+            JAVA_INT.withName("last_session_start_micros"),
+            JAVA_INT.withName("ema_session_start_micros"),
+            JAVA_INT.withName("max_session_start_micros"));
     private static final MemoryLayout VULKAN_INTEROP_BUFFER_LAYOUT =
             MemoryLayout.structLayout(
                     JAVA_INT.withName("struct_size"),
@@ -456,7 +468,7 @@ public final class NativeBridge {
                 || PASS_DESCRIPTOR_LAYOUT.byteSize() != 64L
                 || CAPABILITIES_LAYOUT.byteSize() != 64L
                 || COLOR_LUT_DESCRIPTOR_LAYOUT.byteSize() != 72L
-                || DIAGNOSTICS_LAYOUT.byteSize() != 624L
+                || DIAGNOSTICS_LAYOUT.byteSize() != 672L
                 || VULKAN_INTEROP_BUFFER_LAYOUT.byteSize() != 80L
                 || VULKAN_INTEROP_STATE_LAYOUT.byteSize() != 72L
                 || VERTEX_LAYOUT.byteSize() != 40L
@@ -1586,7 +1598,19 @@ public final class NativeBridge {
                     intArray(diagnosticsSegment, 552L, DEVICE_UPDATE_PHASE_COUNT),
                     intArray(diagnosticsSegment, 584L, DEVICE_UPDATE_PHASE_COUNT),
                     diagnosticsSegment.get(JAVA_FLOAT, 616L),
-                    diagnosticsSegment.get(JAVA_FLOAT, 620L));
+                    diagnosticsSegment.get(JAVA_FLOAT, 620L),
+                    diagnosticsSegment.get(JAVA_INT, 624L),
+                    diagnosticsSegment.get(JAVA_INT, 628L),
+                    diagnosticsSegment.get(JAVA_INT, 632L),
+                    diagnosticsSegment.get(JAVA_INT, 636L),
+                    diagnosticsSegment.get(JAVA_INT, 640L),
+                    diagnosticsSegment.get(JAVA_INT, 644L),
+                    diagnosticsSegment.get(JAVA_INT, 648L),
+                    diagnosticsSegment.get(JAVA_INT, 652L),
+                    diagnosticsSegment.get(JAVA_INT, 656L),
+                    diagnosticsSegment.get(JAVA_INT, 660L),
+                    diagnosticsSegment.get(JAVA_INT, 664L),
+                    diagnosticsSegment.get(JAVA_INT, 668L));
         }
 
         private static int[] intArray(MemorySegment source, long offset, int count) {
@@ -2309,7 +2333,19 @@ public final class NativeBridge {
             int[] emaDevicePhaseMicros,
             int[] maxDevicePhaseMicros,
             float cameraShiftX,
-            float cameraShiftY) {
+            float cameraShiftY,
+            int lastRenderConfigureMicros,
+            int emaRenderConfigureMicros,
+            int maxRenderConfigureMicros,
+            int lastRenderResetMicros,
+            int emaRenderResetMicros,
+            int maxRenderResetMicros,
+            int lastRenderPrepareMicros,
+            int emaRenderPrepareMicros,
+            int maxRenderPrepareMicros,
+            int lastSessionStartMicros,
+            int emaSessionStartMicros,
+            int maxSessionStartMicros) {
         public Diagnostics {
             lastDevicePhaseMicros = lastDevicePhaseMicros.clone();
             emaDevicePhaseMicros = emaDevicePhaseMicros.clone();
