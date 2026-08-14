@@ -4,7 +4,7 @@
 
 检查日期：2026-08-14（Asia/Shanghai）
 
-检查对象：S2 验证工作树（起点 `da5862b`；产品修复基线为 `fca5bd6`）
+检查对象：S3 验证工作树（起点 `80afb23`；产品修复基线为 `fca5bd6`）
 
 本文件只描述上述提交附近的当前事实、验证证据和已知红项。它不是历史阶段
 记录，也不替代源码、构建配置、ABI 断言或测试。ABI、稳定契约、验证入口或
@@ -41,8 +41,8 @@
 | Vulkan interop | buffer/state 均为 80 bytes；state 的 depth dimensions 位于尾部 | Java layout 检查、C++ `static_assert` |
 | Java 测试 | camera 自动曝光/对焦/射线/直方图与 LabPBR 资源测试 | `src/test/java` |
 | 项目验证入口 | Gradle `verifyProject` 先执行 Java `build`，再运行所选 native 变体的全部 CTest | `build.gradle` |
-| Native 测试入口 | CTest 注册 `cyclesrenderer_native_smoke` 与 `cyclesrenderer_scene_update` | `native/CMakeLists.txt` |
-| Native smoke 结构 | 源文件已按 contract、color、render、denoiser、support 拆分，但仍由单一短路 `main` 串行执行 | `native/tests/cycles_bridge_smoke*.cpp` |
+| Native 测试入口 | CTest 注册 5 个独立 smoke 能力域与 `cyclesrenderer_scene_update` | `native/CMakeLists.txt` |
+| Native smoke 结构 | 无参数入口保留完整顺序；CTest 通过 `--suite` 独立报告 contract、color、render、denoiser 与 scene-lifecycle | `native/tests/cycles_bridge_smoke*.cpp` |
 
 跨语言 ABI 目前仍由 C 头结构、C++ size/offset 断言、Java `MemoryLayout` 和
 smoke contract 多处人工维护。断言能够发现部分漂移，但尚不存在单一 schema
@@ -92,8 +92,14 @@ run-client.cmd verifyProject --rerun-tasks --console=plain
 | 领域 | 状态 | 结果 |
 | --- | --- | --- |
 | Native configure/build | `PASS` | Release DLL、smoke、scene-update 目标构建成功 |
-| `cyclesrenderer_scene_update` | `PASS` | 5.26 秒完成 |
-| `cyclesrenderer_native_smoke` | `FAIL` / `KNOWN RED` | 134.26 秒后在 `initial section` 超时 |
+| `cyclesrenderer_smoke_contract` | `PASS` | 4.48 秒完成 |
+| `cyclesrenderer_smoke_color` | `PASS` | 4.56 秒完成 |
+| `cyclesrenderer_smoke_render` | `FAIL` / `KNOWN RED` | 134.32 秒后在 `initial section` 超时 |
+| `cyclesrenderer_smoke_denoiser` | `BLOCKED` / `SKIPPED` | 134.39 秒后由 render 前置失败返回 skip 77 |
+| `cyclesrenderer_smoke_scene_lifecycle` | `BLOCKED` / `SKIPPED` | 134.46 秒后由 render 前置失败返回 skip 77 |
+| `cyclesrenderer_scene_update` | `PASS` | 5.27 秒完成 |
+
+CTest 总耗时 417.49 秒；6 项中 3 项通过、1 项失败、2 项跳过。
 
 smoke 失败前 OptiX 已报告 `frame=ready`、`resolution=320x180`、`sample=1/1`、
 `produced=2`、`starts=2`，但 `wait_for_updated_frame` 没有接受到所期待的后续
@@ -111,33 +117,43 @@ run-client.cmd verifyProject -PexperimentalDlss=true --rerun-tasks --console=pla
 | 领域 | 状态 | 结果 |
 | --- | --- | --- |
 | Native configure/build | `PASS` | DLSS Release DLL、smoke、scene-update 目标构建成功 |
-| `cyclesrenderer_scene_update` | `PASS` | 5.62 秒完成 |
-| `cyclesrenderer_native_smoke` | `FAIL` / `KNOWN RED` | 134.62 秒后在同一 `initial section` 阶段超时 |
+| `cyclesrenderer_smoke_contract` | `PASS` | 4.92 秒完成 |
+| `cyclesrenderer_smoke_color` | `PASS` | 5.12 秒完成 |
+| `cyclesrenderer_smoke_render` | `FAIL` / `KNOWN RED` | 134.98 秒后在同一 `initial section` 阶段超时 |
+| `cyclesrenderer_smoke_denoiser` | `BLOCKED` / `SKIPPED` | 134.84 秒后由 render 前置失败返回 skip 77 |
+| `cyclesrenderer_smoke_scene_lifecycle` | `BLOCKED` / `SKIPPED` | 134.73 秒后由 render 前置失败返回 skip 77 |
+| `cyclesrenderer_scene_update` | `PASS` | 5.60 秒完成 |
+
+CTest 总耗时 420.20 秒；6 项中同样为 3 项通过、1 项失败、2 项跳过。
 
 DLSS 变体的 ready frame、尺寸、sample、produced 和 starts 与默认变体一致。
 当前证据支持“共享帧发布/等待契约问题”，不支持“只在 DLSS 构建失败”。
 
-## 5. 被前置失败遮蔽的测试领域
+## 5. 分域测试结果
 
-当前 smoke `main` 使用连续 `&&`：
+无参数 smoke 继续保留原有完整顺序：
 
 ```text
 contract -> color -> render -> denoiser -> scene lifecycle
 ```
 
-`render` 中的 initial-section 失败后，后续领域不会执行。因此本基线只能给出：
+CTest 则为每个能力域启动独立进程。目标域自身失败返回 1；前置域失败返回 77，
+由 CTest 显示为 `Skipped`。因此当前可以准确给出：
 
 | 测试领域 | 状态 | 原因 |
 | --- | --- | --- |
-| ABI/bridge contract 前置部分 | `PASS` | smoke 已越过 ABI check 与 renderer 创建 |
-| color contract | `PASS` | smoke 已进入 render suite |
-| initial scene frame | `KNOWN RED` | ready frame 存在，但 updated-frame 等待超时 |
+| ABI/bridge contract | `PASS` | 默认与 DLSS 独立 CTest 均通过 |
+| color contract | `PASS` | 默认与 DLSS 独立 CTest 均通过 |
+| initial scene frame / render | `KNOWN RED` | 两种变体均有 ready frame，但 updated-frame 等待超时 |
 | camera shift / autofocus / DoF / pass viewer | `BLOCKED` | 位于同一 render suite 的失败点之后 |
 | panorama | `BLOCKED` | 未到达当前 panorama 循环；旧结果不替代本次结果 |
-| denoiser | `BLOCKED` | render suite 失败后短路 |
-| scene lifecycle / dynamic resolution | `BLOCKED` | render suite 失败后短路 |
+| denoiser | `BLOCKED` / `SKIPPED` | 独立 CTest 明确报告 render 前置失败 |
+| scene lifecycle / dynamic resolution | `BLOCKED` / `SKIPPED` | 独立 CTest 明确报告 render 前置失败 |
+| scene-update contract | `PASS` | 默认与 DLSS 独立 CTest 均通过 |
 
-这正是下一阶段需要按能力域独立 setup、执行和报告 native smoke 的原因。
+S3 已消除“一个 CTest 红项令后续领域完全无报告”的问题，但没有改变真实场景
+前置依赖。解决 render 的 frame publication / wait contract 后，denoiser 与
+scene-lifecycle 才能执行自身断言。
 
 ## 6. 游戏内验证状态
 
@@ -189,10 +205,10 @@ smoke ready frame 推断。
 
 1. `S2 DONE`：Gradle 单一 `verifyProject` 聚合入口已经建立并在默认、DLSS
    两种变体实际执行；总结果因已知 native smoke 红项准确失败。
-2. `S3 NEXT`：只在测试代码中拆分 smoke suite 的 setup、执行和 CTest 报告，
-   使一个红项不再遮蔽其他领域。
-3. 先解决或准确重定义 initial-section 的 frame publication / wait contract。
-4. 在测试分域可独立报告后，为一个小型 interop 结构建立 ABI schema 生成原型。
+2. `S3 DONE`：smoke suite 已按能力域独立 setup、执行和 CTest 报告；前置失败
+   使用 skip 77 与目标域失败区分。
+3. `S4 NEXT`：解决或准确重定义 initial-section 的 frame publication / wait contract。
+4. `S5`：在测试分域可独立报告后，为一个小型 interop 结构建立 ABI schema 生成原型。
 5. 完成上述门禁后，才开始 `NativeBridge` 或 `cycles_engine.cpp` 的生产代码拆分。
 
 任何新功能开发在上述稳定化阶段完成前继续冻结。

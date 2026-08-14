@@ -221,7 +221,27 @@ set_target_properties(cyclesrenderer_scene_update_test PROPERTIES
 add_dependencies(cyclesrenderer_smoke cyclesrenderer_scene_update_test)
 
 enable_testing()
-add_test(NAME cyclesrenderer_native_smoke COMMAND cyclesrenderer_smoke)
+set(CYCLESRENDERER_SMOKE_SUITES
+    contract
+    color
+    render
+    denoiser
+    scene-lifecycle
+)
+foreach(smoke_suite IN LISTS CYCLESRENDERER_SMOKE_SUITES)
+    string(REPLACE "-" "_" smoke_test_suffix "${smoke_suite}")
+    set(smoke_test_name "cyclesrenderer_smoke_${smoke_test_suffix}")
+    add_test(
+        NAME "${smoke_test_name}"
+        COMMAND cyclesrenderer_smoke --suite "${smoke_suite}"
+    )
+    set_tests_properties(
+        "${smoke_test_name}"
+        PROPERTIES
+            RUN_SERIAL TRUE
+            SKIP_RETURN_CODE 77
+    )
+endforeach()
 add_test(
     NAME cyclesrenderer_scene_update
     COMMAND cyclesrenderer_scene_update_test
