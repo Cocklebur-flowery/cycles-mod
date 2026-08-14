@@ -92,19 +92,19 @@ run-client.cmd verifyProject --rerun-tasks --console=plain
 | 领域 | 状态 | 结果 |
 | --- | --- | --- |
 | Native configure/build | `PASS` | Release DLL、smoke、scene-update 目标构建成功 |
-| `cyclesrenderer_smoke_contract` | `PASS` | 4.48 秒完成 |
-| `cyclesrenderer_smoke_color` | `PASS` | 4.56 秒完成 |
-| `cyclesrenderer_smoke_render` | `FAIL` / `KNOWN RED` | 134.32 秒后在 `initial section` 超时 |
-| `cyclesrenderer_smoke_denoiser` | `BLOCKED` / `SKIPPED` | 134.39 秒后由 render 前置失败返回 skip 77 |
-| `cyclesrenderer_smoke_scene_lifecycle` | `BLOCKED` / `SKIPPED` | 134.46 秒后由 render 前置失败返回 skip 77 |
-| `cyclesrenderer_scene_update` | `PASS` | 5.27 秒完成 |
+| `cyclesrenderer_smoke_contract` | `PASS` | 4.58 秒完成 |
+| `cyclesrenderer_smoke_color` | `PASS` | 4.51 秒完成 |
+| `cyclesrenderer_smoke_render` | `FAIL` / `KNOWN RED` | 5.41 秒后明确失败于绿色纹理内容断言 |
+| `cyclesrenderer_smoke_denoiser` | `BLOCKED` / `SKIPPED` | 5.48 秒后由 render 前置失败返回 skip 77 |
+| `cyclesrenderer_smoke_scene_lifecycle` | `BLOCKED` / `SKIPPED` | 5.29 秒后由 render 前置失败返回 skip 77 |
+| `cyclesrenderer_scene_update` | `PASS` | 5.20 秒完成 |
 
-CTest 总耗时 417.49 秒；6 项中 3 项通过、1 项失败、2 项跳过。
+CTest 总耗时 30.49 秒；6 项中 3 项通过、1 项失败、2 项跳过。
 
-smoke 失败前 OptiX 已报告 `frame=ready`、`resolution=320x180`、`sample=1/1`、
-`produced=2`、`starts=2`，但 `wait_for_updated_frame` 没有接受到所期待的后续
-`FRAME_UPDATED` 结果。该现象应归类为帧发布/等待契约或 smoke harness 问题，
-不能描述为“OptiX 未产生帧”。
+S4 表征运行确认 smoke 收到 2 个 `FRAME_UPDATED` 帧，最后 generation 为 18，
+Combined pass 匹配，画面也有 RGB 变化。帧发布和 generation 游标正常；未满足的是
+独立的绿色纹理内容断言。最接近绿色的像素为 `90,94,93`，绿色优势仅为 1，
+不是原阈值 16 过严。该红项现在归类为初始场景几何、材质或纹理内容问题。
 
 ### 4.3 Experimental DLSS Native 变体
 
@@ -117,17 +117,17 @@ run-client.cmd verifyProject -PexperimentalDlss=true --rerun-tasks --console=pla
 | 领域 | 状态 | 结果 |
 | --- | --- | --- |
 | Native configure/build | `PASS` | DLSS Release DLL、smoke、scene-update 目标构建成功 |
-| `cyclesrenderer_smoke_contract` | `PASS` | 4.92 秒完成 |
-| `cyclesrenderer_smoke_color` | `PASS` | 5.12 秒完成 |
-| `cyclesrenderer_smoke_render` | `FAIL` / `KNOWN RED` | 134.98 秒后在同一 `initial section` 阶段超时 |
-| `cyclesrenderer_smoke_denoiser` | `BLOCKED` / `SKIPPED` | 134.84 秒后由 render 前置失败返回 skip 77 |
-| `cyclesrenderer_smoke_scene_lifecycle` | `BLOCKED` / `SKIPPED` | 134.73 秒后由 render 前置失败返回 skip 77 |
-| `cyclesrenderer_scene_update` | `PASS` | 5.60 秒完成 |
+| `cyclesrenderer_smoke_contract` | `PASS` | 4.93 秒完成 |
+| `cyclesrenderer_smoke_color` | `PASS` | 5.10 秒完成 |
+| `cyclesrenderer_smoke_render` | `FAIL` / `KNOWN RED` | 5.94 秒后明确失败于同一绿色纹理内容断言 |
+| `cyclesrenderer_smoke_denoiser` | `BLOCKED` / `SKIPPED` | 5.86 秒后由 render 前置失败返回 skip 77 |
+| `cyclesrenderer_smoke_scene_lifecycle` | `BLOCKED` / `SKIPPED` | 5.84 秒后由 render 前置失败返回 skip 77 |
+| `cyclesrenderer_scene_update` | `PASS` | 5.84 秒完成 |
 
-CTest 总耗时 420.20 秒；6 项中同样为 3 项通过、1 项失败、2 项跳过。
+CTest 总耗时 33.52 秒；6 项中同样为 3 项通过、1 项失败、2 项跳过。
 
-DLSS 变体的 ready frame、尺寸、sample、produced 和 starts 与默认变体一致。
-当前证据支持“共享帧发布/等待契约问题”，不支持“只在 DLSS 构建失败”。
+DLSS 表征运行同样收到 2 个 `FRAME_UPDATED` 帧，但没有绿色主导像素。
+当前证据支持默认与 DLSS 共享的场景内容问题，不支持帧发布失败或 DLSS 独有故障。
 
 ## 5. 分域测试结果
 
@@ -144,16 +144,18 @@ CTest 则为每个能力域启动独立进程。目标域自身失败返回 1；
 | --- | --- | --- |
 | ABI/bridge contract | `PASS` | 默认与 DLSS 独立 CTest 均通过 |
 | color contract | `PASS` | 默认与 DLSS 独立 CTest 均通过 |
-| initial scene frame / render | `KNOWN RED` | 两种变体均有 ready frame，但 updated-frame 等待超时 |
+| frame publication / generation | `PASS` | 两种变体均收到 2 个 `FRAME_UPDATED` 帧，generation 与 Combined pass 正常 |
+| initial scene textured content / render | `KNOWN RED` | 两种变体均缺少预期绿色纹理内容；断言强度保持不变 |
 | camera shift / autofocus / DoF / pass viewer | `BLOCKED` | 位于同一 render suite 的失败点之后 |
 | panorama | `BLOCKED` | 未到达当前 panorama 循环；旧结果不替代本次结果 |
 | denoiser | `BLOCKED` / `SKIPPED` | 独立 CTest 明确报告 render 前置失败 |
 | scene lifecycle / dynamic resolution | `BLOCKED` / `SKIPPED` | 独立 CTest 明确报告 render 前置失败 |
 | scene-update contract | `PASS` | 默认与 DLSS 独立 CTest 均通过 |
 
-S3 已消除“一个 CTest 红项令后续领域完全无报告”的问题，但没有改变真实场景
-前置依赖。解决 render 的 frame publication / wait contract 后，denoiser 与
-scene-lifecycle 才能执行自身断言。
+S3 已消除“一个 CTest 红项令后续领域完全无报告”的问题。S4 又将初始场景的帧到达
+与内容验收拆成连续断言：该调用只等待 `FRAME_UPDATED`，随后由既有绿色纹理断言验证内容。
+因此当前失败会在约 6 秒内准确报告，不再消耗约 135 秒并误报发布超时。真实场景内容
+红项仍是 denoiser 与 scene-lifecycle 执行自身断言之前的前置阻塞。
 
 ## 6. 游戏内验证状态
 
@@ -207,8 +209,11 @@ smoke ready frame 推断。
    两种变体实际执行；总结果因已知 native smoke 红项准确失败。
 2. `S3 DONE`：smoke suite 已按能力域独立 setup、执行和 CTest 报告；前置失败
    使用 skip 77 与目标域失败区分。
-3. `S4 NEXT`：解决或准确重定义 initial-section 的 frame publication / wait contract。
-4. `S5`：在测试分域可独立报告后，为一个小型 interop 结构建立 ABI schema 生成原型。
-5. 完成上述门禁后，才开始 `NativeBridge` 或 `cycles_engine.cpp` 的生产代码拆分。
+3. `S4 DONE`：initial-section 的 frame publication / wait contract 已准确重定义；
+   两种 native 变体均证明帧发布正常，内容断言保持不变并独立报告。
+4. `PBR BUG NEXT`：关闭初始场景缺少绿色纹理内容的已知红项，并复跑默认、DLSS
+   完整验证入口；不得通过删除或放宽内容断言绕过。
+5. `S5`：上述红项关闭后，为一个小型 interop 结构建立 ABI schema 生成原型。
+6. 完成上述门禁后，才开始 `NativeBridge` 或 `cycles_engine.cpp` 的生产代码拆分。
 
 任何新功能开发在上述稳定化阶段完成前继续冻结。

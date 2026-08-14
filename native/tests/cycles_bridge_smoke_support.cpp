@@ -76,6 +76,21 @@ bool wait_for_updated_frame(
     std::string& info,
     bool require_green,
     int expected_pass) {
+    std::uint32_t updated_frame_count = 0U;
+    std::uint64_t last_updated_generation = frame.generation;
+    std::uint64_t last_updated_checksum = 0U;
+    std::uint32_t last_active_pass = 0U;
+    std::uint32_t last_section_count = 0U;
+    std::uint64_t last_scene_revision = 0U;
+    std::uint64_t last_camera_revision = 0U;
+    std::uint64_t last_scene_commit_count = 0U;
+    std::uint64_t last_scene_delta_count = 0U;
+    bool last_active_pass_valid = false;
+    bool last_pass_matches = false;
+    bool last_rgb_variation = false;
+    bool last_green_dominant = false;
+    int last_green_advantage = -255;
+    std::array<std::uint8_t, 3> last_green_candidate{};
     for (int attempt = 0; attempt < 1200; ++attempt) {
         camera.frame_id++;
         if (!require_ok(
@@ -101,22 +116,79 @@ bool wait_for_updated_frame(
         }
         if ((frame.flags & CYCLES_BRIDGE_FRAME_READY) != 0U
             && (frame.flags & CYCLES_BRIDGE_FRAME_UPDATED) != 0U) {
+            updated_frame_count++;
+            last_updated_generation = frame.generation;
+            last_updated_checksum = checksum(pixels);
+            last_rgb_variation = has_rgb_variation(pixels);
+            last_green_dominant = has_green_dominant_pixel(pixels);
+            last_green_advantage = -255;
+            for (std::size_t offset = 0; offset + 3U < pixels.size(); offset += 4U) {
+                const int red = pixels[offset];
+                const int green = pixels[offset + 1U];
+                const int blue = pixels[offset + 2U];
+                const int advantage = green - (red > blue ? red : blue);
+                if (advantage > last_green_advantage) {
+                    last_green_advantage = advantage;
+                    last_green_candidate = {
+                        pixels[offset], pixels[offset + 1U], pixels[offset + 2U]};
+                }
+            }
             CyclesBridgeDiagnostics diagnostics{};
             diagnostics.struct_size = sizeof(diagnostics);
             diagnostics.struct_version = 1;
+            const std::uint32_t diagnostics_status =
+                cycles_bridge_query_diagnostics(renderer, &diagnostics);
+            last_active_pass_valid = diagnostics_status == CYCLES_BRIDGE_STATUS_OK;
+            if (last_active_pass_valid) {
+                last_active_pass = diagnostics.active_pass;
+                last_section_count = diagnostics.section_count;
+                last_scene_revision = diagnostics.scene_revision;
+                last_camera_revision = diagnostics.camera_revision;
+                last_scene_commit_count = diagnostics.scene_commit_count;
+                last_scene_delta_count = diagnostics.scene_delta_count;
+            }
             const bool pass_matches = expected_pass < 0
                 || (require_ok(
-                        cycles_bridge_query_diagnostics(renderer, &diagnostics),
+                        diagnostics_status,
                         "frame pass diagnostics")
                     && diagnostics.active_pass == static_cast<std::uint32_t>(expected_pass));
-            if (pass_matches && (!require_green || has_green_dominant_pixel(pixels))) {
+            last_pass_matches = pass_matches;
+            if (pass_matches && (!require_green || last_green_dominant)) {
                 return true;
             }
         }
         Sleep(100);
     }
-    std::cerr << stage << " did not produce an updated frame before timeout: "
-              << info << '\n';
+    std::cerr << stage;
+    if (updated_frame_count == 0U) {
+        std::cerr << " did not publish an updated frame before timeout: ";
+    } else {
+        std::cerr << " published updated frames, but none satisfied the acceptance predicate: ";
+    }
+    std::cerr << info
+              << ";updated_frames=" << updated_frame_count
+              << ";last_generation=" << last_updated_generation
+              << ";rgb_variation=" << last_rgb_variation
+              << ";require_green=" << require_green
+              << ";green_dominant=" << last_green_dominant
+              << ";green_candidate="
+              << static_cast<int>(last_green_candidate[0]) << ','
+              << static_cast<int>(last_green_candidate[1]) << ','
+              << static_cast<int>(last_green_candidate[2])
+              << ";green_advantage=" << last_green_advantage
+              << ";active_pass=";
+    if (last_active_pass_valid) {
+        std::cerr << last_active_pass;
+    } else {
+        std::cerr << "unknown";
+    }
+    std::cerr << ";pass_matches=" << last_pass_matches
+              << ";sections=" << last_section_count
+              << ";scene_revision=" << last_scene_revision
+              << ";camera_revision=" << last_camera_revision
+              << ";scene_commits=" << last_scene_commit_count
+              << ";scene_deltas=" << last_scene_delta_count
+              << ";checksum=" << last_updated_checksum << '\n';
     return false;
 }
 

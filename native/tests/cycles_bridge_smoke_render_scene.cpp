@@ -172,7 +172,7 @@ bool run_render_scenarios(SmokeContext& context) {
     frame.struct_version = 1;
     info.clear();
     if (!wait_for_updated_frame(
-            renderer, camera, frame, pixels, "initial section", info, true)) {
+            renderer, camera, frame, pixels, "initial section", info, false)) {
         return false;
     }
     if (require_optix && info.find("backend=OPTIX") == std::string::npos) {
