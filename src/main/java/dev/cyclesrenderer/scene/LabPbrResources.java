@@ -9,6 +9,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.util.Collection;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Properties;
@@ -110,11 +111,21 @@ public final class LabPbrResources {
             ResourceManager resourceManager,
             Identifier spriteId,
             String suffix) {
-        Identifier companionId = Identifier.fromNamespaceAndPath(
-                spriteId.getNamespace(),
-                "textures/" + spriteId.getPath() + suffix + ".png");
-        return resourceManager.getResource(companionId)
-                .map(resource -> new CompanionResource(companionId, resource.sourcePackId()));
+        for (Identifier companionId : companionCandidates(spriteId, suffix)) {
+            Optional<Resource> resource = resourceManager.getResource(companionId);
+            if (resource.isPresent()) {
+                return resource.map(value -> new CompanionResource(
+                        companionId, value.sourcePackId()));
+            }
+        }
+        return Optional.empty();
+    }
+
+    private static List<Identifier> companionCandidates(Identifier spriteId, String suffix) {
+        return LabPbrCompanionPaths.candidates(spriteId.getPath(), suffix).stream()
+                .map(path -> Identifier.fromNamespaceAndPath(
+                        spriteId.getNamespace(), path))
+                .toList();
     }
 
     public enum Format {
