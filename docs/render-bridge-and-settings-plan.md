@@ -365,7 +365,7 @@ Native 端维护 Pass registry 和 HDR Pass cache。Java 默认只获取已经�
 - 切换普通资源包并重载后，Cycles 纹理随之变化。
 - 无法转换的模型有计数和日志，不导致崩溃。
 
-当前状态：代码、Java 构建、Native 构建、OptiX 纹理冒烟和游戏内模型/纹理验收已经通过，提交为 `d91e71e`。
+当前状态：代码、Java 构建、Native 构建、OptiX 纹理冒烟和游戏内模型/纹理验收已经通过，提交为 `4319ae5`。
 
 ### 单元 A2：原版 Section 流送、动态更新与 Vulkan 展示
 

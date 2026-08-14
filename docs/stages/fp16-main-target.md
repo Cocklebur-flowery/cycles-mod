@@ -159,10 +159,10 @@ RGBA8 为 4 bytes/pixel，RGBA16F 为 8 bytes/pixel。每个全屏目标的额�
 
 | 阶段 | 内容 | 独立提交 |
 | --- | --- | --- |
-| A0 | 本设计、回退与验证矩阵 | `f78eb0d docs(hdr): define FP16 main-target contract` |
-| A1 | Vulkan render-pass 实际附件格式特化 | `b1dd84c feat(hdr): specialize Vulkan pipelines for FP16 targets` |
-| A2 | 主目标、Level framegraph、PostChain RGBA16F | `88a12b9 feat(hdr): promote Minecraft color targets to FP16` |
-| A3 | OCIO HDR view、PQ/scRGB/extended-sRGB 显示变换 | `9c4df29 feat(hdr): preserve HDR through Minecraft composition` |
+| A0 | 本设计、回退与验证矩阵 | `a9bb3ba docs(hdr): define FP16 main-target contract` |
+| A1 | Vulkan render-pass 实际附件格式特化 | `640b028 feat(hdr): specialize Vulkan pipelines for FP16 targets` |
+| A2 | 主目标、Level framegraph、PostChain RGBA16F | `e283628 feat(hdr): promote Minecraft color targets to FP16` |
+| A3 | OCIO HDR view、PQ/scRGB/extended-sRGB 显示变换 | `825b790 feat(hdr): preserve HDR through Minecraft composition` |
 | A4 | SDR fallback、PNG capture、遥测与文档收口 | `fix(hdr): complete SDR fallback and capture paths` |
 
 每个新 Java 类保持单一职责并低于 500 行；不向超过 800 行的现有类追加新职责。

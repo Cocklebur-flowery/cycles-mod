@@ -4,7 +4,7 @@
 
 检查日期：2026-08-14（Asia/Shanghai）
 
-检查对象：`aef6382`（工程纪律提交；产品修复基线为其父提交 `11f9d90`）
+检查对象：`4d418ad`（工程纪律提交；产品修复基线为其父提交 `fca5bd6`）
 
 本文件只描述上述提交附近的当前事实、验证证据和已知红项。它不是历史阶段
 记录，也不替代源码、构建配置、ABI 断言或测试。ABI、稳定契约、验证入口或
@@ -51,9 +51,9 @@ smoke contract 多处人工维护。断言能够发现部分漂移，但尚不�
 
 | 项目 | 状态 | 证据 |
 | --- | --- | --- |
-| Minecraft 26.2 Mixin 启动崩溃 | `PASS` | `54b22b2 fix(mixin): restore client startup on Minecraft 26.2` |
-| backend 初始化原始异常被通用错误覆盖 | `PASS` | `d6116b8 fix(native): preserve backend initialization errors` |
-| DLSS runtime kernels 与开发安装树不同步 | `PASS` | `11f9d90 fix(dev): synchronize DLSS runtime kernels`；用户确认原故障已修复 |
+| Minecraft 26.2 Mixin 启动崩溃 | `PASS` | `5830b16 fix(mixin): restore client startup on Minecraft 26.2` |
+| backend 初始化原始异常被通用错误覆盖 | `PASS` | `3a4812b fix(native): preserve backend initialization errors` |
+| DLSS runtime kernels 与开发安装树不同步 | `PASS` | `fca5bd6 fix(dev): synchronize DLSS runtime kernels`；用户确认原故障已修复 |
 
 `run/logs/latest.log` 对应的客户端在 18:06 启动，而最后两个修复提交在 18:07
 形成。该日志可以证明 Native bridge 曾进入 OptiX/scene staging，但不能作为

@@ -8,12 +8,12 @@ The implementation intentionally does not disable or downgrade DLSS when a panor
 
 The implementation was split into these commits:
 
-- `51096ab` — native ABI, validation, Java bridge, Cycles camera configuration and transforms;
-- `9c2bcb3` — persistent configuration, F9 dependencies and translations;
-- `5f8f387` — full-direction section compilation for panorama cameras;
-- `e0999c7` — preserve the full world height for panorama section uploads;
-- `e00c24d` — native smoke coverage and camera diagnostics;
-- `dfded57` — Blender-compatible panorama type order in F9.
+- `05b5756` — native ABI, validation, Java bridge, Cycles camera configuration and transforms;
+- `91177e7` — persistent configuration, F9 dependencies and translations;
+- `ba92779` — full-direction section compilation for panorama cameras;
+- `6e30201` — preserve the full world height for panorama section uploads;
+- `6bbc3f2` — native smoke coverage and camera diagnostics;
+- `51ef9a4` — Blender-compatible panorama type order in F9.
 
 ## Upstream basis
 

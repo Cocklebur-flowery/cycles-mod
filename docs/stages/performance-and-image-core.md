@@ -1,7 +1,7 @@
 # 性能与 Cycles 画面核心阶段
 
 状态：实施中  
-起始提交：`6a12acd feat: add Cycles settings and pass diagnostics`  
+起始提交：`923b170 feat: add Cycles settings and pass diagnostics`
 目标平台：Minecraft 26.2、NeoForge 26.2.0.58、Blender Cycles 5.2、Windows Vulkan、RTX/OptiX
 
 ## 1. 阶段目标
@@ -88,10 +88,10 @@ F10 叠加层采用“当前值 + 最近窗口统计”，不把目标值伪装�
 
 | 子阶段 | 预期提交 | 主要交付物 | 状态 |
 | --- | --- | --- | --- |
-| P0 | `docs: record performance and image pipeline stage` | 本文档、指标字典、瓶颈假设 | 已完成（`7afa984`） |
+| P0 | `docs: record performance and image pipeline stage` | 本文档、指标字典、瓶颈假设 | 已完成（`9ca51a5`） |
 | P1 | `feat: report actual render sampling` | ABI v7、实际/目标 sample、sample state/rate、F10 | 已完成（本提交） |
 | P2 | `perf: add frame pipeline telemetry` | Native convert/copy、Java/Vulkan upload、帧计数 | 已完成（本提交） |
-| P3 | `perf: trace section update latency` | 捕获/upsert/commit/队列与卡顿热点 | 已完成（Java `89d5c0d`，Native 本提交） |
+| P3 | `perf: trace section update latency` | 捕获/upsert/commit/队列与卡顿热点 | 已完成（Java `ab2241d`，Native 本提交） |
 | P4 | `perf: throttle display frame delivery` | 上传限频、latest-only、保留上一有效帧 | 已完成（本提交） |
 | P5 | `perf: adopt cycles half-float display driver` | Cycles DisplayDriver、RGBA16F、移除热路径 CPU `pow` | 已完成（本提交） |
 | P6 | `perf: add acquired frame ring buffers` | Native 三缓冲、FFM acquire/release | 已完成（本提交） |

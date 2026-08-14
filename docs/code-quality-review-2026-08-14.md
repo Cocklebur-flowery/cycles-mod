@@ -171,7 +171,7 @@ CMake 定义并注册了 `cyclesrenderer_scene_update_test`；此前 `buildNativ
 - 新增 Gradle `runNativeTests` 入口，通过 CTest 执行 CMake 当前注册的全部 Native 测试；原有 `runNativeSmoke` 保持不变。
 - `run-client.cmd help --task runNativeTests --console=plain` 通过，Gradle 将其识别为 `verification` 组的 `Exec` 任务。
 - 首次执行 `run-client.cmd runNativeTests --console=plain` 时，`cyclesrenderer_scene_update` 通过；`cyclesrenderer_native_smoke` 在当时新增的 camera-shift 场景超时失败。失败期间 Native 持续报告 `state=rendering`、`resolution=0x0`，最终 shift 为 `0/0`。这是该次运行的原始证据，不能回溯改写。
-- 相机阶段提交 `792de09`、`5af7d8b`、`8c0c945`、`961e9bd` 后，camera shift 应用、恢复、checksum 变化、诊断回读及随后 Pass 1–6/Combined 恢复均已通过；默认与 DLSS native smoke 目标构建、`compileJava` 和 scene-update 也通过。当前默认 OptiX smoke 的剩余超时已移动到既有 `Perspective → panorama 0` 增量切换，后续应归类为 panorama Session 生命周期问题，不再归类为 camera-shift。
+- 相机阶段提交 `feee09c`、`6e269c2`、`06541e6`、`ae4e63b` 后，camera shift 应用、恢复、checksum 变化、诊断回读及随后 Pass 1–6/Combined 恢复均已通过；默认与 DLSS native smoke 目标构建、`compileJava` 和 scene-update 也通过。当前默认 OptiX smoke 的剩余超时已移动到既有 `Perspective → panorama 0` 增量切换，后续应归类为 panorama Session 生命周期问题，不再归类为 camera-shift。
 - 本次运行中 `configureNative` 与 `buildNative` 均为 `UP-TO-DATE`，因此不能表述为完成了一次干净的 Native 重编译。
 - 未运行 Minecraft 实机，也未验证真实 Vulkan/CUDA timeline 图像复制。
 - 首批除 `build.gradle`、`README.md` 和本审查留档外，未修改、删除、移动或格式化业务源码、资源、依赖与生成物。
