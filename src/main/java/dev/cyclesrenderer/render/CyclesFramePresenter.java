@@ -212,6 +212,10 @@ public final class CyclesFramePresenter {
                 colorLutViewTransform);
     }
 
+    public AutomaticExposureStage.Telemetry automaticExposureTelemetry() {
+        return automaticExposure.telemetry();
+    }
+
     public void reset() {
         RenderSystem.assertOnRenderThread();
         ready = false;

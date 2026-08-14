@@ -591,6 +591,7 @@ public final class CyclesRendererMod {
                 graphics,
                 minecraft,
                 FRAME_PRESENTER,
+                AUTOFOCUS.state(),
                 INTEROP_BUFFER,
                 SCENE_MANAGER,
                 CyclesClientConfig.snapshot(),

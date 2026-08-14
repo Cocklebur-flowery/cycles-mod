@@ -8,7 +8,7 @@ import dev.cyclesrenderer.config.CameraAutomationSettings;
 import dev.cyclesrenderer.config.CyclesRenderSettings;
 
 /** Coordinates asynchronous HDR measurements with the temporal exposure controller. */
-final class AutomaticExposureStage {
+public final class AutomaticExposureStage {
     private final GpuExposureMeter meter = new GpuExposureMeter();
     private final AutoExposureController controller = new AutoExposureController();
     private boolean enabled;
@@ -62,7 +62,7 @@ final class AutomaticExposureStage {
         meter.reset();
     }
 
-    Telemetry telemetry() {
+    public Telemetry telemetry() {
         AutoExposureController.State state = controller.state();
         GpuExposureMeter.Telemetry meterState = meter.telemetry();
         return new Telemetry(
@@ -95,7 +95,7 @@ final class AutomaticExposureStage {
                 headroom);
     }
 
-    record Telemetry(
+    public record Telemetry(
             boolean enabled,
             boolean initialized,
             float currentEv,

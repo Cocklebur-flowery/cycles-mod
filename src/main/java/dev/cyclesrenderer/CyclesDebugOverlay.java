@@ -1,7 +1,10 @@
 package dev.cyclesrenderer;
 
+import dev.cyclesrenderer.camera.AutofocusStage;
+import dev.cyclesrenderer.config.CameraAutomationSettings;
 import dev.cyclesrenderer.config.CyclesRenderSettings;
 import dev.cyclesrenderer.nativebridge.NativeBridge;
+import dev.cyclesrenderer.render.AutomaticExposureStage;
 import dev.cyclesrenderer.render.CyclesFramePresenter;
 import dev.cyclesrenderer.render.HdrOutputStage;
 import dev.cyclesrenderer.render.VulkanCapabilityProbe;
@@ -35,6 +38,7 @@ final class CyclesDebugOverlay {
             GuiGraphicsExtractor graphics,
             Minecraft minecraft,
             CyclesFramePresenter presenter,
+            AutofocusStage.State autofocus,
             VulkanExternalBufferPrototype interopBuffer,
             SectionSceneManager sceneManager,
             CyclesRenderSettings requestedSettings,
@@ -57,6 +61,8 @@ final class CyclesDebugOverlay {
             VulkanExternalBufferPrototype.Telemetry buffer = interopBuffer.telemetry();
             VulkanExternalBufferPrototype.CopyTelemetry copy = interopBuffer.copyTelemetry();
             CyclesFramePresenter.Telemetry presentation = presenter.telemetry();
+            AutomaticExposureStage.Telemetry exposure =
+                    presenter.automaticExposureTelemetry();
             SectionGeometryCollector.Telemetry capture = SectionGeometryCollector.telemetry();
             SectionSceneManager.Telemetry scene = sceneManager.telemetry();
             CyclesRenderSettings settings = acceptedSettings;
@@ -443,6 +449,40 @@ final class CyclesDebugOverlay {
                             + "  f/=" + diagnostics.fStop()
                             + "  aperture=" + diagnostics.apertureSize(),
                     COLOR_STATIC);
+
+            out.section("[ CAMERA AUTOMATION ]", COLOR_STATE);
+            out.line(
+                    "AE enabled/locked/initialized="
+                            + settings.cameraAutomation().autoExposure().enabled() + "/"
+                            + settings.cameraAutomation().autoExposure().locked() + "/"
+                            + exposure.initialized()
+                            + "  metering="
+                            + settings.cameraAutomation().autoExposure().metering().name()
+                            + "  EV current/target/manual=" + exposure.currentEv() + "/"
+                            + exposure.targetEv() + "/" + settings.exposureEv(),
+                    exposure.enabled() ? COLOR_STATE : COLOR_STATIC);
+            out.line(
+                    "AE measurements/captures/dropped/pending="
+                            + exposure.measurementCount() + "/" + exposure.captureCount() + "/"
+                            + exposure.droppedCaptureCount() + "/"
+                            + exposure.pendingCaptureCount(),
+                    exposure.droppedCaptureCount() == 0L ? COLOR_STATE : COLOR_WARNING);
+            out.line(
+                    "AF configured/effective/locked="
+                            + settings.cameraAutomation().autofocus().mode().name() + "/"
+                            + autofocus.mode().name() + "/"
+                            + settings.cameraAutomation().autofocus().locked()
+                            + "  initialized/single=" + autofocus.initialized() + "/"
+                            + autofocus.singleShotComplete(),
+                    autofocus.mode()
+                            == CameraAutomationSettings.AutofocusMode.OFF
+                            ? COLOR_STATIC : COLOR_STATE);
+            out.line(
+                    "AF focus current/target/native=" + autofocus.currentDistance() + "/"
+                            + autofocus.targetDistance() + "/" + diagnostics.focusDistance()
+                            + "  accepted/rays=" + autofocus.acceptedMeasurements() + "/"
+                            + autofocus.lastRayCount(),
+                    autofocus.initialized() ? COLOR_STATE : COLOR_STATIC);
         } catch (RuntimeException error) {
             out.section("[ CYCLES DEBUG ERROR ]", COLOR_ERROR);
             out.line("Diagnostics failed: " + error.getMessage(), COLOR_ERROR);
