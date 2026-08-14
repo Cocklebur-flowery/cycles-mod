@@ -112,6 +112,7 @@ CyclesBridgeRenderSettings default_settings() {
     settings.pbr_emission_scale = 1.0F;
     settings.working_space = CYCLES_BRIDGE_WORKING_SPACE_LINEAR_REC709;
     settings.dlss_quality_mode = CYCLES_BRIDGE_DLSS_QUALITY_QUALITY;
+    settings.depth_of_field_mode = CYCLES_BRIDGE_DEPTH_OF_FIELD_PHYSICAL;
     settings.camera_type = CYCLES_BRIDGE_CAMERA_PERSPECTIVE;
     settings.panorama_type = CYCLES_BRIDGE_PANORAMA_EQUIRECTANGULAR;
     settings.fisheye_fov_degrees = 180.0F;
@@ -225,6 +226,39 @@ float dlss_upscale_factor(std::uint32_t quality_mode) {
         3.0F,
     };
     return factors[quality_mode];
+}
+
+bool uses_post_process_depth_of_field(
+    const CyclesBridgeRenderSettings& settings) {
+    return settings.depth_of_field != 0U
+        && settings.depth_of_field_mode
+            == CYCLES_BRIDGE_DEPTH_OF_FIELD_POST_PROCESS
+        && settings.camera_type == CYCLES_BRIDGE_CAMERA_PERSPECTIVE
+        && settings.active_pass == CYCLES_BRIDGE_PASS_COMBINED;
+}
+
+std::uint64_t required_output_pass_mask(
+    const CyclesBridgeRenderSettings& settings) {
+    std::uint64_t mask = 1ULL << CYCLES_BRIDGE_PASS_COMBINED;
+    if (uses_post_process_depth_of_field(settings)) {
+        mask |= 1ULL << CYCLES_BRIDGE_PASS_DEPTH;
+    }
+    return mask;
+}
+
+float interop_depth_resolution_divider(
+    const ccl::DeviceInfo& device,
+    const CyclesBridgeRenderSettings& settings) {
+#if defined(CYCLESRENDERER_DLSS_EXPERIMENTAL)
+    if (settings.denoiser_mode == 4U
+        && (device.denoisers & ccl::DENOISER_DLSS) != 0) {
+        return dlss_upscale_factor(settings.dlss_quality_mode);
+    }
+#else
+    (void)device;
+    (void)settings;
+#endif
+    return 1.0F;
 }
 
 const char* pass_name(std::uint32_t pass) {
@@ -1257,6 +1291,8 @@ struct VulkanInteropSlot {
     std::uint64_t generation = 0U;
     std::uint32_t width = 0U;
     std::uint32_t height = 0U;
+    std::uint32_t depth_width = 0U;
+    std::uint32_t depth_height = 0U;
     std::uint32_t sample_count = 0U;
     std::uint64_t release_wait_value = 0U;
 };
@@ -1293,7 +1329,9 @@ class VulkanInteropDisplayDriver final : public ccl::DisplayDriver {
         std::condition_variable& worker_changed,
         bool& stopping,
         std::uint64_t& configured_camera_revision,
-        std::uint64_t& produced_camera_revision)
+        std::uint64_t& produced_camera_revision,
+        bool export_depth,
+        float depth_resolution_divider)
         : snapshot_(std::move(snapshot)),
           frames_(frames),
           state_(state),
@@ -1303,7 +1341,9 @@ class VulkanInteropDisplayDriver final : public ccl::DisplayDriver {
           worker_changed_(worker_changed),
           stopping_(stopping),
           configured_camera_revision_(configured_camera_revision),
-          produced_camera_revision_(produced_camera_revision) {}
+          produced_camera_revision_(produced_camera_revision),
+          export_depth_(export_depth),
+          depth_resolution_divider_(depth_resolution_divider) {}
 
     ~VulkanInteropDisplayDriver() override {
         std::unique_lock lock(state_mutex_);
@@ -1344,11 +1384,37 @@ class VulkanInteropDisplayDriver final : public ccl::DisplayDriver {
         }
         const std::uint64_t width = static_cast<std::uint32_t>(params.full_size.x);
         const std::uint64_t height = static_cast<std::uint32_t>(params.full_size.y);
-        compatible_ = width <= std::numeric_limits<std::uint64_t>::max() / height
-            && width * height
-                <= snapshot_.descriptor.slot_stride_bytes / sizeof(ccl::half4);
+        const std::uint64_t slot_bytes = snapshot_.descriptor.slot_stride_bytes;
+        const bool valid_pixel_count =
+            width <= std::numeric_limits<std::uint64_t>::max() / height;
+        const std::uint64_t color_pixels = valid_pixel_count ? width * height : 0U;
+        compatible_ = valid_pixel_count
+            && color_pixels <= slot_bytes / sizeof(ccl::half4);
         current_width_ = static_cast<std::uint32_t>(width);
         current_height_ = static_cast<std::uint32_t>(height);
+        current_depth_width_ = 0U;
+        current_depth_height_ = 0U;
+        if (compatible_ && export_depth_) {
+            const std::uint32_t depth_width = std::max(
+                1U,
+                static_cast<std::uint32_t>(
+                    static_cast<float>(current_width_)
+                    / depth_resolution_divider_));
+            const std::uint32_t depth_height = std::max(
+                1U,
+                static_cast<std::uint32_t>(
+                    static_cast<float>(current_height_)
+                    / depth_resolution_divider_));
+            const std::uint64_t color_bytes =
+                color_pixels * sizeof(ccl::half4);
+            const std::uint64_t depth_pixels =
+                static_cast<std::uint64_t>(depth_width) * depth_height;
+            if (color_bytes <= slot_bytes
+                && depth_pixels <= (slot_bytes - color_bytes) / sizeof(float)) {
+                current_depth_width_ = depth_width;
+                current_depth_height_ = depth_height;
+            }
+        }
         current_slot_ = -1;
         if (compatible_) {
             std::unique_lock lock(state_mutex_);
@@ -1410,6 +1476,8 @@ class VulkanInteropDisplayDriver final : public ccl::DisplayDriver {
             state_.completed_frame_count++;
             state_.width = current_width_;
             state_.height = current_height_;
+            state_.depth_width = current_depth_width_;
+            state_.depth_height = current_depth_height_;
             state_.last_sync_micros = elapsed;
             state_.ema_sync_micros = update_ema(state_.ema_sync_micros, elapsed);
             state_.max_sync_micros = std::max(state_.max_sync_micros, elapsed);
@@ -1418,6 +1486,8 @@ class VulkanInteropDisplayDriver final : public ccl::DisplayDriver {
             slot.generation = state_.generation;
             slot.width = current_width_;
             slot.height = current_height_;
+            slot.depth_width = current_depth_width_;
+            slot.depth_height = current_depth_height_;
             slot.sample_count = state_.sample_count;
             state_.slot_index = static_cast<std::uint32_t>(current_slot_);
             state_.ready_slot_count = static_cast<std::uint32_t>(std::count_if(
@@ -1519,11 +1589,15 @@ class VulkanInteropDisplayDriver final : public ccl::DisplayDriver {
     bool& stopping_;
     std::uint64_t& configured_camera_revision_;
     std::uint64_t& produced_camera_revision_;
+    bool export_depth_ = false;
+    float depth_resolution_divider_ = 1.0F;
     std::chrono::steady_clock::time_point update_started_{};
     bool compatible_ = false;
     bool used_interop_ = false;
     std::uint32_t current_width_ = 0U;
     std::uint32_t current_height_ = 0U;
+    std::uint32_t current_depth_width_ = 0U;
+    std::uint32_t current_depth_height_ = 0U;
     int current_slot_ = -1;
 };
 
@@ -1949,7 +2023,10 @@ ccl::BufferParams configure_camera(
         : camera_request.camera.depth_far;
     camera->set_nearclip(near_clip);
     camera->set_farclip(std::max(near_clip + 0.001F, requested_far_clip));
-    const float aperture_size = settings.depth_of_field != 0U
+    const bool physical_depth_of_field = settings.depth_of_field != 0U
+        && settings.depth_of_field_mode
+            == CYCLES_BRIDGE_DEPTH_OF_FIELD_PHYSICAL;
+    const float aperture_size = physical_depth_of_field
         ? (settings.focal_length_mm / 1000.0F) / (2.0F * settings.f_stop)
         : 0.0F;
     const float focus_distance =
@@ -2317,6 +2394,8 @@ class CyclesEngine::Impl final {
                 selected->owner = VulkanInteropSlotOwner::ACQUIRED;
                 interop_state_.width = selected->width;
                 interop_state_.height = selected->height;
+                interop_state_.depth_width = selected->depth_width;
+                interop_state_.depth_height = selected->depth_height;
                 interop_state_.sample_count = selected->sample_count;
                 interop_state_.generation = selected->generation;
                 interop_state_.slot_index = selected_index;
@@ -2355,6 +2434,8 @@ class CyclesEngine::Impl final {
             acquired->generation = 0U;
             acquired->width = 0U;
             acquired->height = 0U;
+            acquired->depth_width = 0U;
+            acquired->depth_height = 0U;
             acquired->sample_count = 0U;
             refresh_vulkan_interop_slot_flags(
                 interop_state_, interop_slots_, interop_descriptor_.slot_count);
@@ -2575,6 +2656,8 @@ class CyclesEngine::Impl final {
                     || atmosphere_changed
                     || material_shader_changed
                     || camera_shift_changed
+                    || settings.depth_of_field_mode
+                        != requested_settings_.depth_of_field_mode
                     || settings.working_space != requested_settings_.working_space) {
                     reset_level = CYCLES_BRIDGE_RESET_SESSION;
                 } else if (settings.resolution_mode != requested_settings_.resolution_mode
@@ -3078,6 +3161,9 @@ class CyclesEngine::Impl final {
             }
         }
         const bool use_graphics_interop = interop_snapshot.memory_handle != nullptr;
+        const bool export_depth = uses_post_process_depth_of_field(settings);
+        const float depth_resolution_divider =
+            interop_depth_resolution_divider(device, settings);
         session_params = make_session_params(device, use_graphics_interop);
 #if defined(CYCLESRENDERER_DLSS_EXPERIMENTAL)
         if (settings.denoiser_mode == 4U) {
@@ -3106,7 +3192,9 @@ class CyclesEngine::Impl final {
                     request_changed_,
                     interop_stopping_,
                     interop_configured_camera_revision_,
-                    interop_produced_camera_revision_));
+                    interop_produced_camera_revision_,
+                    export_depth,
+                    depth_resolution_divider));
             {
                 std::lock_guard lock(interop_mutex_);
                 interop_state_.flags |=
@@ -3116,7 +3204,9 @@ class CyclesEngine::Impl final {
             session->set_display_driver(
                 ccl::make_unique<FrameDisplayDriver>(frames_, request_changed_));
         }
-        create_output_passes(session->scene.get(), registered_pass_mask);
+        create_output_passes(
+            session->scene.get(),
+            registered_pass_mask | required_output_pass_mask(settings));
         build_scene(session->scene.get(), scene_request, settings, runtime);
         const DenoiserSchedule denoiser_schedule = configure_scene_settings(
             session->scene.get(), device, settings,
@@ -3311,6 +3401,8 @@ class CyclesEngine::Impl final {
                 : settings.focus_distance;
             f_stop_diagnostic_ = settings.f_stop;
             aperture_size_diagnostic_ = settings.depth_of_field != 0U
+                    && settings.depth_of_field_mode
+                        == CYCLES_BRIDGE_DEPTH_OF_FIELD_PHYSICAL
                 ? (settings.focal_length_mm / 1000.0F) / (2.0F * settings.f_stop)
                 : 0.0F;
             aperture_blades_diagnostic_ = settings.aperture_blades;
@@ -3467,12 +3559,13 @@ class CyclesEngine::Impl final {
                 if (requested_settings.revision != active_settings_revision) {
                     const bool pass_changed = requested_settings.active_pass
                         != active_settings.active_pass;
-                    const std::uint64_t requested_pass_bit =
-                        1ULL << requested_settings.active_pass;
-                    const bool pass_registration_required = pass_changed
-                        && (registered_pass_mask & requested_pass_bit) == 0U;
+                    const std::uint64_t requested_pass_mask =
+                        required_output_pass_mask(requested_settings)
+                        | (1ULL << requested_settings.active_pass);
+                    const bool pass_registration_required =
+                        (requested_pass_mask & ~registered_pass_mask) != 0U;
                     if (pass_registration_required) {
-                        registered_pass_mask |= requested_pass_bit;
+                        registered_pass_mask |= requested_pass_mask;
                     }
                     if (session && pass_changed && !pass_registration_required) {
                         std::lock_guard lock(state_mutex_);
@@ -3480,7 +3573,8 @@ class CyclesEngine::Impl final {
                     }
                     pass_only_settings_update = requested_pass_only_change;
                     if (session && (requested_settings_reset == CYCLES_BRIDGE_RESET_SESSION
-                                    || pass_changed)) {
+                                    || pass_changed
+                                    || pass_registration_required)) {
                         session->cancel(true);
                         session.reset();
                         scene_runtime.clear();

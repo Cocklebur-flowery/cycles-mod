@@ -24,7 +24,7 @@ import static java.lang.foreign.ValueLayout.JAVA_INT;
 import static java.lang.foreign.ValueLayout.JAVA_LONG;
 
 public final class NativeBridge {
-    public static final int ABI_VERSION = 42;
+    public static final int ABI_VERSION = 43;
     public static final int DEVICE_UPDATE_PHASE_COUNT = 8;
     public static final int PIXEL_FORMAT_RGBA16_FLOAT = 2;
     public static final int PIXEL_FORMAT_RGBA32_FLOAT = 3;
@@ -189,7 +189,7 @@ public final class NativeBridge {
             JAVA_FLOAT.withName("pbr_emission_scale"),
             JAVA_INT.withName("working_space"),
             JAVA_INT.withName("dlss_quality_mode"),
-            JAVA_INT.withName("dlss_reserved"),
+            JAVA_INT.withName("depth_of_field_mode"),
             JAVA_INT.withName("camera_type"),
             JAVA_INT.withName("panorama_type"),
             JAVA_FLOAT.withName("fisheye_fov_degrees"),
@@ -420,7 +420,9 @@ public final class NativeBridge {
                     JAVA_INT.withName("slot_index"),
                     JAVA_INT.withName("slot_count"),
                     JAVA_INT.withName("ready_slot_count"),
-                    JAVA_LONG.withName("producer_wait_count"));
+                    JAVA_LONG.withName("producer_wait_count"),
+                    JAVA_INT.withName("depth_width"),
+                    JAVA_INT.withName("depth_height"));
     private static final MemoryLayout VERTEX_LAYOUT = MemoryLayout.structLayout(
             JAVA_FLOAT.withName("position_x"),
             JAVA_FLOAT.withName("position_y"),
@@ -470,7 +472,7 @@ public final class NativeBridge {
                 || COLOR_LUT_DESCRIPTOR_LAYOUT.byteSize() != 72L
                 || DIAGNOSTICS_LAYOUT.byteSize() != 672L
                 || VULKAN_INTEROP_BUFFER_LAYOUT.byteSize() != 80L
-                || VULKAN_INTEROP_STATE_LAYOUT.byteSize() != 72L
+                || VULKAN_INTEROP_STATE_LAYOUT.byteSize() != 80L
                 || VERTEX_LAYOUT.byteSize() != 40L
                 || TRIANGLE_LAYOUT.byteSize() != 16L
                 || MATERIAL_LAYOUT.byteSize() != 32L
@@ -1189,7 +1191,9 @@ public final class NativeBridge {
                     vulkanInteropStateSegment.get(JAVA_INT, 52L),
                     vulkanInteropStateSegment.get(JAVA_INT, 56L),
                     vulkanInteropStateSegment.get(JAVA_INT, 60L),
-                    vulkanInteropStateSegment.get(JAVA_LONG, 64L));
+                    vulkanInteropStateSegment.get(JAVA_LONG, 64L),
+                    vulkanInteropStateSegment.get(JAVA_INT, 72L),
+                    vulkanInteropStateSegment.get(JAVA_INT, 76L));
         }
 
         @FunctionalInterface
@@ -1330,6 +1334,7 @@ public final class NativeBridge {
             settingsSegment.set(JAVA_FLOAT, 272L, settings.pbrEmissionScale());
             settingsSegment.set(JAVA_INT, 276L, settings.workingSpace().nativeId());
             settingsSegment.set(JAVA_INT, 280L, settings.dlssQualityMode().nativeId());
+            settingsSegment.set(JAVA_INT, 284L, settings.depthOfFieldMode().nativeId());
             settingsSegment.set(JAVA_INT, 288L, settings.cameraType().nativeId());
             settingsSegment.set(JAVA_INT, 292L, settings.panoramaType().nativeId());
             settingsSegment.set(JAVA_FLOAT, 296L, settings.fisheyeFovDegrees());
@@ -2197,7 +2202,9 @@ public final class NativeBridge {
             int slotIndex,
             int slotCount,
             int readySlotCount,
-            long producerWaitCount) {
+            long producerWaitCount,
+            int depthWidth,
+            int depthHeight) {
         public boolean bound() {
             return (flags & 1) != 0;
         }

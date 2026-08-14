@@ -254,6 +254,11 @@ enum CyclesBridgeProjectionMode : std::uint32_t {
     CYCLES_BRIDGE_PROJECTION_PHYSICAL_LENS = 1,
 };
 
+enum CyclesBridgeDepthOfFieldMode : std::uint32_t {
+    CYCLES_BRIDGE_DEPTH_OF_FIELD_PHYSICAL = 0,
+    CYCLES_BRIDGE_DEPTH_OF_FIELD_POST_PROCESS = 1,
+};
+
 enum CyclesBridgeCameraType : std::uint32_t {
     CYCLES_BRIDGE_CAMERA_PERSPECTIVE = 0,
     CYCLES_BRIDGE_CAMERA_PANORAMA = 1,
@@ -443,7 +448,7 @@ struct CyclesBridgeRenderSettings {
     float pbr_emission_scale;
     std::uint32_t working_space;
     std::uint32_t dlss_quality_mode;
-    std::uint32_t dlss_reserved;
+    std::uint32_t depth_of_field_mode;
     std::uint32_t camera_type;
     std::uint32_t panorama_type;
     float fisheye_fov_degrees;
@@ -682,6 +687,8 @@ struct CyclesBridgeVulkanInteropState {
     std::uint32_t slot_count;
     std::uint32_t ready_slot_count;
     std::uint64_t producer_wait_count;
+    std::uint32_t depth_width;
+    std::uint32_t depth_height;
 };
 
 struct CyclesBridgeVertex {

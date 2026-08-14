@@ -18,9 +18,9 @@ struct CyclesBridgeRenderer {
 
 namespace {
 
-constexpr std::uint32_t kAbiVersion = 42;
+constexpr std::uint32_t kAbiVersion = 43;
 constexpr std::uint32_t kStructVersion = 1;
-constexpr char kBuildInfo[] = "cyclesrenderer-native/cycles-5.2;abi=42";
+constexpr char kBuildInfo[] = "cyclesrenderer-native/cycles-5.2;abi=43";
 
 static_assert(sizeof(CyclesBridgeCamera) == 80);
 static_assert(offsetof(CyclesBridgeCamera, frame_id) == 8);
@@ -39,6 +39,7 @@ static_assert(sizeof(CyclesBridgeFrameView) == 72);
 static_assert(offsetof(CyclesBridgeFrameView, generation) == 16);
 static_assert(offsetof(CyclesBridgeFrameView, pixels) == 48);
 static_assert(sizeof(CyclesBridgeRenderSettings) == 392);
+static_assert(offsetof(CyclesBridgeRenderSettings, depth_of_field_mode) == 284);
 static_assert(offsetof(CyclesBridgeRenderSettings, camera_type) == 288);
 static_assert(offsetof(CyclesBridgeRenderSettings, central_cylindrical_radius) == 356);
 static_assert(offsetof(CyclesBridgeRenderSettings, camera_shift_x) == 360);
@@ -77,10 +78,12 @@ static_assert(offsetof(CyclesBridgeVulkanInteropBuffer, memory_handle) == 32);
 static_assert(offsetof(CyclesBridgeVulkanInteropBuffer, device_uuid) == 40);
 static_assert(offsetof(CyclesBridgeVulkanInteropBuffer, slot_count) == 56);
 static_assert(offsetof(CyclesBridgeVulkanInteropBuffer, ready_semaphore_handle) == 64);
-static_assert(sizeof(CyclesBridgeVulkanInteropState) == 72);
+static_assert(sizeof(CyclesBridgeVulkanInteropState) == 80);
 static_assert(offsetof(CyclesBridgeVulkanInteropState, generation) == 24);
 static_assert(offsetof(CyclesBridgeVulkanInteropState, last_sync_micros) == 40);
 static_assert(offsetof(CyclesBridgeVulkanInteropState, producer_wait_count) == 64);
+static_assert(offsetof(CyclesBridgeVulkanInteropState, depth_width) == 72);
+static_assert(offsetof(CyclesBridgeVulkanInteropState, depth_height) == 76);
 static_assert(sizeof(CyclesBridgeVertex) == 40);
 static_assert(offsetof(CyclesBridgeVertex, packed_rgba) == 32);
 static_assert(sizeof(CyclesBridgeTriangle) == 16);
@@ -329,6 +332,7 @@ bool valid_settings(const CyclesBridgeRenderSettings& settings) {
         && settings.camera_shift_y >= -10.0F
         && settings.camera_shift_y <= 10.0F
         && valid_bool(settings.depth_of_field)
+        && settings.depth_of_field_mode <= CYCLES_BRIDGE_DEPTH_OF_FIELD_POST_PROCESS
         && std::isfinite(settings.focus_distance)
         && settings.focus_distance >= 0.01F && settings.focus_distance <= 1000000.0F
         && std::isfinite(settings.f_stop)
@@ -422,7 +426,6 @@ bool valid_settings(const CyclesBridgeRenderSettings& settings) {
         && settings.denoiser_quality <= 2U
         && settings.dlss_quality_mode
             <= CYCLES_BRIDGE_DLSS_QUALITY_ULTRA_PERFORMANCE
-        && settings.dlss_reserved == 0U
         && valid_bool(settings.denoiser_use_gpu)
         && std::isfinite(settings.exposure_ev)
         && settings.exposure_ev >= -20.0F && settings.exposure_ev <= 20.0F

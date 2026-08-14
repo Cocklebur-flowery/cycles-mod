@@ -77,7 +77,7 @@ bool run_bridge_contract_scenarios(SmokeContext& context) {
     CyclesBridgeCapabilities& capabilities = context.capabilities;
     CyclesBridgeRenderSettings& settings = context.settings;
     std::cerr << "[smoke] ABI check\n";
-    if (cycles_bridge_abi_version() != 42U) {
+    if (cycles_bridge_abi_version() != 43U) {
         std::cerr << "unexpected native ABI " << cycles_bridge_abi_version() << '\n';
         return false;
     }
@@ -168,7 +168,9 @@ bool run_bridge_contract_scenarios(SmokeContext& context) {
                 cycles_bridge_query_vulkan_interop_state(
                     renderer, &interop_state),
                 "interop state query")
-            || (interop_state.flags & CYCLES_BRIDGE_VULKAN_INTEROP_BOUND) == 0U) {
+            || (interop_state.flags & CYCLES_BRIDGE_VULKAN_INTEROP_BOUND) == 0U
+            || interop_state.depth_width != 0U
+            || interop_state.depth_height != 0U) {
             std::cerr << "interop handle ownership was not transferred and closed\n";
             return false;
         }
@@ -345,6 +347,15 @@ bool run_bridge_contract_scenarios(SmokeContext& context) {
         return false;
     }
     settings.dlss_quality_mode = CYCLES_BRIDGE_DLSS_QUALITY_QUALITY;
+    CyclesBridgeRenderSettings invalid_depth_of_field_mode = settings;
+    invalid_depth_of_field_mode.depth_of_field_mode =
+        CYCLES_BRIDGE_DEPTH_OF_FIELD_POST_PROCESS + 1U;
+    invalid_depth_of_field_mode.revision++;
+    if (cycles_bridge_apply_settings(renderer, &invalid_depth_of_field_mode)
+        != CYCLES_BRIDGE_STATUS_INVALID_ARGUMENT) {
+        std::cerr << "invalid depth-of-field mode was accepted\n";
+        return false;
+    }
     settings.camera_clip_near = 0.125F;
     settings.camera_clip_far = 50.0F;
     settings.revision++;

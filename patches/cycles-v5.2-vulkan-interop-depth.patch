@@ -1,0 +1,29 @@
+diff --git a/src/integrator/path_trace_work_gpu.cpp b/src/integrator/path_trace_work_gpu.cpp
+--- a/src/integrator/path_trace_work_gpu.cpp
++++ b/src/integrator/path_trace_work_gpu.cpp
+@@ -1095,6 +1095,25 @@ bool PathTraceWorkGPU::copy_to_display_interop(PathTraceDisplay *display,
+ 
+   get_render_tile_film_pixels(destination, pass_mode, num_samples);
+ 
++  /* Embedders may reserve a tightly packed float depth plane immediately after the display
++   * color plane. Keep the regular interop contract when the extra range is absent. */
++  const BufferPass *depth_pass = buffers_->params.find_pass(PASS_DEPTH, PassMode::NOISY);
++  const int2 display_size = display->get_texture_size();
++  const size_t color_bytes = size_t(display_size.x) * display_size.y * sizeof(half4);
++  const size_t depth_bytes = size_t(effective_buffer_params_.window_width) *
++                             effective_buffer_params_.window_height * sizeof(float);
++  if (depth_pass != nullptr && color_bytes <= interop_buffer.get_range_size() &&
++      depth_bytes <= interop_buffer.get_range_size() - color_bytes)
++  {
++    PassAccessor::PassAccessInfo depth_access(*depth_pass);
++    depth_access.use_sample_count = false;
++    PassAccessor::Destination depth_destination(PASS_DEPTH, PassMode::NOISY);
++    depth_destination.d_pixels = d_rgba_half + color_bytes;
++    const PassAccessorGPU depth_accessor(queue_.get(), depth_access, 1.0f, num_samples);
++    depth_accessor.get_render_tile_pixels(
++        buffers_.get(), effective_buffer_params_, depth_destination);
++  }
++
+   device_graphics_interop_->unmap();
+ 
+   /* Vulkan external memory without a timeline semaphore is not implicitly synchronized with the

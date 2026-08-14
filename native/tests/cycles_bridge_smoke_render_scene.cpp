@@ -251,6 +251,55 @@ bool run_render_scenarios(SmokeContext& context) {
     camera.focus_distance = 0.0F;
     camera.flags = 0U;
 
+    std::cerr << "[smoke] Switching to post-process depth of field\n";
+    settings.depth_of_field_mode = CYCLES_BRIDGE_DEPTH_OF_FIELD_POST_PROCESS;
+    settings.revision++;
+    CyclesBridgeDiagnostics post_dof_diagnostics{};
+    post_dof_diagnostics.struct_size = sizeof(post_dof_diagnostics);
+    post_dof_diagnostics.struct_version = 1U;
+    if (!require_ok(
+            cycles_bridge_apply_settings(renderer, &settings),
+            "post-process depth-of-field settings")
+        || !wait_for_settings(renderer, settings.revision)
+        || !wait_for_updated_frame(
+            renderer, camera, frame, pixels, "post-process depth of field", info,
+            false, CYCLES_BRIDGE_PASS_COMBINED)
+        || !require_ok(
+            cycles_bridge_query_diagnostics(renderer, &post_dof_diagnostics),
+            "post-process depth-of-field diagnostics")
+        || post_dof_diagnostics.reset_level != CYCLES_BRIDGE_RESET_SESSION
+        || std::abs(post_dof_diagnostics.aperture_size) > 1.0e-7F
+        || (post_dof_diagnostics.registered_pass_mask
+            & (1ULL << CYCLES_BRIDGE_PASS_DEPTH)) == 0U) {
+        std::cerr << "post-process depth of field did not use a pinhole camera/depth pass: "
+                  << "reset=" << post_dof_diagnostics.reset_level
+                  << ";aperture=" << post_dof_diagnostics.aperture_size
+                  << ";passes=" << post_dof_diagnostics.registered_pass_mask << '\n';
+        return false;
+    }
+    settings.depth_of_field_mode = CYCLES_BRIDGE_DEPTH_OF_FIELD_PHYSICAL;
+    settings.revision++;
+    CyclesBridgeDiagnostics physical_dof_diagnostics{};
+    physical_dof_diagnostics.struct_size = sizeof(physical_dof_diagnostics);
+    physical_dof_diagnostics.struct_version = 1U;
+    if (!require_ok(
+            cycles_bridge_apply_settings(renderer, &settings),
+            "physical depth-of-field restore")
+        || !wait_for_settings(renderer, settings.revision)
+        || !wait_for_updated_frame(
+            renderer, camera, frame, pixels, "physical depth-of-field restore", info,
+            false, CYCLES_BRIDGE_PASS_COMBINED)
+        || !require_ok(
+            cycles_bridge_query_diagnostics(renderer, &physical_dof_diagnostics),
+            "physical depth-of-field diagnostics")
+        || physical_dof_diagnostics.reset_level != CYCLES_BRIDGE_RESET_SESSION
+        || physical_dof_diagnostics.aperture_size <= 0.0F) {
+        std::cerr << "physical depth of field did not restore the Cycles aperture: "
+                  << "reset=" << physical_dof_diagnostics.reset_level
+                  << ";aperture=" << physical_dof_diagnostics.aperture_size << '\n';
+        return false;
+    }
+
     for (std::uint32_t pass = CYCLES_BRIDGE_PASS_DEPTH;
          pass < CYCLES_BRIDGE_PASS_COUNT;
          ++pass) {

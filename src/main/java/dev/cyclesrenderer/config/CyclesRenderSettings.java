@@ -46,6 +46,7 @@ public record CyclesRenderSettings(
         float focalLengthMm,
         float sensorWidthMm,
         boolean depthOfField,
+        DepthOfFieldMode depthOfFieldMode,
         float focusDistance,
         float fStop,
         int apertureBlades,
@@ -242,6 +243,26 @@ public record CyclesRenderSettings(
         @Override
         public String translationGroup() {
             return "projection_mode";
+        }
+    }
+
+    public enum DepthOfFieldMode implements NativeEnum, NamedEnum {
+        PHYSICAL(0), POST_PROCESS(1);
+
+        private final int nativeId;
+
+        DepthOfFieldMode(int nativeId) {
+            this.nativeId = nativeId;
+        }
+
+        @Override
+        public int nativeId() {
+            return nativeId;
+        }
+
+        @Override
+        public String translationGroup() {
+            return "depth_of_field_mode";
         }
     }
 

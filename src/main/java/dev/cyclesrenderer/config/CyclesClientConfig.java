@@ -443,6 +443,7 @@ public final class CyclesClientConfig {
                 CAMERA_CLIP_NEAR.get().floatValue(), CAMERA_CLIP_FAR.get().floatValue(),
                 CAMERA_PROJECTION.get(), CAMERA_FOCAL_LENGTH.get().floatValue(),
                 CAMERA_SENSOR_WIDTH.get().floatValue(), CAMERA_DEPTH_OF_FIELD.get(),
+                CyclesRenderSettings.DepthOfFieldMode.PHYSICAL,
                 CAMERA_FOCUS_DISTANCE.get().floatValue(), CAMERA_F_STOP.get().floatValue(),
                 CAMERA_APERTURE_CIRCULAR.get() ? 0 : CAMERA_APERTURE_BLADES.get(),
                 CAMERA_APERTURE_ROTATION.get().floatValue(),
