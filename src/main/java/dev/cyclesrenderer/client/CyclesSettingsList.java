@@ -152,7 +152,8 @@ final class CyclesSettingsList
             return false;
         }
         if (id.startsWith("camera.")
-                && Set.of("camera.focusDistance", "camera.fStop", "camera.apertureCircular",
+                && Set.of("camera.depthOfFieldMode", "camera.focusDistance", "camera.fStop",
+                        "camera.apertureCircular",
                         "camera.apertureBlades", "camera.apertureRotation", "camera.apertureRatio")
                 .contains(id)
                 && !booleanValue("camera.depthOfField")) {

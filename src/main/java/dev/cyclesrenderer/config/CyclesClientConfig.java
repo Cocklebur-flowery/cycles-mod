@@ -75,6 +75,8 @@ public final class CyclesClientConfig {
     private static final ModConfigSpec.DoubleValue CAMERA_CENTER_ACTION_SAFE_X;
     private static final ModConfigSpec.DoubleValue CAMERA_CENTER_ACTION_SAFE_Y;
     private static final ModConfigSpec.BooleanValue CAMERA_DEPTH_OF_FIELD;
+    private static final ModConfigSpec.EnumValue<CyclesRenderSettings.DepthOfFieldMode>
+            CAMERA_DEPTH_OF_FIELD_MODE;
     private static final ModConfigSpec.DoubleValue CAMERA_FOCUS_DISTANCE;
     private static final ModConfigSpec.DoubleValue CAMERA_F_STOP;
     private static final ModConfigSpec.BooleanValue CAMERA_APERTURE_CIRCULAR;
@@ -273,6 +275,10 @@ public final class CyclesClientConfig {
                 .defineInRange("centerActionSafeY", 0.05D, 0.0D, 0.5D);
         CAMERA_DEPTH_OF_FIELD = builder.translation("config.cyclesrenderer.camera.depthOfField")
                 .define("depthOfField", false);
+        CAMERA_DEPTH_OF_FIELD_MODE = builder
+                .translation("config.cyclesrenderer.camera.depthOfFieldMode")
+                .comment("Choose physically sampled Cycles depth of field or a post-process blur.")
+                .defineEnum("depthOfFieldMode", CyclesRenderSettings.DepthOfFieldMode.PHYSICAL);
         CAMERA_FOCUS_DISTANCE = builder.translation("config.cyclesrenderer.camera.focusDistance")
                 .comment("Focus plane distance in blocks/meters.")
                 .defineInRange("focusDistance", 10.0D, 0.01D, 1000000.0D);
@@ -443,7 +449,7 @@ public final class CyclesClientConfig {
                 CAMERA_CLIP_NEAR.get().floatValue(), CAMERA_CLIP_FAR.get().floatValue(),
                 CAMERA_PROJECTION.get(), CAMERA_FOCAL_LENGTH.get().floatValue(),
                 CAMERA_SENSOR_WIDTH.get().floatValue(), CAMERA_DEPTH_OF_FIELD.get(),
-                CyclesRenderSettings.DepthOfFieldMode.PHYSICAL,
+                CAMERA_DEPTH_OF_FIELD_MODE.get(),
                 CAMERA_FOCUS_DISTANCE.get().floatValue(), CAMERA_F_STOP.get().floatValue(),
                 CAMERA_APERTURE_CIRCULAR.get() ? 0 : CAMERA_APERTURE_BLADES.get(),
                 CAMERA_APERTURE_ROTATION.get().floatValue(),
@@ -688,6 +694,9 @@ public final class CyclesClientConfig {
                 "config.cyclesrenderer.camera.shiftY", CAMERA_SHIFT_Y, -10.0D, 10.0D, 0.001D));
         options.add(booleanOption("camera.depthOfField", Category.CAMERA,
                 "config.cyclesrenderer.camera.depthOfField", CAMERA_DEPTH_OF_FIELD));
+        options.add(enumOption("camera.depthOfFieldMode", Category.CAMERA,
+                "config.cyclesrenderer.camera.depthOfFieldMode", CAMERA_DEPTH_OF_FIELD_MODE,
+                CyclesRenderSettings.DepthOfFieldMode.values()));
         options.add(doubleOption("camera.focusDistance", Category.CAMERA,
                 "config.cyclesrenderer.camera.focusDistance", CAMERA_FOCUS_DISTANCE, 0.01D, 1000000.0D, 0.01D));
         options.add(doubleOption("camera.fStop", Category.CAMERA,
