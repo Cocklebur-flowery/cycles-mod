@@ -211,6 +211,16 @@ tasks.register('runNativeTests', Exec) {
             '--output-on-failure'
 }
 
+tasks.register('verifyProject') {
+    group = 'verification'
+    description = 'Runs the Java build and every native CTest test for the selected native variant.'
+    dependsOn tasks.named('build'), tasks.named('runNativeTests')
+}
+
+tasks.named('configureNative').configure {
+    mustRunAfter tasks.named('build')
+}
+
 tasks.register('prepareVulkanClientConfig') {
     group = 'ide'
     description = 'Disables the OpenGL NeoForge early window before starting the Vulkan client.'

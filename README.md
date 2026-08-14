@@ -136,8 +136,7 @@ git clone https://github.com/Cocklebur-flowery/cycles-mod.git
 cd cycles-mod
 
 powershell -ExecutionPolicy Bypass -File .\scripts\setup-cycles.ps1
-.\gradlew.bat buildNative
-.\gradlew.bat runNativeTests
+.\gradlew.bat verifyProject
 .\gradlew.bat runClient
 ```
 
@@ -145,8 +144,7 @@ powershell -ExecutionPolicy Bypass -File .\scripts\setup-cycles.ps1
 
 ```bat
 run-client.cmd setup
-run-client.cmd buildNative
-run-client.cmd runNativeTests
+run-client.cmd verifyProject
 run-client.cmd runClient
 ```
 
@@ -156,10 +154,13 @@ DLSS 构建使用独立的 `cycles-dlss` 与 `native-dlss` 目录，不会覆盖
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\scripts\setup-cycles.ps1 -ExperimentalDlss
-.\gradlew.bat buildNative -PexperimentalDlss=true
-.\gradlew.bat runNativeTests -PexperimentalDlss=true
+.\gradlew.bat verifyProject -PexperimentalDlss=true
 .\gradlew.bat runClient -PexperimentalDlss=true
 ```
+
+`verifyProject` 是完整自动验证的单一入口：先执行 Java `build`，再构建所选 native
+变体并运行 CTest 注册的全部测试。`runNativeTests` 和 `runNativeSmoke` 仍保留为聚焦
+诊断入口，不替代完整验证。
 
 首次依赖准备耗时较长。后续 `buildNative` 会复用已经校验的固定版本依赖，不会重新下载完整仓库。
 
