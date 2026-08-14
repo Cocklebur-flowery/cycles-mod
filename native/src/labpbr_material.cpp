@@ -1,4 +1,5 @@
 #include "labpbr_material.h"
+#include "labpbr_metals.h"
 
 #include "scene/shader_graph.h"
 #include "scene/shader_nodes.h"
@@ -33,14 +34,14 @@ ccl::unique_ptr<ccl::ShaderGraph> build_material_graph(
     graph->connect(coordinates->output("UV"), texture->input("Vector"));
 
     ccl::VertexColorNode* vertex_color = graph->create_node<ccl::VertexColorNode>();
-    ccl::VectorMathNode* multiply = graph->create_node<ccl::VectorMathNode>();
-    multiply->set_math_type(ccl::NODE_VECTOR_MATH_MULTIPLY);
-    graph->connect(texture->output("Color"), multiply->input("Vector1"));
-    graph->connect(vertex_color->output("Color"), multiply->input("Vector2"));
+    ccl::VectorMathNode* albedo = graph->create_node<ccl::VectorMathNode>();
+    albedo->set_math_type(ccl::NODE_VECTOR_MATH_MULTIPLY);
+    graph->connect(texture->output("Color"), albedo->input("Vector1"));
+    graph->connect(vertex_color->output("Color"), albedo->input("Vector2"));
 
     ccl::PrincipledBsdfNode* principled = graph->create_node<ccl::PrincipledBsdfNode>();
     principled->set_roughness(0.8F);
-    graph->connect(multiply->output("Vector"), principled->input("Base Color"));
+    ccl::ShaderOutput* surface = principled->output("BSDF");
 
     if (material.pbr_format == CYCLES_BRIDGE_PBR_LAB_1_3) {
         ccl::ImageTextureNode* normal_texture = create_texture_node(
@@ -71,18 +72,61 @@ ccl::unique_ptr<ccl::ShaderGraph> build_material_graph(
         graph->connect(material_channels->output("Blue"), f0_to_specular->input("Value1"));
         graph->connect(f0_to_specular->output("Value"), principled->input("Specular IOR Level"));
 
-        graph->connect(multiply->output("Vector"), principled->input("Emission Color"));
+        ccl::ImageTextureNode* auxiliary_texture = create_texture_node(
+            graph.get(), images[material.auxiliary_texture_index], ccl::u_colorspace_data);
+        graph->connect(coordinates->output("UV"), auxiliary_texture->input("Vector"));
+
+        ccl::SeparateColorNode* auxiliary_channels =
+            graph->create_node<ccl::SeparateColorNode>();
+        auxiliary_channels->set_color_type(ccl::NODE_COMBSEP_COLOR_RGB);
+        graph->connect(auxiliary_texture->output("Color"), auxiliary_channels->input("Color"));
+
+        ccl::VectorMathNode* occluded_albedo = graph->create_node<ccl::VectorMathNode>();
+        occluded_albedo->set_math_type(ccl::NODE_VECTOR_MATH_SCALE);
+        graph->connect(albedo->output("Vector"), occluded_albedo->input("Vector1"));
+        graph->connect(auxiliary_channels->output("Red"), occluded_albedo->input("Scale"));
+        graph->connect(occluded_albedo->output("Vector"), principled->input("Base Color"));
+
+        ccl::MathNode* sss_range = graph->create_node<ccl::MathNode>();
+        sss_range->set_math_type(ccl::NODE_MATH_SUBTRACT);
+        sss_range->set_value2(65.0F / 255.0F);
+        graph->connect(auxiliary_texture->output("Alpha"), sss_range->input("Value1"));
+
+        ccl::MathNode* sss_weight = graph->create_node<ccl::MathNode>();
+        sss_weight->set_math_type(ccl::NODE_MATH_MULTIPLY);
+        sss_weight->set_value2(255.0F / 190.0F);
+        sss_weight->set_use_clamp(true);
+        graph->connect(sss_range->output("Value"), sss_weight->input("Value1"));
+        graph->connect(sss_weight->output("Value"), principled->input("Subsurface Weight"));
+        principled->set_subsurface_scale(0.005F);
+
+        surface = apply_exact_metal_closures(
+            graph.get(),
+            auxiliary_channels->output("Blue"),
+            material_channels->output("Red"),
+            normal_map->output("Normal"),
+            surface);
+
+        ccl::EmissionNode* emission = graph->create_node<ccl::EmissionNode>();
+        graph->connect(albedo->output("Vector"), emission->input("Color"));
         ccl::MathNode* emission_scale = graph->create_node<ccl::MathNode>();
         emission_scale->set_math_type(ccl::NODE_MATH_MULTIPLY);
         emission_scale->set_value2(settings.pbr_emission_scale);
         graph->connect(material_texture->output("Alpha"), emission_scale->input("Value1"));
-        graph->connect(emission_scale->output("Value"), principled->input("Emission Strength"));
+        graph->connect(emission_scale->output("Value"), emission->input("Strength"));
+
+        ccl::AddClosureNode* add_emission = graph->create_node<ccl::AddClosureNode>();
+        graph->connect(surface, add_emission->input("Closure1"));
+        graph->connect(emission->output("Emission"), add_emission->input("Closure2"));
+        surface = add_emission->output("Closure");
     } else if (material.emission_strength > 0.0F) {
         principled->set_emission_strength(material.emission_strength);
-        graph->connect(multiply->output("Vector"), principled->input("Emission Color"));
+        graph->connect(albedo->output("Vector"), principled->input("Base Color"));
+        graph->connect(albedo->output("Vector"), principled->input("Emission Color"));
+    } else {
+        graph->connect(albedo->output("Vector"), principled->input("Base Color"));
     }
 
-    ccl::ShaderOutput* surface = principled->output("BSDF");
     if ((material.flags & CYCLES_BRIDGE_MATERIAL_BLEND) != 0U) {
         ccl::TransparentBsdfNode* transparent = graph->create_node<ccl::TransparentBsdfNode>();
         ccl::MixClosureNode* blend = graph->create_node<ccl::MixClosureNode>();
