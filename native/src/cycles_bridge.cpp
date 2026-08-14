@@ -18,15 +18,17 @@ struct CyclesBridgeRenderer {
 
 namespace {
 
-constexpr std::uint32_t kAbiVersion = 37;
+constexpr std::uint32_t kAbiVersion = 38;
 constexpr std::uint32_t kStructVersion = 1;
-constexpr char kBuildInfo[] = "cyclesrenderer-native/cycles-5.2;abi=37";
+constexpr char kBuildInfo[] = "cyclesrenderer-native/cycles-5.2;abi=38";
 
 static_assert(sizeof(CyclesBridgeCamera) == 80);
 static_assert(offsetof(CyclesBridgeCamera, frame_id) == 8);
 static_assert(offsetof(CyclesBridgeCamera, position_x) == 24);
 static_assert(offsetof(CyclesBridgeCamera, rotation_x) == 48);
 static_assert(offsetof(CyclesBridgeCamera, vertical_fov_radians) == 64);
+static_assert(offsetof(CyclesBridgeCamera, focus_distance) == 72);
+static_assert(offsetof(CyclesBridgeCamera, flags) == 76);
 static_assert(sizeof(CyclesBridgeScene) == 48);
 static_assert(offsetof(CyclesBridgeScene, origin_x) == 8);
 static_assert(offsetof(CyclesBridgeScene, vertex_count) == 20);

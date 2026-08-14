@@ -1,6 +1,7 @@
 package dev.cyclesrenderer;
 
 import com.mojang.blaze3d.platform.InputConstants;
+import dev.cyclesrenderer.camera.AutofocusStage;
 import dev.cyclesrenderer.client.CameraSafeAreaOverlay;
 import dev.cyclesrenderer.client.CyclesSettingsScreen;
 import dev.cyclesrenderer.config.CyclesClientConfig;
@@ -88,6 +89,7 @@ public final class CyclesRendererMod {
     private static ModContainer modContainer;
     private static final SectionSceneManager SCENE_MANAGER = new SectionSceneManager();
     private static final CyclesFramePresenter FRAME_PRESENTER = new CyclesFramePresenter();
+    private static final AutofocusStage AUTOFOCUS = new AutofocusStage();
     private static final VulkanExternalBufferPrototype INTEROP_BUFFER =
             new VulkanExternalBufferPrototype();
     private static final FramePerformanceMonitor PERFORMANCE_MONITOR =
@@ -172,6 +174,7 @@ public final class CyclesRendererMod {
             lastFrameDeliveryNanos = 0L;
             SCENE_MANAGER.reset();
             FRAME_PRESENTER.reset();
+            AUTOFOCUS.reset();
             INTEROP_BUFFER.initialize(
                     Minecraft.getInstance(),
                     CyclesClientConfig.snapshot());
@@ -269,6 +272,7 @@ public final class CyclesRendererMod {
         INTEROP_BUFFER.initialize(Minecraft.getInstance(), settings);
         SCENE_MANAGER.reset();
         FRAME_PRESENTER.reset();
+        AUTOFOCUS.reset();
         nativeFrameId = 0L;
     }
 
@@ -332,7 +336,13 @@ public final class CyclesRendererMod {
             PERFORMANCE_MONITOR.endCpuStage(
                     PerformanceSample.CpuStage.SCENE_UPDATE, sceneStart);
             long frameId = nativeFrameId++;
-            NativeBridge.CameraInput cameraInput = createCameraInput(camera);
+            NativeBridge.CameraInput cameraInput = createCameraInput(
+                    minecraft,
+                    level,
+                    camera,
+                    renderSettings,
+                    mainTarget.width,
+                    mainTarget.height);
             long cameraStart = System.nanoTime();
             long cameraTraceStart = PERFORMANCE_MONITOR.beginCpuStage();
             NativeBridge.updateCamera(
@@ -437,12 +447,26 @@ public final class CyclesRendererMod {
         }
     }
 
-    private static NativeBridge.CameraInput createCameraInput(CameraRenderState camera) {
+    private static NativeBridge.CameraInput createCameraInput(
+            Minecraft minecraft,
+            ClientLevel level,
+            CameraRenderState camera,
+            CyclesRenderSettings settings,
+            int width,
+            int height) {
         float projectionScaleY = camera.projectionMatrix.m11();
         if (!Float.isFinite(projectionScaleY) || projectionScaleY <= 0.0F) {
             throw new IllegalStateException("invalid camera projection scale: " + projectionScaleY);
         }
         float verticalFovRadians = 2.0F * (float) Math.atan(1.0F / projectionScaleY);
+        float focusDistance = AUTOFOCUS.update(
+                minecraft,
+                level,
+                camera,
+                settings,
+                verticalFovRadians,
+                (float) width / Math.max(height, 1),
+                System.nanoTime());
         return new NativeBridge.CameraInput(
                 camera.pos.x,
                 camera.pos.y,
@@ -452,7 +476,9 @@ public final class CyclesRendererMod {
                 camera.orientation.z(),
                 camera.orientation.w(),
                 verticalFovRadians,
-                Math.max(camera.depthFar, 1.0F));
+                Math.max(camera.depthFar, 1.0F),
+                focusDistance,
+                NativeBridge.CAMERA_FOCUS_DISTANCE_VALID);
     }
 
     private static CyclesRenderSettings activeRenderSettings() {
@@ -500,6 +526,7 @@ public final class CyclesRendererMod {
         SectionGeometryCollector.setEnabled(false);
         SCENE_MANAGER.reset();
         FRAME_PRESENTER.reset();
+        AUTOFOCUS.reset();
         INTEROP_BUFFER.drainPendingCopy();
         boolean interopAttached = INTEROP_BUFFER.telemetry().nativeBound()
                 && NativeBridge.isReady()

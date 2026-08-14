@@ -494,7 +494,7 @@ bool verify_progressive_sampling(
 int main(int argc, char** argv) {
     const bool require_optix = argc > 1 && std::strcmp(argv[1], "--require-optix") == 0;
     std::cerr << "[smoke] ABI check\n";
-    if (cycles_bridge_abi_version() != 37U) {
+    if (cycles_bridge_abi_version() != 38U) {
         std::cerr << "unexpected native ABI " << cycles_bridge_abi_version() << '\n';
         return 1;
     }
@@ -1176,6 +1176,31 @@ int main(int argc, char** argv) {
         cycles_bridge_destroy_renderer(renderer);
         return 1;
     }
+
+    std::cerr << "[smoke] Applying autofocus distance override\n";
+    camera.focus_distance = 3.0F;
+    camera.flags = CYCLES_BRIDGE_CAMERA_FOCUS_DISTANCE_VALID;
+    camera.frame_id++;
+    CyclesBridgeDiagnostics autofocus_diagnostics{};
+    autofocus_diagnostics.struct_size = sizeof(autofocus_diagnostics);
+    autofocus_diagnostics.struct_version = 1;
+    if (!require_ok(
+            cycles_bridge_update_camera(renderer, &camera),
+            "autofocus camera update")
+        || !wait_for_updated_frame(
+            renderer, camera, frame, pixels, "autofocus override", info, false,
+            CYCLES_BRIDGE_PASS_COMBINED)
+        || !require_ok(
+            cycles_bridge_query_diagnostics(renderer, &autofocus_diagnostics),
+            "autofocus diagnostics")
+        || std::abs(autofocus_diagnostics.focus_distance - camera.focus_distance) > 1.0e-6F) {
+        std::cerr << "autofocus override did not reach Cycles; focus="
+                  << autofocus_diagnostics.focus_distance << '\n';
+        cycles_bridge_destroy_renderer(renderer);
+        return 1;
+    }
+    camera.focus_distance = 0.0F;
+    camera.flags = 0U;
 
     for (std::uint32_t pass = CYCLES_BRIDGE_PASS_DEPTH;
          pass < CYCLES_BRIDGE_PASS_COUNT;

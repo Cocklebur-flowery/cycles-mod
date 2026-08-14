@@ -252,6 +252,10 @@ enum CyclesBridgeCameraType : std::uint32_t {
     CYCLES_BRIDGE_CAMERA_PANORAMA = 1,
 };
 
+enum CyclesBridgeCameraFlags : std::uint32_t {
+    CYCLES_BRIDGE_CAMERA_FOCUS_DISTANCE_VALID = 1U << 0U,
+};
+
 // Values intentionally match ccl::PanoramaType in Cycles 5.2.
 enum CyclesBridgePanoramaType : std::uint32_t {
     CYCLES_BRIDGE_PANORAMA_EQUIRECTANGULAR = 0,
@@ -292,7 +296,8 @@ struct CyclesBridgeCamera {
     float rotation_w;
     float vertical_fov_radians;
     float depth_far;
-    std::uint32_t reserved[2];
+    float focus_distance;
+    std::uint32_t flags;
 };
 
 struct CyclesBridgeScene {

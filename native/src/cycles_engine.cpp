@@ -417,7 +417,9 @@ bool finite_camera(const CyclesBridgeCamera& camera) {
         && std::isfinite(camera.rotation_z)
         && std::isfinite(camera.rotation_w)
         && std::isfinite(camera.vertical_fov_radians)
-        && std::isfinite(camera.depth_far);
+        && std::isfinite(camera.depth_far)
+        && ((camera.flags & CYCLES_BRIDGE_CAMERA_FOCUS_DISTANCE_VALID) == 0U
+            || std::isfinite(camera.focus_distance));
 }
 
 std::pair<std::uint32_t, std::uint32_t> render_dimensions(
@@ -477,7 +479,10 @@ bool same_camera(
         && (!compare_minecraft_fov
             || nearly_equal(first.vertical_fov_radians, second.vertical_fov_radians, 1.0e-6))
         && (!compare_minecraft_far
-            || nearly_equal(first.depth_far, second.depth_far, 1.0e-3));
+            || nearly_equal(first.depth_far, second.depth_far, 1.0e-3))
+        && first.flags == second.flags
+        && ((first.flags & CYCLES_BRIDGE_CAMERA_FOCUS_DISTANCE_VALID) == 0U
+            || nearly_equal(first.focus_distance, second.focus_distance, 1.0e-4));
 }
 
 float linear_to_srgb(float value) {
@@ -1936,7 +1941,16 @@ ccl::BufferParams configure_camera(
     const float aperture_size = settings.depth_of_field != 0U
         ? (settings.focal_length_mm / 1000.0F) / (2.0F * settings.f_stop)
         : 0.0F;
-    camera->set_focaldistance(settings.focus_distance);
+    const float focus_distance =
+        (camera_request.camera.flags & CYCLES_BRIDGE_CAMERA_FOCUS_DISTANCE_VALID) != 0U
+        ? camera_request.camera.focus_distance
+        : settings.focus_distance;
+#if defined(CYCLESRENDERER_DLSS_EXPERIMENTAL)
+    if (!nearly_equal(camera->get_focaldistance(), focus_distance, 1.0e-5)) {
+        ccl::request_dlss_history_reset();
+    }
+#endif
+    camera->set_focaldistance(focus_distance);
     camera->set_aperturesize(aperture_size);
     camera->set_blades(settings.aperture_blades);
     camera->set_bladesrotation(
@@ -2769,7 +2783,11 @@ class CyclesEngine::Impl final {
             || !finite_camera(camera)
             || camera.vertical_fov_radians <= 0.0F
             || camera.vertical_fov_radians >= 3.14159265F
-            || camera.depth_far <= 0.0F) {
+            || camera.depth_far <= 0.0F
+            || (camera.flags & ~CYCLES_BRIDGE_CAMERA_FOCUS_DISTANCE_VALID) != 0U
+            || ((camera.flags & CYCLES_BRIDGE_CAMERA_FOCUS_DISTANCE_VALID) != 0U
+                && (camera.focus_distance < 0.01F
+                    || camera.focus_distance > 1000000.0F))) {
             error = "invalid camera";
             return false;
         }
@@ -2847,7 +2865,11 @@ class CyclesEngine::Impl final {
             || !finite_camera(camera)
             || camera.vertical_fov_radians <= 0.0F
             || camera.vertical_fov_radians >= 3.14159265F
-            || camera.depth_far <= 0.0F) {
+            || camera.depth_far <= 0.0F
+            || (camera.flags & ~CYCLES_BRIDGE_CAMERA_FOCUS_DISTANCE_VALID) != 0U
+            || ((camera.flags & CYCLES_BRIDGE_CAMERA_FOCUS_DISTANCE_VALID) != 0U
+                && (camera.focus_distance < 0.01F
+                    || camera.focus_distance > 1000000.0F))) {
             error = "invalid camera";
             return false;
         }
@@ -3267,7 +3289,10 @@ class CyclesEngine::Impl final {
                     / (2.0F * settings.focal_length_mm * aspect))
                 : camera_request.camera.vertical_fov_radians;
             depth_of_field_diagnostic_ = settings.depth_of_field;
-            focus_distance_diagnostic_ = settings.focus_distance;
+            focus_distance_diagnostic_ =
+                (camera_request.camera.flags & CYCLES_BRIDGE_CAMERA_FOCUS_DISTANCE_VALID) != 0U
+                ? camera_request.camera.focus_distance
+                : settings.focus_distance;
             f_stop_diagnostic_ = settings.f_stop;
             aperture_size_diagnostic_ = settings.depth_of_field != 0U
                 ? (settings.focal_length_mm / 1000.0F) / (2.0F * settings.f_stop)

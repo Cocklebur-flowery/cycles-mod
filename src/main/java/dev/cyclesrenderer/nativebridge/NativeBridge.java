@@ -24,10 +24,11 @@ import static java.lang.foreign.ValueLayout.JAVA_INT;
 import static java.lang.foreign.ValueLayout.JAVA_LONG;
 
 public final class NativeBridge {
-    public static final int ABI_VERSION = 37;
+    public static final int ABI_VERSION = 38;
     public static final int DEVICE_UPDATE_PHASE_COUNT = 8;
     public static final int PIXEL_FORMAT_RGBA16_FLOAT = 2;
     public static final int PIXEL_FORMAT_RGBA32_FLOAT = 3;
+    public static final int CAMERA_FOCUS_DISTANCE_VALID = 1;
 
     private static final String LIBRARY_PATH_PROPERTY = "cyclesrenderer.nativeLibrary";
     private static final int STRUCT_VERSION = 1;
@@ -65,8 +66,8 @@ public final class NativeBridge {
             JAVA_FLOAT.withName("rotation_w"),
             JAVA_FLOAT.withName("vertical_fov_radians"),
             JAVA_FLOAT.withName("depth_far"),
-            JAVA_INT.withName("reserved_0"),
-            JAVA_INT.withName("reserved_1"));
+            JAVA_FLOAT.withName("focus_distance"),
+            JAVA_INT.withName("flags"));
     private static final MemoryLayout RESOURCES_LAYOUT = MemoryLayout.structLayout(
             JAVA_INT.withName("struct_size"),
             JAVA_INT.withName("struct_version"),
@@ -1871,6 +1872,8 @@ public final class NativeBridge {
             camera.set(JAVA_FLOAT, 60L, input.rotationW());
             camera.set(JAVA_FLOAT, 64L, input.verticalFovRadians());
             camera.set(JAVA_FLOAT, 68L, input.depthFar());
+            camera.set(JAVA_FLOAT, 72L, input.focusDistance());
+            camera.set(JAVA_INT, 76L, input.flags());
         }
 
         private String buildInfo() {
@@ -1921,7 +1924,9 @@ public final class NativeBridge {
             float rotationZ,
             float rotationW,
             float verticalFovRadians,
-            float depthFar) {
+            float depthFar,
+            float focusDistance,
+            int flags) {
     }
 
     public record RenderedFrame(
