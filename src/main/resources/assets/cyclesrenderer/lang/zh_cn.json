@@ -131,6 +131,8 @@
   "config.cyclesrenderer.materials.fallbackF0": "缺省绝缘体 F0",
   "config.cyclesrenderer.materials.wetness": "多孔材质湿润度",
   "config.cyclesrenderer.materials.subsurfaceScale": "次表面尺度（方块）",
+  "config.cyclesrenderer.materials.heightStrength": "高度凹凸强度",
+  "config.cyclesrenderer.materials.heightDistance": "高度凹凸距离（方块）",
   "config.cyclesrenderer.lightPaths.minimumBounce": "最小反弹",
   "config.cyclesrenderer.lightPaths.maximumBounce": "最大反弹",
   "config.cyclesrenderer.lightPaths.diffuseBounces": "漫反射反弹",

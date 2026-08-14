@@ -459,6 +459,8 @@ struct CyclesBridgeRenderSettings {
     float camera_shift_y;
     float pbr_wetness;
     float pbr_subsurface_scale;
+    float pbr_height_strength;
+    float pbr_height_distance;
 };
 
 struct CyclesBridgePassDescriptor {

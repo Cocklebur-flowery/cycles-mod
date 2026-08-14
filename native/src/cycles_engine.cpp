@@ -198,7 +198,9 @@ bool same_material_shader_settings(
     return first.pbr_normal_strength == second.pbr_normal_strength
         && first.pbr_emission_scale == second.pbr_emission_scale
         && first.pbr_wetness == second.pbr_wetness
-        && first.pbr_subsurface_scale == second.pbr_subsurface_scale;
+        && first.pbr_subsurface_scale == second.pbr_subsurface_scale
+        && first.pbr_height_strength == second.pbr_height_strength
+        && first.pbr_height_distance == second.pbr_height_distance;
 }
 
 ccl::Transform rec709_to_working_space(std::uint32_t working_space) {
