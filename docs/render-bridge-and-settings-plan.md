@@ -1,7 +1,9 @@
 # 渲染数据桥与 Cycles 画面控制里程碑
 
-状态：已确认，实施中（单元 A/A2 已验收；单元 D 基础接入已收口；类型化 HDR Pass 缓存 P9a 已完成自动验证）
-基线：Minecraft 26.2 / NeoForge 26.2.0.58 / Cycles 5.2 / C ABI v15
+> 状态说明（2026-08-14）：Distant Horizons 兼容已从近期范围移除，失活的 Provider 与旧快照实现不再保留在主编译源中。本文的 DH 设计、兼容边界和验收项仅作历史决策与未来重启该单元时的参考，不表示当前实现仍包含 DH 数据路径。
+
+状态：已确认，实施中（单元 A/A2 已验收；单元 D 已移出近期范围；类型化 HDR Pass 缓存 P9a 已完成自动验证）
+基线：Minecraft 26.2 / NeoForge 26.2.0.58 / Cycles 5.2；本文初始基线为 C ABI v15，当前实现为 ABI v36
 
 ## 1. 目标
 
@@ -57,7 +59,7 @@
 Distant Horizons（可选）
   -> DH LOD Provider
 
-上述来源 -> 不可变 ClientRenderSnapshot
+历史设计中的上述来源 -> 旧不可变 ClientRenderSnapshot（已删除）
        - Scene/Object/Chunk records
        - Vertex/Index buffers
        - Material table
@@ -407,7 +409,7 @@ Section 流送切换到 ABI v5 后，旧高度场暂不再合并进活动场景�
 - 近远景没有明显重复表面、反向几何或持续闪烁。
 - 禁用 DH、禁用 Cycles以及 Provider 失败时均可安全回退。
 
-当前状态：API/版本审计、反射 Provider、异步软缓存读取、彩色高度场、诊断和文档已经编码并通过构建。安装 DH 时游戏和 F8 回退正常，但游戏测试没有看到可靠远景；Provider 作为隔离的兼容骨架保留，当前 v5 活动场景不消费它，最终网格、可见距离、接缝和质量优化延后。
+当前状态（2026-08-14）：游戏测试没有得到可靠远景，且近期不实施 DH 兼容。失活的反射 Provider 与旧快照链已从主编译源删除；未来重启此单元时，需重新审计届时受支持的公开 API，并基于当前 Section 流送重新定义远近景所有权、接缝和生命周期。
 
 ### 单元 B：HDR、采样、降噪与 OCIO 核心
 
@@ -506,4 +508,4 @@ Section 流送切换到 ABI v5 后，旧高度场暂不再合并进活动场景�
 6. 通用静态桥验证后，以独立 A2 单元实施 Section 流送、区块增量缓存和现有 Cycles Session 内的 Mesh/Object 更新；更细粒度且低成本的设备 BVH 更新继续后移。
 7. 远景第一版只支持 Distant Horizons，Voxy 延后，并使用可选 Provider 而不是硬依赖。
 
-上述选择已经确认。A、D 已收口，A2 等待游戏验收；之后按 B、C 的顺序实施，并在每个单元通过相应验收后创建本地提交。
+上述选择中，A 已收口，A2 等待游戏验收；D 已从近期范围移除，之后按 B、C 的顺序实施，并在每个单元通过相应验收后创建本地提交。
