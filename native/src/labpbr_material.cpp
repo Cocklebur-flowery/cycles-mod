@@ -1,5 +1,6 @@
 #include "labpbr_material.h"
 #include "labpbr_metals.h"
+#include "labpbr_surface.h"
 
 #include "scene/shader_graph.h"
 #include "scene/shader_nodes.h"
@@ -70,7 +71,6 @@ ccl::unique_ptr<ccl::ShaderGraph> build_material_graph(
         f0_to_specular->set_math_type(ccl::NODE_MATH_MULTIPLY);
         f0_to_specular->set_value2(12.5F);
         graph->connect(material_channels->output("Blue"), f0_to_specular->input("Value1"));
-        graph->connect(f0_to_specular->output("Value"), principled->input("Specular IOR Level"));
 
         ccl::ImageTextureNode* auxiliary_texture = create_texture_node(
             graph.get(), images[material.auxiliary_texture_index], ccl::u_colorspace_data);
@@ -85,20 +85,17 @@ ccl::unique_ptr<ccl::ShaderGraph> build_material_graph(
         occluded_albedo->set_math_type(ccl::NODE_VECTOR_MATH_SCALE);
         graph->connect(albedo->output("Vector"), occluded_albedo->input("Vector1"));
         graph->connect(auxiliary_channels->output("Red"), occluded_albedo->input("Scale"));
-        graph->connect(occluded_albedo->output("Vector"), principled->input("Base Color"));
-
-        ccl::MathNode* sss_range = graph->create_node<ccl::MathNode>();
-        sss_range->set_math_type(ccl::NODE_MATH_SUBTRACT);
-        sss_range->set_value2(65.0F / 255.0F);
-        graph->connect(auxiliary_texture->output("Alpha"), sss_range->input("Value1"));
-
-        ccl::MathNode* sss_weight = graph->create_node<ccl::MathNode>();
-        sss_weight->set_math_type(ccl::NODE_MATH_MULTIPLY);
-        sss_weight->set_value2(255.0F / 190.0F);
-        sss_weight->set_use_clamp(true);
-        graph->connect(sss_range->output("Value"), sss_weight->input("Value1"));
-        graph->connect(sss_weight->output("Value"), principled->input("Subsurface Weight"));
-        principled->set_subsurface_scale(0.005F);
+        const SurfaceInputs surface_inputs = apply_porosity_wetness(
+            graph.get(),
+            auxiliary_texture->output("Alpha"),
+            occluded_albedo->output("Vector"),
+            f0_to_specular->output("Value"),
+            settings.pbr_wetness);
+        graph->connect(surface_inputs.albedo, principled->input("Base Color"));
+        graph->connect(surface_inputs.specular, principled->input("Specular IOR Level"));
+        connect_subsurface(
+            graph.get(), auxiliary_texture->output("Alpha"), principled,
+            settings.pbr_subsurface_scale);
 
         surface = apply_exact_metal_closures(
             graph.get(),
