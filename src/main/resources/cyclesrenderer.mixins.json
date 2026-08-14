@@ -11,6 +11,7 @@
     "MainTargetFormatMixin",
     "MinecraftMixin",
     "PostChainFormatMixin",
+    "ScreenshotMixin",
     "SectionCompilerMixin",
     "VulkanBackendMixin",
     "VulkanCommandEncoderMixin",

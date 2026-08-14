@@ -1,6 +1,6 @@
 # FP16 Minecraft 主渲染链路
 
-状态：方案 A 已确认，A0 设计冻结；A1–A4 待实现与验证
+状态：方案 A 的 A0–A4 已实现并通过自动验证；游戏内验证矩阵待执行
 基线：Minecraft/NeoForge 26.2.0.58、Vulkan 1.2、Cycles 5.2、Windows scRGB
 
 ## 1. 目标
@@ -126,7 +126,7 @@ P18 当前强制使用 sRGB OCIO view，再把 SDR 结果解码到 scRGB。A3 �
 `getInt` 把每个像素解释为 RGBA8。直接读取 RGBA16F 会把两个 half-float 通道的
 字节误认为完整像素。
 
-A4 冻结以下策略：
+A4 已实现以下策略：
 
 - 普通 Minecraft 截图仍输出兼容的 SDR PNG；
 - 捕获前用 GPU shader 把 signed extended-sRGB FP16 主目标转换为 RGBA8 sRGB；
@@ -134,6 +134,12 @@ A4 冻结以下策略：
 - 自动世界截图、普通 F2 截图和 downscale 路径都必须经过同一转换；
 - Tracy 的 RGBA8 捕获目标继续保留，但其 blit pipeline 必须与实际附件格式匹配；
 - HDR EXR/JXL 截图不在本阶段内，不能把 SDR PNG 宣称为 HDR 文件。
+
+屏幕 SDR 回退和截图共用 `sdr_output.fsh`。对 SDR 色域内、所有分量均未超过
+paper white 的非负像素，传递函数为恒等映射；仅当线性峰值超过 `1.0` 时，按
+`mappedPeak = peak / (peak + 0.05)` 等比缩放 RGB，保留高光色相并避免逐通道硬裁剪。
+截图转换发生在原版 GPU readback 和 downscale 之前，因此 F2、自动世界截图与
+非 1 倍 downscale 不会解释 RGBA16F 原始字节。
 
 ## 8. 性能预算
 
@@ -153,10 +159,10 @@ RGBA8 为 4 bytes/pixel，RGBA16F 为 8 bytes/pixel。每个全屏目标的额�
 
 | 阶段 | 内容 | 独立提交 |
 | --- | --- | --- |
-| A0 | 本设计、回退与验证矩阵 | `docs(hdr): define FP16 main-target contract` |
-| A1 | Vulkan render-pass 实际附件格式特化 | `feat(hdr): specialize Vulkan pipelines for FP16 targets` |
-| A2 | 主目标、Level framegraph、PostChain RGBA16F | `feat(hdr): promote main render chain to FP16` |
-| A3 | OCIO HDR view、PQ/scRGB/extended-sRGB 显示变换 | `feat(hdr): preserve HDR values through Minecraft composition` |
+| A0 | 本设计、回退与验证矩阵 | `f78eb0d docs(hdr): define FP16 main-target contract` |
+| A1 | Vulkan render-pass 实际附件格式特化 | `b1dd84c feat(hdr): specialize Vulkan pipelines for FP16 targets` |
+| A2 | 主目标、Level framegraph、PostChain RGBA16F | `88a12b9 feat(hdr): promote Minecraft color targets to FP16` |
+| A3 | OCIO HDR view、PQ/scRGB/extended-sRGB 显示变换 | `9c4df29 feat(hdr): preserve HDR through Minecraft composition` |
 | A4 | SDR fallback、PNG capture、遥测与文档收口 | `fix(hdr): complete SDR fallback and capture paths` |
 
 每个新 Java 类保持单一职责并低于 500 行；不向超过 800 行的现有类追加新职责。
@@ -167,8 +173,18 @@ RGBA8 为 4 bytes/pixel，RGBA16F 为 8 bytes/pixel。每个全屏目标的额�
 自动验证：
 
 - `compileJava`、Java tests、Mixin JSON；
-- HDR policy、pipeline variant key/复制语义、传递函数边界和截图 tone-map 单元测试；
+- HDR policy、pipeline variant key/复制语义、传递函数边界和截图 tone-map 静态端点校验；
 - staged diff 不包含 native ABI、DLSS 或性能线程所有权文件。
+
+2026-08-14 收口结果：
+
+- `compileJava --rerun-tasks`、`test` 与 `jar` 通过；
+- `javap` 确认三个 FP16 目标构造器注入点和截图纹理替换点均唯一命中；
+- Mixin JSON 可解析，构建 JAR 包含全部新 mixin、策略类和 shader；
+- `CyclesDisplay` 的七个 std140 槽与 112-byte Java uniform buffer 一致；
+- PQ 0/80/100/200/1000/10000-nit 端点往返与 scRGB `nits / 80` 标度通过；
+- SDR 压缩在 `peak > 1` 区间单调且有界，SDR 恒等区保持不变；
+- 未修改 native ABI 或 DLSS，DLSS 仍允许使用且未被强制回退。
 
 游戏内验证：
 

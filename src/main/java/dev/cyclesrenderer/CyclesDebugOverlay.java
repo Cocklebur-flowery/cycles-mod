@@ -7,6 +7,7 @@ import dev.cyclesrenderer.nativebridge.NativeBridge;
 import dev.cyclesrenderer.render.AutomaticExposureStage;
 import dev.cyclesrenderer.render.CyclesFramePresenter;
 import dev.cyclesrenderer.render.HdrOutputStage;
+import dev.cyclesrenderer.render.VulkanPipelineFormatVariants;
 import dev.cyclesrenderer.render.VulkanCapabilityProbe;
 import dev.cyclesrenderer.render.VulkanExternalBufferPrototype;
 import dev.cyclesrenderer.scene.SectionGeometryCollector;
@@ -179,23 +180,25 @@ final class CyclesDebugOverlay {
                             + "  active=" + swapchain.activeSurfaceFormat().summary(),
                     swapchain.scRgbSelected() ? COLOR_FRAME : COLOR_WARNING);
             out.line(
-                    "output=" + (hdrOutput.active()
-                            ? "linear scRGB (composited SDR prototype)"
-                            : "sRGB SDR")
+                    "output=" + hdrOutput.outputMode()
                             + "  size=" + hdrOutput.width() + "x" + hdrOutput.height()
                             + "  paper white=" + hdrOutput.paperWhiteNits() + " nits"
                             + "  scale=" + oneDecimal(hdrOutput.scRgbScale()),
-                    hdrOutput.active() ? COLOR_FRAME : COLOR_STATIC);
+                    hdrOutput.fp16TargetsActive() ? COLOR_FRAME : COLOR_STATIC);
             out.line(
-                    "scRGB conversion us last/EMA/max="
+                    "output conversion us last/EMA/max="
                             + timing(hdrOutput.lastConversionMicros(),
                             hdrOutput.emaConversionMicros(),
                             hdrOutput.maxConversionMicros())
-                            + "  count=" + hdrOutput.conversionCount()
+                            + "  total/SDR/capture=" + hdrOutput.conversionCount() + "/"
+                            + hdrOutput.sdrConversionCount() + "/"
+                            + hdrOutput.captureConversionCount()
+                            + "  FP16/variants=" + hdrOutput.fp16TargetsActive() + "/"
+                            + VulkanPipelineFormatVariants.variantCount()
                             + "  reason=" + swapchain.reason(),
                     hdrOutput.error().isEmpty() ? COLOR_FRAME : COLOR_ERROR);
             if (!hdrOutput.error().isEmpty()) {
-                out.line("scRGB conversion error=" + hdrOutput.error(), COLOR_ERROR);
+                out.line("output conversion error=" + hdrOutput.error(), COLOR_ERROR);
             }
 
             out.section("[ PERFORMANCE: last / EMA / max us ]", COLOR_TIMING);
@@ -399,9 +402,7 @@ final class CyclesDebugOverlay {
                             + capabilities.supportsViewTransform(settings.viewTransform())
                             + "  OCIO=" + capabilities.colorConfigStateName()
                             + "  working=" + settings.workingSpace().name()
-                            + "  output=" + (hdrOutput.active()
-                            ? "sRGB view -> linear scRGB"
-                            : "sRGB SDR"),
+                            + "  output=" + hdrOutput.outputMode(),
                     COLOR_STATIC);
             out.line(
                     "white balance=" + (settings.whiteBalance() ? "on" : "off")

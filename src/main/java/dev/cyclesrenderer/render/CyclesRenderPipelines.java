@@ -50,6 +50,17 @@ public final class CyclesRenderPipelines {
             .withPrimitiveTopology(PrimitiveTopology.TRIANGLES)
             .build();
 
+    public static final RenderPipeline SDR_OUTPUT = RenderPipeline.builder(
+                    RenderPipelines.GLOBALS_SNIPPET)
+            .withLocation(id("pipeline/sdr_output"))
+            .withVertexShader(id("core/screenquad"))
+            .withFragmentShader(id("core/sdr_output"))
+            .withBindGroupLayout(BindGroupLayouts.IN_SAMPLER)
+            .withColorTargetState(new ColorTargetState(
+                    Optional.empty(), GpuFormat.RGBA8_UNORM, ColorTargetState.WRITE_ALL))
+            .withPrimitiveTopology(PrimitiveTopology.TRIANGLES)
+            .build();
+
     public static final RenderPipeline EXPOSURE_METER = RenderPipeline.builder(
                     RenderPipelines.GLOBALS_SNIPPET)
             .withLocation(id("pipeline/exposure_meter"))
@@ -67,6 +78,7 @@ public final class CyclesRenderPipelines {
     public static void register(RegisterRenderPipelinesEvent event) {
         event.registerPipeline(PRESENT);
         event.registerPipeline(SCRGB_OUTPUT);
+        event.registerPipeline(SDR_OUTPUT);
         event.registerPipeline(EXPOSURE_METER);
     }
 
