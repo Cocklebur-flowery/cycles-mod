@@ -1627,6 +1627,11 @@ ccl::Shader* create_material_shader(
 
     ccl::Shader* shader = scene->create_node<ccl::Shader>();
     shader->name = "minecraft_material_" + std::to_string(index);
+    if (material.pbr_format == CYCLES_BRIDGE_PBR_LAB_1_3) {
+        // Emission is encoded per atlas texel. Material-level MIS would otherwise
+        // register every Minecraft triangle as a light when any texel emits.
+        shader->set_emission_sampling_method(ccl::EMISSION_SAMPLING_NONE);
+    }
     shader->set_graph(std::move(graph));
     shader->tag_update(scene);
     return shader;

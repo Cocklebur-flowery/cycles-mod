@@ -39,7 +39,8 @@ $cyclesPatches = @(
     (Join-Path $projectRoot 'patches\cycles-v5.2-cuew-external-semaphore.patch'),
     (Join-Path $projectRoot 'patches\cycles-v5.2-vulkan-interop-sync.patch'),
     (Join-Path $projectRoot 'patches\cycles-v5.2-vulkan-interop-range.patch'),
-    (Join-Path $projectRoot 'patches\cycles-v5.2-vulkan-interop-timeline.patch')
+    (Join-Path $projectRoot 'patches\cycles-v5.2-vulkan-interop-timeline.patch'),
+    (Join-Path $projectRoot 'patches\cycles-v5.2-nonemissive-geometry-light-update.patch')
 )
 if ($ExperimentalDlss) {
     $cyclesPatches += Join-Path $projectRoot 'patches\cycles-v5.2-dlss-experimental.patch'
@@ -310,23 +311,41 @@ if ($missingObjects.Count -gt 0) {
 Write-Host "[cycles] Libraries: $cyclesLibraries ($cyclesLibrariesCommit)"
 
 $patchesAlreadyApplied = $false
+$knownAppliedPatchLines = @()
 if (Test-Path -LiteralPath $cyclesPatchStamp -PathType Leaf) {
     $actualCyclesPatchState = (Get-Content -LiteralPath $cyclesPatchStamp -Raw).TrimEnd("`r", "`n")
-    if ($actualCyclesPatchState -ne $expectedCyclesPatchState) {
+    $actualCyclesPatchLines = @($actualCyclesPatchState -split "`r?`n")
+    $knownAppliedPatchLines = $actualCyclesPatchLines
+    $expectedCyclesPatchLines = @($expectedCyclesPatchState -split "`r?`n")
+    $unrecognizedPatchLines = @(
+        $actualCyclesPatchLines | Where-Object { $_ -notin $expectedCyclesPatchLines }
+    )
+    if ($unrecognizedPatchLines.Count -gt 0) {
         throw "Cycles patch state does not match the requested patch set. Remove only the isolated source directory and rerun: $cyclesSource"
     }
-    $patchesAlreadyApplied = $true
-    Write-Host '[cycles] Patch set already applied and fingerprint verified.'
+    if ($actualCyclesPatchState -eq $expectedCyclesPatchState) {
+        $patchesAlreadyApplied = $true
+        Write-Host '[cycles] Patch set already applied and fingerprint verified.'
+    } else {
+        Write-Host '[cycles] Applying an additive patch-set update.'
+    }
 }
 if (-not $patchesAlreadyApplied) {
-    $trackedSourceChanges = @(& $git -C $cyclesSource diff --name-only)
-    if ($LASTEXITCODE -ne 0) {
-        throw "Unable to inspect Cycles source changes at $cyclesSource"
-    }
-    if ($trackedSourceChanges.Count -gt 0) {
-        throw "Cycles source has unrecognized tracked changes and cannot be patched safely: $cyclesSource"
+    if (-not (Test-Path -LiteralPath $cyclesPatchStamp -PathType Leaf)) {
+        $trackedSourceChanges = @(& $git -C $cyclesSource diff --name-only)
+        if ($LASTEXITCODE -ne 0) {
+            throw "Unable to inspect Cycles source changes at $cyclesSource"
+        }
+        if ($trackedSourceChanges.Count -gt 0) {
+            throw "Cycles source has unrecognized tracked changes and cannot be patched safely: $cyclesSource"
+        }
     }
     foreach ($cyclesPatch in $cyclesPatches) {
+        $patchStateLine = "$([System.IO.Path]::GetFileName($cyclesPatch))=$((Get-FileHash -Algorithm SHA256 -LiteralPath $cyclesPatch).Hash.ToLowerInvariant())"
+        if ($patchStateLine -in $knownAppliedPatchLines) {
+            Write-Host "[cycles] Patch already fingerprinted: $([System.IO.Path]::GetFileName($cyclesPatch))"
+            continue
+        }
         Apply-CyclesPatch -PatchPath $cyclesPatch
     }
     [System.IO.File]::WriteAllText(
