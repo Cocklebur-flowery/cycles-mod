@@ -14,12 +14,7 @@ import java.util.Objects;
 import java.util.Optional;
 
 public final class HdrOutputStage {
-    private static final String PAPER_WHITE_PROPERTY =
-            "cyclesrenderer.hdrPaperWhiteNits";
-    private static final String PAPER_WHITE_ENVIRONMENT =
-            "CYCLESRENDERER_HDR_PAPER_WHITE_NITS";
     private static final float SCRGB_REFERENCE_WHITE_NITS = 80.0F;
-    private static final float PAPER_WHITE_NITS = paperWhiteNits();
     private static final ByteBuffer UNIFORM_DATA = ByteBuffer.allocateDirect(16)
             .order(ByteOrder.nativeOrder());
 
@@ -78,8 +73,8 @@ public final class HdrOutputStage {
                 VulkanCapabilityProbe.swapchainBootstrap().scRgbSelected(),
                 target == null ? 0 : target.width,
                 target == null ? 0 : target.height,
-                PAPER_WHITE_NITS,
-                PAPER_WHITE_NITS / SCRGB_REFERENCE_WHITE_NITS,
+                HdrDisplayTransform.paperWhiteNits(),
+                HdrDisplayTransform.paperWhiteNits() / SCRGB_REFERENCE_WHITE_NITS,
                 conversionCount,
                 lastConversionMicros,
                 emaConversionMicros,
@@ -115,8 +110,9 @@ public final class HdrOutputStage {
                     GpuBuffer.USAGE_COPY_DST | GpuBuffer.USAGE_UNIFORM,
                     16L);
             UNIFORM_DATA.clear();
-            UNIFORM_DATA.putFloat(PAPER_WHITE_NITS / SCRGB_REFERENCE_WHITE_NITS);
-            UNIFORM_DATA.putFloat(PAPER_WHITE_NITS);
+            UNIFORM_DATA.putFloat(
+                    HdrDisplayTransform.paperWhiteNits() / SCRGB_REFERENCE_WHITE_NITS);
+            UNIFORM_DATA.putFloat(HdrDisplayTransform.paperWhiteNits());
             UNIFORM_DATA.putFloat(SCRGB_REFERENCE_WHITE_NITS);
             UNIFORM_DATA.putFloat(0.0F);
             UNIFORM_DATA.flip();
@@ -133,20 +129,6 @@ public final class HdrOutputStage {
                 : (emaConversionMicros * 7L + micros) / 8L;
         maxConversionMicros = Math.max(maxConversionMicros, micros);
         conversionCount++;
-    }
-
-    private static float paperWhiteNits() {
-        String configured = System.getProperty(PAPER_WHITE_PROPERTY);
-        if (configured == null) {
-            configured = System.getenv(PAPER_WHITE_ENVIRONMENT);
-        }
-        if (configured != null) {
-            try {
-                return Math.clamp(Float.parseFloat(configured), 80.0F, 1_000.0F);
-            } catch (NumberFormatException ignored) {
-            }
-        }
-        return 200.0F;
     }
 
     public record Telemetry(

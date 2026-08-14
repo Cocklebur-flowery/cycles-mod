@@ -44,11 +44,12 @@ public final class CyclesFramePresenter {
     private long emaColorLutUploadMicros;
     private long maxColorLutUploadMicros;
     private GpuBuffer displayUniformBuffer;
-    private final ByteBuffer displayUniformData = ByteBuffer.allocateDirect(96)
+    private final ByteBuffer displayUniformData = ByteBuffer.allocateDirect(112)
             .order(ByteOrder.nativeOrder());
     private long displaySettingsRevision = Long.MIN_VALUE;
     private int displayDepthFarBits;
     private int displayExposureBits;
+    private HdrDisplayTransform.Selection displayTransform;
 
     public void update(NativeBridge.AcquiredFrame frame) {
         RenderSystem.assertOnRenderThread();
@@ -151,15 +152,17 @@ public final class CyclesFramePresenter {
             GpuTextureView source,
             DisplayPerformanceProbe performanceProbe) {
         long stageStart = performanceProbe.beginDisplayStage();
-        CyclesRenderSettings.DisplayDevice outputDisplay = outputDisplay(settings);
+        HdrDisplayTransform.Selection outputTransform =
+                HdrDisplayTransform.select(settings);
         GpuTextureView activeColorLut = updateColorLut(
-                outputDisplay, settings.viewTransform(), settings.colorLook(),
+                outputTransform.displayDevice(), outputTransform.viewTransform(),
+                settings.colorLook(),
                 settings.workingSpace());
         performanceProbe.endDisplayStage(
                 DisplayPerformanceProbe.Stage.COLOR_LUT, stageStart);
         float effectiveExposureEv = automaticExposure.update(source, settings, System.nanoTime());
         stageStart = performanceProbe.beginDisplayStage();
-        updateDisplayUniforms(settings, outputDisplay, depthFar, effectiveExposureEv);
+        updateDisplayUniforms(settings, outputTransform, depthFar, effectiveExposureEv);
         performanceProbe.endDisplayStage(
                 DisplayPerformanceProbe.Stage.UNIFORMS, stageStart);
         stageStart = performanceProbe.beginDisplayStage();
@@ -239,6 +242,7 @@ public final class CyclesFramePresenter {
         displaySettingsRevision = Long.MIN_VALUE;
         displayDepthFarBits = 0;
         displayExposureBits = 0;
+        displayTransform = null;
         automaticExposure.reset();
         if (nativeFrameTarget != null) {
             nativeFrameTarget.destroyBuffers();
@@ -411,7 +415,7 @@ public final class CyclesFramePresenter {
 
     private void updateDisplayUniforms(
             CyclesRenderSettings settings,
-            CyclesRenderSettings.DisplayDevice outputDisplay,
+            HdrDisplayTransform.Selection outputTransform,
             float depthFar,
             float effectiveExposureEv) {
         int depthBits = Float.floatToIntBits(depthFar);
@@ -419,14 +423,15 @@ public final class CyclesFramePresenter {
         if (displayUniformBuffer != null
                 && displaySettingsRevision == settings.revision()
                 && displayDepthFarBits == depthBits
-                && displayExposureBits == exposureBits) {
+                && displayExposureBits == exposureBits
+                && outputTransform.equals(displayTransform)) {
             return;
         }
         if (displayUniformBuffer == null) {
             displayUniformBuffer = RenderSystem.getDevice().createBuffer(
                     () -> "Cycles display settings",
                     GpuBuffer.USAGE_COPY_DST | GpuBuffer.USAGE_UNIFORM,
-                    96L);
+                    112L);
         }
         displayUniformData.clear();
         displayUniformData.putFloat((float) Math.pow(2.0, effectiveExposureEv));
@@ -434,10 +439,9 @@ public final class CyclesFramePresenter {
         displayUniformData.putFloat(Math.max(depthFar, 1.0F));
         displayUniformData.putFloat(Math.max(settings.stillSamples(), 1));
         displayUniformData.putInt(settings.activePass().nativeId());
-        CyclesRenderSettings.ViewTransform effectiveView =
-                settings.viewTransform().effectiveFor(outputDisplay);
+        CyclesRenderSettings.ViewTransform effectiveView = outputTransform.viewTransform();
         displayUniformData.putInt(effectiveView.nativeId());
-        displayUniformData.putInt(0);
+        displayUniformData.putInt(outputTransform.pqEncoded() ? 1 : 0);
         displayUniformData.putInt(0);
         NativeBridge.ColorLutDescriptor descriptor = colorLutDescriptor;
         if (effectiveView != CyclesRenderSettings.ViewTransform.RAW
@@ -464,6 +468,10 @@ public final class CyclesFramePresenter {
             displayUniformData.putFloat(whiteBalance[row * 3 + 2]);
             displayUniformData.putFloat(0.0F);
         }
+        displayUniformData.putFloat(HdrDisplayTransform.pqToPaperWhiteScale());
+        displayUniformData.putFloat(HdrDisplayTransform.paperWhiteNits());
+        displayUniformData.putFloat(0.0F);
+        displayUniformData.putFloat(0.0F);
         displayUniformData.flip();
         RenderSystem.getDevice().createCommandEncoder().writeToBuffer(
                 displayUniformBuffer.slice(),
@@ -471,16 +479,7 @@ public final class CyclesFramePresenter {
         displaySettingsRevision = settings.revision();
         displayDepthFarBits = depthBits;
         displayExposureBits = exposureBits;
-    }
-
-    private static CyclesRenderSettings.DisplayDevice outputDisplay(
-            CyclesRenderSettings settings) {
-        // The current HDR stage embeds the already composed SDR framebuffer in
-        // linear scRGB. Keep the OCIO output on sRGB until the later direct HDR
-        // Cycles path can retain scene-linear highlights through composition.
-        return VulkanCapabilityProbe.swapchainBootstrap().scRgbSelected()
-                ? CyclesRenderSettings.DisplayDevice.SRGB
-                : settings.displayDevice();
+        displayTransform = outputTransform;
     }
 
     private static long nanosToMicros(long nanos) {

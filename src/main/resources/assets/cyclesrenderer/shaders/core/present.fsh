@@ -10,6 +10,7 @@ layout(std140) uniform CyclesDisplay {
     vec4 WhiteBalanceRow0;
     vec4 WhiteBalanceRow1;
     vec4 WhiteBalanceRow2;
+    vec4 HdrParams;
 };
 
 in vec2 texCoord;
@@ -20,6 +21,33 @@ vec3 linearToSrgb(vec3 value) {
     vec3 low = value * 12.92;
     vec3 high = 1.055 * pow(max(value, vec3(0.0)), vec3(1.0 / 2.4)) - 0.055;
     return mix(high, low, linearRange);
+}
+
+vec3 pqToLinear(vec3 value) {
+    const float m1 = 0.1593017578125;
+    const float m2 = 78.84375;
+    const float c1 = 0.8359375;
+    const float c2 = 18.8515625;
+    const float c3 = 18.6875;
+    vec3 encoded = pow(clamp(value, vec3(0.0), vec3(1.0)), vec3(1.0 / m2));
+    vec3 numerator = max(encoded - vec3(c1), vec3(0.0));
+    vec3 denominator = max(vec3(c2) - vec3(c3) * encoded, vec3(1.0e-6));
+    return pow(numerator / denominator, vec3(1.0 / m1));
+}
+
+vec3 rec2020ToSrgb(vec3 value) {
+    return vec3(
+        dot(vec3(1.660491, -0.587641, -0.072850), value),
+        dot(vec3(-0.124550, 1.132900, -0.008349), value),
+        dot(vec3(-0.018151, -0.100579, 1.118730), value));
+}
+
+vec3 linearToSignedSrgb(vec3 value) {
+    vec3 magnitude = abs(value);
+    bvec3 linearRange = lessThanEqual(magnitude, vec3(0.0031308));
+    vec3 low = magnitude * 12.92;
+    vec3 high = 1.055 * pow(magnitude, vec3(1.0 / 2.4)) - 0.055;
+    return sign(value) * mix(high, low, linearRange);
 }
 
 vec3 fetchColorLut(ivec3 index, int edge) {
@@ -72,9 +100,15 @@ void main() {
         if (DisplayModes.y != 1) {
             display = applyColorLut(display);
         }
-        if (DisplayModes.y != 1) {
+        if (DisplayModes.y != 1 && DisplayModes.z == 0) {
             display = pow(max(display, vec3(0.0)), vec3(DisplayParams.y));
         }
+    }
+
+    if (DisplayModes.z == 1) {
+        vec3 absoluteRec2020 = pqToLinear(display);
+        vec3 relativeSrgb = rec2020ToSrgb(absoluteRec2020) * HdrParams.x;
+        display = linearToSignedSrgb(relativeSrgb);
     }
 
     float alpha = activePass == 0 ? source.a : 1.0;
