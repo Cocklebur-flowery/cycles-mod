@@ -154,13 +154,18 @@ bool valid_scene_data(
         const bool lab_pbr = material.pbr_format == CYCLES_BRIDGE_PBR_LAB_1_3;
         constexpr std::uint32_t supported_flags =
             CYCLES_BRIDGE_MATERIAL_CUTOUT | CYCLES_BRIDGE_MATERIAL_BLEND
-            | CYCLES_BRIDGE_MATERIAL_TRANSMISSION | CYCLES_BRIDGE_MATERIAL_WATER;
+            | CYCLES_BRIDGE_MATERIAL_TRANSMISSION | CYCLES_BRIDGE_MATERIAL_WATER
+            | CYCLES_BRIDGE_MATERIAL_FOLIAGE;
         const bool water_without_transmission =
             (material.flags & CYCLES_BRIDGE_MATERIAL_WATER) != 0U
             && (material.flags & CYCLES_BRIDGE_MATERIAL_TRANSMISSION) == 0U;
+        const bool foliage_without_cutout =
+            (material.flags & CYCLES_BRIDGE_MATERIAL_FOLIAGE) != 0U
+            && (material.flags & CYCLES_BRIDGE_MATERIAL_CUTOUT) == 0U;
         if (material.texture_index >= scene.texture_count
             || (material.flags & ~supported_flags) != 0U
             || water_without_transmission
+            || foliage_without_cutout
             || !std::isfinite(material.emission_strength)
             || !std::isfinite(material.alpha_cutoff)
             || material.emission_strength < 0.0F

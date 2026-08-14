@@ -575,6 +575,16 @@ public final class SectionSceneManager {
                         normalTextureIndex,
                         materialTextureIndex,
                         pbrFormat,
+                        auxiliaryTextureIndex),
+                new SectionGeometrySnapshot.MaterialData(
+                        0,
+                        SectionGeometrySnapshot.MATERIAL_FLAG_CUTOUT
+                                | SectionGeometrySnapshot.MATERIAL_FLAG_FOLIAGE,
+                        0.0F,
+                        0.5F,
+                        normalTextureIndex,
+                        materialTextureIndex,
+                        pbrFormat,
                         auxiliaryTextureIndex)
         };
         SectionGeometrySnapshot.TextureData[] textures = hasPbrAtlases

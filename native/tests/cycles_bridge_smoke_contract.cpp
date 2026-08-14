@@ -56,6 +56,8 @@ bool verify_material_flag_contract(CyclesBridgeRenderer* renderer) {
 
     if (reset_with_flags(CYCLES_BRIDGE_MATERIAL_WATER)
             != CYCLES_BRIDGE_STATUS_INVALID_ARGUMENT
+        || reset_with_flags(CYCLES_BRIDGE_MATERIAL_FOLIAGE)
+            != CYCLES_BRIDGE_STATUS_INVALID_ARGUMENT
         || reset_with_flags(1U << 31U) != CYCLES_BRIDGE_STATUS_INVALID_ARGUMENT
         || !require_ok(
             reset_with_flags(CYCLES_BRIDGE_MATERIAL_TRANSMISSION),
@@ -63,7 +65,11 @@ bool verify_material_flag_contract(CyclesBridgeRenderer* renderer) {
         || !require_ok(
             reset_with_flags(
                 CYCLES_BRIDGE_MATERIAL_TRANSMISSION | CYCLES_BRIDGE_MATERIAL_WATER),
-            "water material flags")) {
+            "water material flags")
+        || !require_ok(
+            reset_with_flags(
+                CYCLES_BRIDGE_MATERIAL_CUTOUT | CYCLES_BRIDGE_MATERIAL_FOLIAGE),
+            "foliage material flags")) {
         std::cerr << "material transmission flag contract was not enforced\n";
         return false;
     }

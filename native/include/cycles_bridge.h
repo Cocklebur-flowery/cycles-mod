@@ -40,6 +40,7 @@ enum CyclesBridgeMaterialFlags : std::uint32_t {
     CYCLES_BRIDGE_MATERIAL_BLEND = 1U << 1U,
     CYCLES_BRIDGE_MATERIAL_TRANSMISSION = 1U << 2U,
     CYCLES_BRIDGE_MATERIAL_WATER = 1U << 3U,
+    CYCLES_BRIDGE_MATERIAL_FOLIAGE = 1U << 4U,
 };
 
 enum CyclesBridgePbrFormat : std::uint32_t {

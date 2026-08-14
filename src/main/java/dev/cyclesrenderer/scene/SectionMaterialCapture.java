@@ -15,7 +15,10 @@ import net.minecraft.tags.BlockTags;
 import net.minecraft.tags.FluidTags;
 import net.minecraft.util.ARGB;
 import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.GrowingPlantBlock;
 import net.minecraft.world.level.block.StainedGlassPaneBlock;
+import net.minecraft.world.level.block.VegetationBlock;
+import net.minecraft.world.level.block.VineBlock;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.material.FluidState;
 import net.neoforged.neoforge.client.extensions.common.IClientBlockExtensions;
@@ -59,9 +62,14 @@ final class SectionMaterialCapture {
         for (int corner = 0; corner < BakedQuad.VERTEX_COUNT; corner++) {
             colors[corner] = packRgba(ARGB.multiply(quad.bakedColors().color(corner), tint));
         }
-        int materialOverride = isGlass(state)
-                ? SectionGeometrySnapshot.MATERIAL_GLASS
-                : SectionGeometrySnapshot.MATERIAL_UNCHANGED;
+        int materialOverride;
+        if (isGlass(state)) {
+            materialOverride = SectionGeometrySnapshot.MATERIAL_GLASS;
+        } else if (isFoliage(state)) {
+            materialOverride = SectionGeometrySnapshot.MATERIAL_FOLIAGE;
+        } else {
+            materialOverride = SectionGeometrySnapshot.MATERIAL_UNCHANGED;
+        }
         blockQuads.computeIfAbsent(
                         signature(layer, x, y, z, quad), ignored -> new ArrayDeque<>())
                 .addLast(new CapturedQuad(colors, materialOverride));
@@ -165,6 +173,13 @@ final class SectionMaterialCapture {
         return state.is(BlockTags.IMPERMEABLE)
                 || state.getBlock() == Blocks.GLASS_PANE
                 || state.getBlock() instanceof StainedGlassPaneBlock;
+    }
+
+    private static boolean isFoliage(BlockState state) {
+        return state.is(BlockTags.LEAVES)
+                || state.getBlock() instanceof VegetationBlock
+                || state.getBlock() instanceof GrowingPlantBlock
+                || state.getBlock() instanceof VineBlock;
     }
 
     private static QuadSignature signature(
