@@ -33,6 +33,8 @@ public final class FramePerformanceMonitor implements DisplayPerformanceProbe {
     private final long[] flipBaselineScratch = new long[BASELINE_SIZE];
     private final VulkanGpuProfiler gpuProfiler;
     private final boolean gpuQueriesEnabled;
+    private final String gpuQueriesProperty;
+    private final String gpuQueriesEnvironment;
 
     private Minecraft minecraft;
     private PerformanceLogWriter logWriter;
@@ -60,6 +62,8 @@ public final class FramePerformanceMonitor implements DisplayPerformanceProbe {
             VulkanExternalBufferPrototype interop,
             SectionSceneManager sceneManager) {
         contextSampler = new PerformanceContextSampler(presenter, interop, sceneManager);
+        gpuQueriesProperty = System.getProperty("cyclesrenderer.performance.gpuQueries");
+        gpuQueriesEnvironment = System.getenv("CYCLESRENDERER_PERF_GPU_QUERIES");
         gpuQueriesEnabled = configuredGpuQueriesEnabled();
         gpuProfiler = new VulkanGpuProfiler(new VulkanGpuProfiler.ResultSink() {
             @Override
@@ -108,8 +112,11 @@ public final class FramePerformanceMonitor implements DisplayPerformanceProbe {
         latestContextFrame = -1L;
         active = true;
         LOGGER.info(
-                "Cycles performance tracing active (GPU queries={}); stalls are captured under {}",
+                "Cycles performance tracing active (GPU queries={}, property={}, environment={}); "
+                        + "stalls are captured under {}",
                 gpuQueriesEnabled,
+                gpuQueriesProperty,
+                gpuQueriesEnvironment,
                 client.gameDirectory.toPath().resolve("logs"));
     }
 

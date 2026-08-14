@@ -96,15 +96,17 @@ Native scene revision、frame generation、reset/device/geometry/BVH wall-time �
 关联，不把这些 wall-time 标成纯 GPU kernel 时间。精确 OptiX kernel 时间需要 CUDA event 或
 CUPTI，是独立的 PERF-P2 工作。
 
-为了确认 timestamp query 本身是否触发 Vulkan command buffer/驱动抖动，可进行 A/B 测试：
+为了确认 timestamp query 本身是否触发 Vulkan command buffer/驱动抖动，可进行 A/B 测试。
+开发环境通过 Gradle 属性显式传入 Minecraft JVM：
 
 ```text
--Dcyclesrenderer.performance.gpuQueries=false
+gradlew.bat runClient -PexperimentalDlss=true -PperformanceGpuQueries=false
 ```
 
-也可在启动环境中设置 `CYCLESRENDERER_PERF_GPU_QUERIES=false`。默认值为 `true`；系统属性优先于
-环境变量。关闭后 CPU、GC、上下文和 JSON 捕获仍正常工作，metadata 的
-`gpu_queries_enabled=false`，所有帧的 `gpu_expected=false`。
+也可在启动 Gradle 的环境中设置 `CYCLESRENDERER_PERF_GPU_QUERIES=false`；`build.gradle` 会将它
+转成同一个 Minecraft JVM system property。Gradle 属性优先于环境变量，默认值为 `true`。关闭后
+CPU、GC、上下文和 JSON 捕获仍正常工作，metadata 的 `gpu_queries_enabled=false`，所有帧的
+`gpu_expected=false`。启动日志会同时打印最终值、JVM property 原值和游戏进程实际看到的环境变量。
 
 ## 5. 日志读取
 
@@ -125,3 +127,22 @@ CUPTI，是独立的 PERF-P2 工作。
 - 不修改 Native ABI、Section/Vertex/Pass 数据布局和 Cycles 固定源码。
 - 不修改 F8/F9/F10 行为、原版回退、DLSS、颜色管理或打包流程。
 - 不新增依赖，不启用同步 GPU 查询，不在渲染线程写性能日志。
+
+## 7. Vulkan Interop 生命周期诊断
+
+若 `interop.completed_frame_count` 和显示 generation 停在同一个值，而 Native produced frame
+继续增长、`frame_upload` 开始持续出现 10ms 以上峰值，说明实时链路已从 Vulkan/CUDA interop
+永久退回 CPU 纹理上传。此前每次 Cycles Session 重建都会把 Engine 保存的三个 Win32 外部句柄
+移动给旧 Session；旧 Session 销毁后，后续 Session 无法重新导入同一组 Vulkan 资源。
+
+修复后的所有权是：Engine 在绑定期间持有原始句柄，每个 Session 只接收通过 `DuplicateHandle`
+创建的独立副本。Session 销毁时会清理自己的导入资源和槽状态，但保留 `BOUND`、
+`TIMELINE_SYNC` 及单调递增的 generation；下一 Session 可再次导入，不改变 Native ABI、三槽协议
+或 Java/Vulkan 资源所有权。
+
+运行验证时应同时满足：
+
+1. 放置/破坏方块、走动加载区块并触发 Session 重建后，interop generation 和
+   `completed_frame_count` 继续增长。
+2. `native copy` 计数持续增长，CPU presenter `frame_upload` 不再长期接管。
+3. 临时重建期间可以出现短暂 fallback，但不能在某个 generation 永久停止。

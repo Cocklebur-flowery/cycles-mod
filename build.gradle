@@ -39,11 +39,17 @@ def nativeSourceDirectory = layout.projectDirectory.dir('native')
 def experimentalDlss = providers.gradleProperty('experimentalDlss')
         .map { it.toBoolean() }
         .getOrElse(false)
+def performanceGpuQueries = providers.gradleProperty('performanceGpuQueries')
+        .orElse(providers.environmentVariable('CYCLESRENDERER_PERF_GPU_QUERIES'))
+        .map { it.toBoolean().toString() }
+        .getOrElse('true')
 def nativeVariant = experimentalDlss ? 'native-dlss' : 'native'
 def cyclesVariant = experimentalDlss ? 'cycles-dlss' : 'cycles'
 def nativeBuildDirectory = layout.buildDirectory.dir(nativeVariant).get().asFile
 def nativeLibraryFile = new File(nativeBuildDirectory, 'bin/cyclesrenderer_native.dll')
 def nativeSmokeFile = new File(nativeBuildDirectory, 'bin/cyclesrenderer_smoke.exe')
+def nativeSceneUpdateTestFile = new File(
+        nativeBuildDirectory, 'bin/cyclesrenderer_scene_update_test.exe')
 def nativeRuntimeDirectory = nativeLibraryFile.parentFile
 def cyclesSourceDirectory = layout.projectDirectory.dir(".deps/${cyclesVariant}").asFile
 def cyclesBuildDirectory = layout.projectDirectory.dir(".deps/${cyclesVariant}-build").asFile
@@ -68,6 +74,7 @@ neoForge {
             // Comma-separated list of namespaces to load gametests from. Empty = all namespaces.
             systemProperty 'neoforge.enabledGameTestNamespaces', project.mod_id
             systemProperty 'cyclesrenderer.nativeLibrary', nativeLibraryFile.absolutePath
+            systemProperty 'cyclesrenderer.performance.gpuQueries', performanceGpuQueries
             programArguments.addAll '--graphicsBackend', 'vulkan'
         }
 
@@ -173,7 +180,7 @@ tasks.register('buildNative', Exec) {
     dependsOn 'configureNative'
     inputs.dir(nativeSourceDirectory)
     inputs.dir(new File(cyclesBuildDirectory, 'lib/Release'))
-    outputs.files(nativeLibraryFile, nativeSmokeFile)
+    outputs.files(nativeLibraryFile, nativeSmokeFile, nativeSceneUpdateTestFile)
     commandLine 'cmake',
             '--build', nativeBuildDirectory.absolutePath,
             '--config', 'Release',
@@ -185,6 +192,16 @@ tasks.register('runNativeSmoke', Exec) {
     description = 'Renders a small voxel scene through the Cycles native bridge.'
     dependsOn 'buildNative'
     commandLine nativeSmokeFile.absolutePath
+}
+
+tasks.register('runNativeTests', Exec) {
+    group = 'verification'
+    description = 'Runs every native test registered with CTest.'
+    dependsOn 'buildNative'
+    commandLine 'ctest',
+            '--test-dir', nativeBuildDirectory.absolutePath,
+            '--build-config', 'Release',
+            '--output-on-failure'
 }
 
 tasks.register('prepareVulkanClientConfig') {
