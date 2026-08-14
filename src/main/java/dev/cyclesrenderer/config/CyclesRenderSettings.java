@@ -63,6 +63,8 @@ public record CyclesRenderSettings(
         PbrMode pbrMode,
         float pbrNormalStrength,
         float pbrEmissionScale,
+        float pbrWetness,
+        float pbrSubsurfaceScale,
         float pbrFallbackRoughness,
         float pbrFallbackF0,
         DenoiserMode denoiserMode,

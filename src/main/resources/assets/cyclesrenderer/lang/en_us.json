@@ -129,6 +129,8 @@
   "config.cyclesrenderer.materials.emissionScale": "Emission Scale",
   "config.cyclesrenderer.materials.fallbackRoughness": "Fallback Roughness",
   "config.cyclesrenderer.materials.fallbackF0": "Fallback Dielectric F0",
+  "config.cyclesrenderer.materials.wetness": "Porous Surface Wetness",
+  "config.cyclesrenderer.materials.subsurfaceScale": "Subsurface Scale (blocks)",
   "config.cyclesrenderer.lightPaths.minimumBounce": "Minimum Bounces",
   "config.cyclesrenderer.lightPaths.maximumBounce": "Maximum Bounces",
   "config.cyclesrenderer.lightPaths.diffuseBounces": "Diffuse Bounces",

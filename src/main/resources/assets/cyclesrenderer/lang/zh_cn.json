@@ -129,6 +129,8 @@
   "config.cyclesrenderer.materials.emissionScale": "自发光倍率",
   "config.cyclesrenderer.materials.fallbackRoughness": "缺省粗糙度",
   "config.cyclesrenderer.materials.fallbackF0": "缺省绝缘体 F0",
+  "config.cyclesrenderer.materials.wetness": "多孔材质湿润度",
+  "config.cyclesrenderer.materials.subsurfaceScale": "次表面尺度（方块）",
   "config.cyclesrenderer.lightPaths.minimumBounce": "最小反弹",
   "config.cyclesrenderer.lightPaths.maximumBounce": "最大反弹",
   "config.cyclesrenderer.lightPaths.diffuseBounces": "漫反射反弹",

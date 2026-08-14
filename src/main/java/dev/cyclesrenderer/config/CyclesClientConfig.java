@@ -95,6 +95,7 @@ public final class CyclesClientConfig {
     private static final ModConfigSpec.DoubleValue PBR_EMISSION_SCALE;
     private static final ModConfigSpec.DoubleValue PBR_FALLBACK_ROUGHNESS;
     private static final ModConfigSpec.DoubleValue PBR_FALLBACK_F0;
+    private static final LabPbrConfig LAB_PBR;
     private static final ModConfigSpec.IntValue MINIMUM_BOUNCE;
     private static final ModConfigSpec.IntValue MAXIMUM_BOUNCE;
     private static final ModConfigSpec.IntValue DIFFUSE_BOUNCES;
@@ -325,6 +326,7 @@ public final class CyclesClientConfig {
         PBR_FALLBACK_F0 = builder.translation("config.cyclesrenderer.materials.fallbackF0")
                 .comment("Linear dielectric F0 used by sprites without a LabPBR specular companion.")
                 .defineInRange("fallbackF0", 0.04D, 0.0D, 0.08D);
+        LAB_PBR = LabPbrConfig.define(builder);
         builder.pop();
 
         builder.push("lightPaths");
@@ -455,6 +457,7 @@ public final class CyclesClientConfig {
                 ATMOSPHERE_OZONE_DENSITY.get().floatValue(),
                 PBR_MODE.get(), PBR_NORMAL_STRENGTH.get().floatValue(),
                 PBR_EMISSION_SCALE.get().floatValue(),
+                LAB_PBR.wetness(), LAB_PBR.subsurfaceScale(),
                 PBR_FALLBACK_ROUGHNESS.get().floatValue(),
                 PBR_FALLBACK_F0.get().floatValue(),
                 DENOISER_MODE.get(), DENOISER_START_SAMPLE.get(), DENOISER_INPUT.get(),
@@ -745,6 +748,7 @@ public final class CyclesClientConfig {
                 "config.cyclesrenderer.materials.fallbackRoughness", PBR_FALLBACK_ROUGHNESS, 0.0D, 1.0D, 0.01D));
         options.add(doubleOption("materials.fallbackF0", Category.MATERIALS,
                 "config.cyclesrenderer.materials.fallbackF0", PBR_FALLBACK_F0, 0.0D, 0.08D, 0.001D));
+        LAB_PBR.appendOptions(options);
 
         options.add(enumOption("color.display", Category.COLOR,
                 "config.cyclesrenderer.color.display", DISPLAY_DEVICE,

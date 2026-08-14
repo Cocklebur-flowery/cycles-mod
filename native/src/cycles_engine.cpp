@@ -196,7 +196,9 @@ bool same_material_shader_settings(
     const CyclesBridgeRenderSettings& first,
     const CyclesBridgeRenderSettings& second) {
     return first.pbr_normal_strength == second.pbr_normal_strength
-        && first.pbr_emission_scale == second.pbr_emission_scale;
+        && first.pbr_emission_scale == second.pbr_emission_scale
+        && first.pbr_wetness == second.pbr_wetness
+        && first.pbr_subsurface_scale == second.pbr_subsurface_scale;
 }
 
 ccl::Transform rec709_to_working_space(std::uint32_t working_space) {
