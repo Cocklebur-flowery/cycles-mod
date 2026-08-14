@@ -2,6 +2,7 @@ package dev.cyclesrenderer.client;
 
 import dev.cyclesrenderer.config.CyclesClientConfig;
 import dev.cyclesrenderer.config.CyclesRenderSettings;
+import dev.cyclesrenderer.config.CameraAutomationSettings;
 import dev.cyclesrenderer.nativebridge.NativeBridge;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
@@ -36,10 +37,12 @@ final class CyclesSettingsList
             "camera.apertureCircular",
             "camera.safeAreas",
             "camera.centerCutSafeAreas",
+            "camera.autofocus.mode",
             "materials.pbrMode",
             "color.display",
             "color.viewTransform",
-            "color.whiteBalance");
+            "color.whiteBalance",
+            "color.autoExposure");
     private final CyclesClientConfig.Draft draft;
     private boolean refreshRequested;
 
@@ -86,6 +89,14 @@ final class CyclesSettingsList
 
     private boolean isEnabled(CyclesClientConfig.ConfigOption<?> option) {
         String id = option.id();
+        if (id.startsWith("color.autoExposure.") && !booleanValue("color.autoExposure")) {
+            return false;
+        }
+        if (id.startsWith("camera.autofocus.") && !id.equals("camera.autofocus.mode")
+                && enumValue("camera.autofocus.mode")
+                    == CameraAutomationSettings.AutofocusMode.OFF) {
+            return false;
+        }
         if ((id.equals("sampling.minimumSamples") || id.equals("sampling.noiseThreshold"))
                 && !booleanValue("sampling.adaptive")) {
             return false;

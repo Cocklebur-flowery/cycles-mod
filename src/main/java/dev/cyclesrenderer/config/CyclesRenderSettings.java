@@ -112,7 +112,8 @@ public record CyclesRenderSettings(
         float centerTitleSafeX,
         float centerTitleSafeY,
         float centerActionSafeX,
-        float centerActionSafeY) {
+        float centerActionSafeY,
+        CameraAutomationSettings cameraAutomation) {
 
     public int pbrResourceFingerprint() {
         int result = pbrMode.hashCode();

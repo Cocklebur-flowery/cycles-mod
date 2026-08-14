@@ -128,6 +128,7 @@ public final class CyclesClientConfig {
     private static final ModConfigSpec.DoubleValue WHITE_BALANCE_TINT;
     private static final ModConfigSpec.EnumValue<CyclesRenderSettings.PassView> ACTIVE_PASS;
     private static final ModConfigSpec.BooleanValue DEBUG_OVERLAY;
+    private static final CameraAutomationConfig CAMERA_AUTOMATION;
 
     static {
         ModConfigSpec.Builder builder = new ModConfigSpec.Builder();
@@ -411,6 +412,8 @@ public final class CyclesClientConfig {
                 .define("debugOverlay", false);
         builder.pop();
 
+        CAMERA_AUTOMATION = CameraAutomationConfig.define(builder);
+
         SPEC = builder.build();
         OPTIONS = buildOptions();
     }
@@ -491,7 +494,8 @@ public final class CyclesClientConfig {
                 CAMERA_CENTER_TITLE_SAFE_X.get().floatValue(),
                 CAMERA_CENTER_TITLE_SAFE_Y.get().floatValue(),
                 CAMERA_CENTER_ACTION_SAFE_X.get().floatValue(),
-                CAMERA_CENTER_ACTION_SAFE_Y.get().floatValue());
+                CAMERA_CENTER_ACTION_SAFE_Y.get().floatValue(),
+                CAMERA_AUTOMATION.snapshot());
     }
 
     public static void markReloaded() {
@@ -771,10 +775,11 @@ public final class CyclesClientConfig {
                 CyclesRenderSettings.PassView.values()));
         options.add(booleanOption("diagnostics.debugOverlay", Category.DIAGNOSTICS,
                 "config.cyclesrenderer.diagnostics.debugOverlay", DEBUG_OVERLAY));
+        CAMERA_AUTOMATION.appendOptions(options);
         return List.copyOf(options);
     }
 
-    private static ConfigOption<Boolean> booleanOption(
+    static ConfigOption<Boolean> booleanOption(
             String id,
             Category category,
             String translationKey,
@@ -783,7 +788,7 @@ public final class CyclesClientConfig {
                 value::get, value::set, UnaryOperator.identity(), 0.0D, 1.0D, 1.0D, List.of());
     }
 
-    private static ConfigOption<Integer> intOption(
+    static ConfigOption<Integer> intOption(
             String id,
             Category category,
             String translationKey,
@@ -797,7 +802,7 @@ public final class CyclesClientConfig {
                 minimum, maximum, step, List.of());
     }
 
-    private static ConfigOption<Double> doubleOption(
+    static ConfigOption<Double> doubleOption(
             String id,
             Category category,
             String translationKey,
@@ -811,7 +816,7 @@ public final class CyclesClientConfig {
                 minimum, maximum, step, List.of());
     }
 
-    private static <E extends Enum<E>> ConfigOption<E> enumOption(
+    static <E extends Enum<E>> ConfigOption<E> enumOption(
             String id,
             Category category,
             String translationKey,
