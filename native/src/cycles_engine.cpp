@@ -3259,8 +3259,18 @@ class CyclesEngine::Impl final {
                 device_index++;
             }
         }
-        const std::string message =
+        std::string backend_error;
+        {
+            std::lock_guard lock(state_mutex_);
+            if (state_ == "fallback") {
+                backend_error = terminal_error_;
+            }
+        }
+        std::string message =
             "no usable Cycles backend matched the selected device policy";
+        if (!backend_error.empty()) {
+            message += "; last backend error: " + backend_error;
+        }
         set_state("failed", message);
         return false;
     }
