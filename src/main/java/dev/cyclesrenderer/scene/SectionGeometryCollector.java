@@ -21,6 +21,8 @@ import org.slf4j.LoggerFactory;
 
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedQueue;
@@ -203,6 +205,7 @@ public final class SectionGeometryCollector {
                 SectionGeometrySnapshot.TRIANGLE_INT_STRIDE)];
         int outputVertex = 0;
         int outputTriangle = 0;
+        List<FoliageSolidifier.Quad> foliageQuads = new ArrayList<>();
 
         for (Map.Entry<ChunkSectionLayer, MeshData> entry : results.renderedLayers.entrySet()) {
             ChunkSectionLayer layer = entry.getKey();
@@ -241,6 +244,7 @@ public final class SectionGeometryCollector {
             for (int quad = 0; quad < layerQuadCount; quad++) {
                 int vertexBase = layerVertexBase + quad * 4;
                 int materialIndex = layerMaterialIndex;
+                FoliageSolidifier.Silhouette silhouette = null;
                 if (materialColors != null) {
                     SectionMaterialCapture.DecodedQuad decoded = materialColors.decodeQuad(
                             layer, vertices, vertexBase, materialIndex);
@@ -249,8 +253,14 @@ public final class SectionGeometryCollector {
                                 decoded.colors(), 0, colors, vertexBase, decoded.colors().length);
                     }
                     materialIndex = decoded.materialIndex();
+                    silhouette = decoded.silhouette();
                 }
                 writeQuadNormal(vertices, vertexBase);
+                if (silhouette != null
+                        && FoliageSolidifier.coversSprite(vertices, vertexBase, silhouette)) {
+                    foliageQuads.add(new FoliageSolidifier.Quad(
+                            vertexBase, materialIndex, silhouette));
+                }
                 for (int triangle = 0; triangle < 2; triangle++) {
                     int target = outputTriangle * SectionGeometrySnapshot.TRIANGLE_INT_STRIDE;
                     int indices = triangle * 3;
@@ -263,15 +273,18 @@ public final class SectionGeometryCollector {
             }
         }
 
+        FoliageSolidifier.Result solidified = FoliageSolidifier.apply(
+                vertices, colors, triangles, foliageQuads);
+
         return new SectionGeometrySnapshot(
                 sectionPos.asLong(),
                 sectionPos.minBlockX(),
                 sectionPos.minBlockY(),
                 sectionPos.minBlockZ(),
-                vertices,
-                colors,
-                triangles,
-                quadCount,
+                solidified.vertices(),
+                solidified.colors(),
+                solidified.triangles(),
+                Math.addExact(quadCount, solidified.addedQuads()),
                 sequence);
     }
 

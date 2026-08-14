@@ -37,6 +37,8 @@ final class SectionMaterialCapture {
     private final long sectionNode;
     private final Map<QuadSignature, ArrayDeque<CapturedQuad>> blockQuads = new HashMap<>();
     private final Map<TintKey, Integer> tintColors = new HashMap<>();
+    private final Map<FoliageKey, FoliageSolidifier.Silhouette> foliageSilhouettes =
+            new HashMap<>();
     private final List<SpriteBounds> waterSprites = new ArrayList<>();
 
     SectionMaterialCapture(long sectionNode) {
@@ -63,16 +65,24 @@ final class SectionMaterialCapture {
             colors[corner] = packRgba(ARGB.multiply(quad.bakedColors().color(corner), tint));
         }
         int materialOverride;
+        FoliageSolidifier.Silhouette silhouette = null;
         if (isGlass(state)) {
             materialOverride = SectionGeometrySnapshot.MATERIAL_GLASS;
         } else if (isFoliage(state)) {
             materialOverride = SectionGeometrySnapshot.MATERIAL_FOLIAGE;
+            if (layer == ChunkSectionLayer.CUTOUT && isSolidifiedFoliage(state)) {
+                TextureAtlasSprite sprite = quad.materialInfo().sprite();
+                int frame = LabPbrAnimationFrames.currentImageFrame(sprite);
+                silhouette = foliageSilhouettes.computeIfAbsent(
+                        new FoliageKey(sprite, frame),
+                        ignored -> FoliageSolidifier.capture(sprite, frame));
+            }
         } else {
             materialOverride = SectionGeometrySnapshot.MATERIAL_UNCHANGED;
         }
         blockQuads.computeIfAbsent(
                         signature(layer, x, y, z, quad), ignored -> new ArrayDeque<>())
-                .addLast(new CapturedQuad(colors, materialOverride));
+                .addLast(new CapturedQuad(colors, materialOverride, silhouette));
     }
 
     void captureFluidModel(FluidState state, FluidModel model) {
@@ -100,7 +110,10 @@ final class SectionMaterialCapture {
         if (material == fallbackMaterial && isWaterQuad(layer, vertices, vertexBase)) {
             material = SectionGeometrySnapshot.MATERIAL_WATER;
         }
-        return new DecodedQuad(captured == null ? null : captured.colors(), material);
+        return new DecodedQuad(
+                captured == null ? null : captured.colors(),
+                material,
+                captured == null ? null : captured.silhouette());
     }
 
     private void addWaterSprite(ChunkSectionLayer layer, Material.Baked material) {
@@ -182,6 +195,13 @@ final class SectionMaterialCapture {
                 || state.getBlock() instanceof VineBlock;
     }
 
+    private static boolean isSolidifiedFoliage(BlockState state) {
+        return !state.is(BlockTags.LEAVES)
+                && (state.getBlock() instanceof VegetationBlock
+                || state.getBlock() instanceof GrowingPlantBlock
+                || state.getBlock() instanceof VineBlock);
+    }
+
     private static QuadSignature signature(
             ChunkSectionLayer layer,
             float x,
@@ -238,16 +258,25 @@ final class SectionMaterialCapture {
                 | ARGB.alpha(argb) << 24;
     }
 
-    record DecodedQuad(int[] colors, int materialIndex) {
+    record DecodedQuad(
+            int[] colors,
+            int materialIndex,
+            FoliageSolidifier.Silhouette silhouette) {
     }
 
-    private record CapturedQuad(int[] colors, int materialOverride) {
+    private record CapturedQuad(
+            int[] colors,
+            int materialOverride,
+            FoliageSolidifier.Silhouette silhouette) {
     }
 
     private record QuadSignature(long first, long second) {
     }
 
     private record TintKey(long blockPosition, int tintIndex) {
+    }
+
+    private record FoliageKey(TextureAtlasSprite sprite, int imageFrame) {
     }
 
     private record SpriteBounds(
