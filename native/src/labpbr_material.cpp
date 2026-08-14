@@ -1,4 +1,5 @@
 #include "labpbr_material.h"
+#include "labpbr_height.h"
 #include "labpbr_metals.h"
 #include "labpbr_surface.h"
 
@@ -54,7 +55,6 @@ ccl::unique_ptr<ccl::ShaderGraph> build_material_graph(
         normal_map->set_convention(ccl::NODE_NORMAL_MAP_CONVENTION_DIRECTX);
         normal_map->set_strength(settings.pbr_normal_strength);
         graph->connect(normal_texture->output("Color"), normal_map->input("Color"));
-        graph->connect(normal_map->output("Normal"), principled->input("Normal"));
 
         ccl::ImageTextureNode* material_texture = create_texture_node(
             graph.get(), images[material.material_texture_index], ccl::u_colorspace_data);
@@ -81,6 +81,14 @@ ccl::unique_ptr<ccl::ShaderGraph> build_material_graph(
         auxiliary_channels->set_color_type(ccl::NODE_COMBSEP_COLOR_RGB);
         graph->connect(auxiliary_texture->output("Color"), auxiliary_channels->input("Color"));
 
+        ccl::ShaderOutput* surface_normal = connect_height_bump(
+            graph.get(),
+            auxiliary_channels->output("Green"),
+            normal_map->output("Normal"),
+            settings.pbr_height_strength,
+            settings.pbr_height_distance);
+        graph->connect(surface_normal, principled->input("Normal"));
+
         ccl::VectorMathNode* occluded_albedo = graph->create_node<ccl::VectorMathNode>();
         occluded_albedo->set_math_type(ccl::NODE_VECTOR_MATH_SCALE);
         graph->connect(albedo->output("Vector"), occluded_albedo->input("Vector1"));
@@ -101,7 +109,7 @@ ccl::unique_ptr<ccl::ShaderGraph> build_material_graph(
             graph.get(),
             auxiliary_channels->output("Blue"),
             material_channels->output("Red"),
-            normal_map->output("Normal"),
+            surface_normal,
             surface);
 
         ccl::EmissionNode* emission = graph->create_node<ccl::EmissionNode>();
