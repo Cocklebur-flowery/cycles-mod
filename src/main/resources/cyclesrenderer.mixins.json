@@ -10,9 +10,11 @@
     "MinecraftMixin",
     "SectionCompilerMixin",
     "VulkanBackendMixin",
+    "VulkanCommandEncoderMixin",
     "VulkanGpuSurfaceAccessor",
     "VulkanGpuSurfaceMixin",
-    "VulkanInstanceMixin"
+    "VulkanInstanceMixin",
+    "VulkanRenderPassMixin"
   ],
   "injectors": {
     "defaultRequire": 1

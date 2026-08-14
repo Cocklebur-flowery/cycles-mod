@@ -45,6 +45,8 @@ public final class CyclesRenderPipelines {
             .withFragmentShader(id("core/scrgb_output"))
             .withBindGroupLayout(BindGroupLayouts.IN_SAMPLER)
             .withBindGroupLayout(HDR_OUTPUT_LAYOUT)
+            .withColorTargetState(new ColorTargetState(
+                    Optional.empty(), GpuFormat.RGBA16_FLOAT, ColorTargetState.WRITE_ALL))
             .withPrimitiveTopology(PrimitiveTopology.TRIANGLES)
             .build();
 
