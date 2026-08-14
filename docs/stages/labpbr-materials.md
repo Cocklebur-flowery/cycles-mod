@@ -1,6 +1,6 @@
 # LabPBR 1.3 材质桥（PBR-0）
 
-状态：PBR-0 至 PBR-5 已完成；PBR-6 自动验收已完成，待游戏内视觉验收
+状态：PBR-0 至 PBR-8 已完成；PBR-9 已完成 Bump/POM，真实位移与细分延期；PBR-10 等待原生 ABI 窗口；PBR-11a 与 PBR-12a 已完成
 目标资源包：`run/resourcepacks/SPBR-21.zip`
 目标格式：ShaderLABS LabPBR 1.3
 
@@ -183,22 +183,37 @@ F10 按动态诊断区显示：
 - 切换资源包或执行资源重载后材质更新；
 - 关闭 PBR 后回到现有普通 Cycles 材质。
 
-## 9. 明确延期
+## 9. PBR-7 至 PBR-12 扩展状态
+
+在第一版稳定合约之上，后续阶段按可独立验证、可独立提交的边界扩展：
+
+| 阶段 | 能力 | 当前状态 |
+| --- | --- | --- |
+| PBR-7 | 无损 Auxiliary atlas，保留 AO、高度、原始金属 ID、孔隙度/SSS | 已完成 |
+| PBR-8 | AO、孔隙度/湿润、SSS、预定义金属复折射率 | 已完成 |
+| PBR-9 | Bump、图集安全的 POM、逐 Sprite UV 边界 | Bump/POM 已完成；真实位移与细分延期 |
+| PBR-10 | 玻璃折射与水材质分类、传输闭包 | 等待原生 ABI 与材质分类窗口 |
+| PBR-11 | Base/Normal/Material/Aux 动画帧同步 | 初始帧和资源重载同步已完成；运行时局部图集更新待实现 |
+| PBR-12 | CTM 伴随纹理解析 | 已支持已拼入方块图集的 OptiFine/MCPatcher CTM Sprite；独立 CTM 几何规则延期 |
+
+PBR-11a 直接读取 Minecraft `SpriteContents.AnimationState` 已选中的实际图像帧，四张图集不再各自推算动画时钟。它保证首次构建和资源重载时相位一致。完整的运行时动画仍需要原生局部纹理区域更新；不得通过每帧重建场景来伪造动画。
+
+PBR-12a 只解析已经由 Minecraft 或其他 CTM 模组拼入方块图集的 Sprite，并在 `optifine/ctm`、`mcpatcher/ctm` 以及标准纹理根目录中寻找 `_n`/`_s` 伴随纹理。它不自行实现连接纹理的邻接选择或模型替换。
+
+## 10. 仍明确延期
 
 以下内容不属于本阶段完成标准：
 
-- POM、真实位移或细分；
-- AO 乘色、孔隙度、潮湿、SSS；
-- 预定义金属的精确复折射率；
+- 真实位移或细分；
 - 玻璃折射和水材质；
 - OptiFine CTM 专用几何/纹理解析；
-- 动画 PBR 帧同步；
+- 运行时动画 PBR 局部图集更新；
 - 实体、方块实体、物品和自定义模组渲染器；
 - Distant Horizons PBR；
 - oldPBR 或其他未声明格式；
 - 性能热点、BVH 或线程调度优化。
 
-## 10. PBR-6 自动验收记录
+## 11. PBR-6 自动验收记录
 
 2026-08-12 对当前开发资源包 `run/resourcepacks/SPBR-21.zip` 做了只读检查：
 
