@@ -222,6 +222,7 @@ debug overlay 的 `[ CAMERA AUTOMATION ]` 区域报告：
 
 - JDK 25 `gradlew test`：12 项 AE/AF/投影单元测试通过。
 - 原生 `gradlew buildNative`：ABI 39 组合工作树编译成功。
+- `gradlew -PexperimentalDlss=true buildNative`：DLSS experimental 变体编译成功，AF history-reset 分支已进入编译。
 - native smoke：相机 shift restore 后设置 3.0m AF override，成功得到新 Combined frame；diagnostics 精确返回 3.0m。
 - native smoke 第二次运行：AF 状态清理后七种 panorama 均继续产生帧。
 - `cyclesrenderer_scene_update`：通过。
@@ -232,7 +233,7 @@ debug overlay 的 `[ CAMERA AUTOMATION ]` 区域报告：
 
 - Minecraft 客户端内真实暗室/日光切换视觉验收。
 - 真实 gameplay 下连续近远对焦、流体、单次锁焦和所有全景类型的视觉验收。
-- DLSS experimental 二进制的本阶段重新编译与运行时重建质量检查。
+- DLSS experimental 的运行时重建质量与近远对焦残影检查。
 - GPU 驱动对 `exposure_meter.fsh` 的游戏内实际编译；Gradle resource packaging 已覆盖，但不能替代驱动运行。
 
 ## 8. 手动验收清单
