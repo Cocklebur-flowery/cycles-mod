@@ -51,6 +51,7 @@ public final class LabPbrAtlasBuilder {
             int startY = Math.round(sprite.getV0() * atlasHeight);
             int width = sprite.contents().width();
             int height = sprite.contents().height();
+            int imageFrame = LabPbrAnimationFrames.currentImageFrame(sprite);
 
             DecodeResult normalResult = decodeCompanion(
                     resourceManager,
@@ -59,7 +60,7 @@ public final class LabPbrAtlasBuilder {
                     height,
                     image -> copyNormal(image, normalPixels, auxiliaryPixels,
                             atlasWidth, atlasHeight,
-                            startX, startY, width, height));
+                            startX, startY, width, height, imageFrame));
             decodedNormals += normalResult.decoded() ? 1 : 0;
             sizeMismatches += normalResult.sizeMismatch() ? 1 : 0;
             decodeErrors += normalResult.error() ? 1 : 0;
@@ -71,7 +72,7 @@ public final class LabPbrAtlasBuilder {
                     height,
                     image -> copyMaterial(image, materialPixels, auxiliaryPixels,
                             atlasWidth, atlasHeight,
-                            startX, startY, width, height, fallbackF0));
+                            startX, startY, width, height, imageFrame, fallbackF0));
             decodedSpeculars += specularResult.decoded() ? 1 : 0;
             sizeMismatches += specularResult.sizeMismatch() ? 1 : 0;
             decodeErrors += specularResult.error() ? 1 : 0;
@@ -167,7 +168,10 @@ public final class LabPbrAtlasBuilder {
             int startX,
             int startY,
             int width,
-            int height) {
+            int height,
+            int imageFrame) {
+        int sourceStartX = frameStartX(source, width, height, imageFrame);
+        int sourceStartY = frameStartY(source, width, height, imageFrame);
         for (int y = 0; y < height; y++) {
             int targetY = startY + y;
             if (targetY < 0 || targetY >= atlasHeight) {
@@ -178,7 +182,7 @@ public final class LabPbrAtlasBuilder {
                 if (targetX < 0 || targetX >= atlasWidth) {
                     continue;
                 }
-                int argb = source.getPixel(x, y);
+                int argb = source.getPixel(sourceStartX + x, sourceStartY + y);
                 float normalX = ARGB.red(argb) / 127.5F - 1.0F;
                 float normalY = ARGB.green(argb) / 127.5F - 1.0F;
                 float normalZ = (float) Math.sqrt(Math.max(
@@ -204,7 +208,10 @@ public final class LabPbrAtlasBuilder {
             int startY,
             int width,
             int height,
+            int imageFrame,
             float fallbackF0) {
+        int sourceStartX = frameStartX(source, width, height, imageFrame);
+        int sourceStartY = frameStartY(source, width, height, imageFrame);
         for (int y = 0; y < height; y++) {
             int targetY = startY + y;
             if (targetY < 0 || targetY >= atlasHeight) {
@@ -215,7 +222,7 @@ public final class LabPbrAtlasBuilder {
                 if (targetX < 0 || targetX >= atlasWidth) {
                     continue;
                 }
-                int argb = source.getPixel(x, y);
+                int argb = source.getPixel(sourceStartX + x, sourceStartY + y);
                 int smoothness = ARGB.red(argb);
                 int encodedF0OrMetal = ARGB.green(argb);
                 int emission = ARGB.alpha(argb);
@@ -238,6 +245,28 @@ public final class LabPbrAtlasBuilder {
                 auxiliary[output + 3] = (byte) ARGB.blue(argb);
             }
         }
+    }
+
+    private static int frameStartX(
+            NativeImage image,
+            int frameWidth,
+            int frameHeight,
+            int imageFrame) {
+        int columns = image.getWidth() / frameWidth;
+        int rows = image.getHeight() / frameHeight;
+        int frame = Math.floorMod(imageFrame, Math.multiplyExact(columns, rows));
+        return frame % columns * frameWidth;
+    }
+
+    private static int frameStartY(
+            NativeImage image,
+            int frameWidth,
+            int frameHeight,
+            int imageFrame) {
+        int columns = image.getWidth() / frameWidth;
+        int rows = image.getHeight() / frameHeight;
+        int frame = Math.floorMod(imageFrame, Math.multiplyExact(columns, rows));
+        return frame / columns * frameHeight;
     }
 
     private static int toUnorm8(float value) {

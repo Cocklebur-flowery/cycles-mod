@@ -499,6 +499,7 @@ public final class SectionSceneManager {
             int startY = Math.round(sprite.getV0() * atlasHeight);
             int width = sprite.contents().width();
             int height = sprite.contents().height();
+            int imageFrame = LabPbrAnimationFrames.currentImageFrame(sprite);
             for (int y = 0; y < height; y++) {
                 int targetY = startY + y;
                 if (targetY < 0 || targetY >= atlasHeight) {
@@ -509,7 +510,7 @@ public final class SectionSceneManager {
                     if (targetX < 0 || targetX >= atlasWidth) {
                         continue;
                     }
-                    int argb = sprite.getPixelRGBA(0, x, y);
+                    int argb = sprite.getPixelRGBA(imageFrame, x, y);
                     int output = (targetY * atlasWidth + targetX) * 4;
                     pixels[output] = (byte) ARGB.red(argb);
                     pixels[output + 1] = (byte) ARGB.green(argb);

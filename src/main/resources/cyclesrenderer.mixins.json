@@ -13,6 +13,7 @@
     "PostChainFormatMixin",
     "ScreenshotMixin",
     "SectionCompilerMixin",
+    "SpriteAnimationStateMixin",
     "VulkanBackendMixin",
     "VulkanCommandEncoderMixin",
     "VulkanGpuSurfaceAccessor",
