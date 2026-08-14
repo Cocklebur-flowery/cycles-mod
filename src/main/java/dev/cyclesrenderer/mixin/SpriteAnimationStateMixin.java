@@ -5,18 +5,23 @@ import com.mojang.blaze3d.buffers.GpuBufferSlice;
 import com.mojang.blaze3d.systems.RenderPass;
 import dev.cyclesrenderer.scene.LabPbrAnimationFrames;
 import net.minecraft.client.renderer.texture.SpriteContents;
-import org.spongepowered.asm.mixin.Final;
 import org.spongepowered.asm.mixin.Mixin;
-import org.spongepowered.asm.mixin.Shadow;
+import org.spongepowered.asm.mixin.Unique;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
 @Mixin(SpriteContents.AnimationState.class)
 abstract class SpriteAnimationStateMixin {
-    @Shadow
-    @Final
-    private SpriteContents this$0;
+    @Unique
+    private SpriteContents cyclesrenderer$contents;
+
+    @Inject(method = "<init>", at = @At("RETURN"))
+    private void cyclesrenderer$captureContents(
+            CallbackInfo callback,
+            @Local(argsOnly = true, index = 1) SpriteContents contents) {
+        cyclesrenderer$contents = contents;
+    }
 
     @Inject(
             method = "drawToAtlas",
@@ -28,6 +33,6 @@ abstract class SpriteAnimationStateMixin {
             GpuBufferSlice spriteUbo,
             CallbackInfo callback,
             @Local(ordinal = 0) int imageFrame) {
-        LabPbrAnimationFrames.record(this$0, imageFrame);
+        LabPbrAnimationFrames.record(cyclesrenderer$contents, imageFrame);
     }
 }
