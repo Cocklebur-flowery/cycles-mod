@@ -18,9 +18,9 @@ struct CyclesBridgeRenderer {
 
 namespace {
 
-constexpr std::uint32_t kAbiVersion = 36;
+constexpr std::uint32_t kAbiVersion = 37;
 constexpr std::uint32_t kStructVersion = 1;
-constexpr char kBuildInfo[] = "cyclesrenderer-native/cycles-5.2;abi=36";
+constexpr char kBuildInfo[] = "cyclesrenderer-native/cycles-5.2;abi=37";
 
 static_assert(sizeof(CyclesBridgeCamera) == 80);
 static_assert(offsetof(CyclesBridgeCamera, frame_id) == 8);
@@ -76,6 +76,7 @@ static_assert(sizeof(CyclesBridgeMaterial) == 32);
 static_assert(offsetof(CyclesBridgeMaterial, normal_texture_index) == 16);
 static_assert(offsetof(CyclesBridgeMaterial, material_texture_index) == 20);
 static_assert(offsetof(CyclesBridgeMaterial, pbr_format) == 24);
+static_assert(offsetof(CyclesBridgeMaterial, auxiliary_texture_index) == 28);
 static_assert(sizeof(CyclesBridgeTexture) == 32);
 static_assert(offsetof(CyclesBridgeTexture, role) == 16);
 
@@ -146,11 +147,13 @@ bool valid_scene_data(
             || (!no_pbr && !lab_pbr)
             || (no_pbr
                 && (material.normal_texture_index != CYCLES_BRIDGE_TEXTURE_INDEX_INVALID
-                    || material.material_texture_index != CYCLES_BRIDGE_TEXTURE_INDEX_INVALID))
+                    || material.material_texture_index != CYCLES_BRIDGE_TEXTURE_INDEX_INVALID
+                    || material.auxiliary_texture_index
+                        != CYCLES_BRIDGE_TEXTURE_INDEX_INVALID))
             || (lab_pbr
                 && (material.normal_texture_index >= scene.texture_count
-                    || material.material_texture_index >= scene.texture_count))
-            || material.reserved != 0U) {
+                    || material.material_texture_index >= scene.texture_count
+                    || material.auxiliary_texture_index >= scene.texture_count))) {
             return false;
         }
     }
@@ -176,6 +179,8 @@ bool valid_scene_data(
                 && (textures[material.normal_texture_index].role
                         != CYCLES_BRIDGE_TEXTURE_DATA_LINEAR
                     || textures[material.material_texture_index].role
+                        != CYCLES_BRIDGE_TEXTURE_DATA_LINEAR
+                    || textures[material.auxiliary_texture_index].role
                         != CYCLES_BRIDGE_TEXTURE_DATA_LINEAR))) {
             return false;
         }

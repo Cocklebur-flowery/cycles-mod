@@ -52,7 +52,8 @@ public record SectionGeometrySnapshot(
             float alphaCutoff,
             int normalTextureIndex,
             int materialTextureIndex,
-            int pbrFormat) {
+            int pbrFormat,
+            int auxiliaryTextureIndex) {
     }
 
     public record TextureData(

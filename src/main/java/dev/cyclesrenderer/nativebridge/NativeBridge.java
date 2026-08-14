@@ -24,7 +24,7 @@ import static java.lang.foreign.ValueLayout.JAVA_INT;
 import static java.lang.foreign.ValueLayout.JAVA_LONG;
 
 public final class NativeBridge {
-    public static final int ABI_VERSION = 36;
+    public static final int ABI_VERSION = 37;
     public static final int DEVICE_UPDATE_PHASE_COUNT = 8;
     public static final int PIXEL_FORMAT_RGBA16_FLOAT = 2;
     public static final int PIXEL_FORMAT_RGBA32_FLOAT = 3;
@@ -426,7 +426,7 @@ public final class NativeBridge {
             JAVA_INT.withName("normal_texture_index"),
             JAVA_INT.withName("material_texture_index"),
             JAVA_INT.withName("pbr_format"),
-            JAVA_INT.withName("reserved"));
+            JAVA_INT.withName("auxiliary_texture_index"));
     private static final MemoryLayout TEXTURE_LAYOUT = MemoryLayout.structLayout(
             JAVA_INT.withName("width"),
             JAVA_INT.withName("height"),
@@ -1752,6 +1752,8 @@ public final class NativeBridge {
                     if (material.normalTextureIndex()
                                     != SectionGeometrySnapshot.TEXTURE_INDEX_INVALID
                             || material.materialTextureIndex()
+                                    != SectionGeometrySnapshot.TEXTURE_INDEX_INVALID
+                            || material.auxiliaryTextureIndex()
                                     != SectionGeometrySnapshot.TEXTURE_INDEX_INVALID) {
                         throw new IllegalArgumentException(
                                 "non-PBR material references PBR data textures");
@@ -1762,6 +1764,8 @@ public final class NativeBridge {
                             SectionGeometrySnapshot.TEXTURE_ROLE_DATA_LINEAR, "normal");
                     validateTextureIndex(resources, material.materialTextureIndex(),
                             SectionGeometrySnapshot.TEXTURE_ROLE_DATA_LINEAR, "material data");
+                    validateTextureIndex(resources, material.auxiliaryTextureIndex(),
+                            SectionGeometrySnapshot.TEXTURE_ROLE_DATA_LINEAR, "LabPBR auxiliary");
                 } else {
                     throw new IllegalArgumentException(
                             "unsupported PBR format " + material.pbrFormat());
@@ -1799,6 +1803,7 @@ public final class NativeBridge {
                 output.set(JAVA_INT, base + 16L, material.normalTextureIndex());
                 output.set(JAVA_INT, base + 20L, material.materialTextureIndex());
                 output.set(JAVA_INT, base + 24L, material.pbrFormat());
+                output.set(JAVA_INT, base + 28L, material.auxiliaryTextureIndex());
             }
             return output;
         }

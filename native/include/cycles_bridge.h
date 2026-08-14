@@ -682,7 +682,7 @@ struct CyclesBridgeMaterial {
     std::uint32_t normal_texture_index;
     std::uint32_t material_texture_index;
     std::uint32_t pbr_format;
-    std::uint32_t reserved;
+    std::uint32_t auxiliary_texture_index;
 };
 
 struct CyclesBridgeTexture {

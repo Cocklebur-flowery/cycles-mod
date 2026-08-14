@@ -236,7 +236,7 @@ bool run_scene_update_integration_test() {
          CYCLES_BRIDGE_TEXTURE_INDEX_INVALID,
          CYCLES_BRIDGE_TEXTURE_INDEX_INVALID,
          CYCLES_BRIDGE_PBR_NONE,
-         0U},
+         CYCLES_BRIDGE_TEXTURE_INDEX_INVALID},
     }};
     const std::array<std::uint8_t, 4> texture_pixels = {{255U, 255U, 255U, 255U}};
     const std::array<CyclesBridgeTexture, 1> textures = {{

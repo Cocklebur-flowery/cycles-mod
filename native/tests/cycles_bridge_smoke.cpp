@@ -494,7 +494,7 @@ bool verify_progressive_sampling(
 int main(int argc, char** argv) {
     const bool require_optix = argc > 1 && std::strcmp(argv[1], "--require-optix") == 0;
     std::cerr << "[smoke] ABI check\n";
-    if (cycles_bridge_abi_version() != 36U) {
+    if (cycles_bridge_abi_version() != 37U) {
         std::cerr << "unexpected native ABI " << cycles_bridge_abi_version() << '\n';
         return 1;
     }
@@ -992,9 +992,9 @@ int main(int argc, char** argv) {
          1U,
          2U,
          CYCLES_BRIDGE_PBR_LAB_1_3,
-         0U},
+         3U},
     }};
-    const std::array<std::uint8_t, 48> texture_pixels = {{
+    const std::array<std::uint8_t, 64> texture_pixels = {{
         255U, 64U, 32U, 255U,
         32U, 255U, 64U, 255U,
         32U, 64U, 255U, 255U,
@@ -1007,8 +1007,12 @@ int main(int argc, char** argv) {
         128U, 0U, 10U, 0U,
         64U, 255U, 10U, 0U,
         204U, 0U, 10U, 0U,
+        255U, 128U, 10U, 0U,
+        255U, 128U, 230U, 32U,
+        192U, 192U, 231U, 96U,
+        128U, 64U, 10U, 160U,
     }};
-    const std::array<CyclesBridgeTexture, 3> textures = {{
+    const std::array<CyclesBridgeTexture, 4> textures = {{
         {2U,
          2U,
          0U,
@@ -1017,6 +1021,7 @@ int main(int argc, char** argv) {
          {0U, 0U, 0U}},
         {2U, 2U, 16U, 16U, CYCLES_BRIDGE_TEXTURE_DATA_LINEAR, {0U, 0U, 0U}},
         {2U, 2U, 32U, 16U, CYCLES_BRIDGE_TEXTURE_DATA_LINEAR, {0U, 0U, 0U}},
+        {2U, 2U, 48U, 16U, CYCLES_BRIDGE_TEXTURE_DATA_LINEAR, {0U, 0U, 0U}},
     }};
     CyclesBridgeSceneResources resources{};
     resources.struct_size = sizeof(resources);
@@ -1033,6 +1038,18 @@ int main(int argc, char** argv) {
             textures.data(),
             texture_pixels.data()) != CYCLES_BRIDGE_STATUS_INVALID_ARGUMENT) {
         std::cerr << "LabPBR material with missing data texture indexes was accepted\n";
+        cycles_bridge_destroy_renderer(renderer);
+        return 1;
+    }
+    invalid_materials = materials;
+    invalid_materials[0].auxiliary_texture_index = CYCLES_BRIDGE_TEXTURE_INDEX_INVALID;
+    if (cycles_bridge_reset_scene(
+            renderer,
+            &resources,
+            invalid_materials.data(),
+            textures.data(),
+            texture_pixels.data()) != CYCLES_BRIDGE_STATUS_INVALID_ARGUMENT) {
+        std::cerr << "LabPBR material with missing auxiliary texture was accepted\n";
         cycles_bridge_destroy_renderer(renderer);
         return 1;
     }

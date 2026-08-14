@@ -527,13 +527,17 @@ public final class SectionSceneManager {
         int materialTextureIndex = hasPbrAtlases
                 ? 2
                 : SectionGeometrySnapshot.TEXTURE_INDEX_INVALID;
+        int auxiliaryTextureIndex = hasPbrAtlases
+                ? 3
+                : SectionGeometrySnapshot.TEXTURE_INDEX_INVALID;
         int pbrFormat = hasPbrAtlases
                 ? SectionGeometrySnapshot.PBR_FORMAT_LAB_1_3
                 : SectionGeometrySnapshot.PBR_FORMAT_NONE;
         SectionGeometrySnapshot.MaterialData[] materials = {
                 new SectionGeometrySnapshot.MaterialData(
                         0, 0, 0.0F, 0.0F,
-                        normalTextureIndex, materialTextureIndex, pbrFormat),
+                        normalTextureIndex, materialTextureIndex, pbrFormat,
+                        auxiliaryTextureIndex),
                 new SectionGeometrySnapshot.MaterialData(
                         0,
                         SectionGeometrySnapshot.MATERIAL_FLAG_CUTOUT,
@@ -541,7 +545,8 @@ public final class SectionSceneManager {
                         0.5F,
                         normalTextureIndex,
                         materialTextureIndex,
-                        pbrFormat),
+                        pbrFormat,
+                        auxiliaryTextureIndex),
                 new SectionGeometrySnapshot.MaterialData(
                         0,
                         SectionGeometrySnapshot.MATERIAL_FLAG_BLEND,
@@ -549,7 +554,8 @@ public final class SectionSceneManager {
                         0.0F,
                         normalTextureIndex,
                         materialTextureIndex,
-                        pbrFormat)
+                        pbrFormat,
+                        auxiliaryTextureIndex)
         };
         SectionGeometrySnapshot.TextureData[] textures = hasPbrAtlases
                 ? new SectionGeometrySnapshot.TextureData[] {
@@ -572,6 +578,13 @@ public final class SectionSceneManager {
                             atlasWidth,
                             atlasHeight,
                             pbrAtlases.materialPixels(),
+                            SectionGeometrySnapshot.TEXTURE_ROLE_DATA_LINEAR),
+                    new SectionGeometrySnapshot.TextureData(
+                            Identifier.fromNamespaceAndPath(
+                                    "cyclesrenderer", "blocks_labpbr_auxiliary"),
+                            atlasWidth,
+                            atlasHeight,
+                            pbrAtlases.auxiliaryPixels(),
                             SectionGeometrySnapshot.TEXTURE_ROLE_DATA_LINEAR)
                 }
                 : new SectionGeometrySnapshot.TextureData[] {

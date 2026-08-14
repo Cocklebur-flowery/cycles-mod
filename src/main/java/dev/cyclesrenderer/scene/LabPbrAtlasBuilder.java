@@ -33,7 +33,9 @@ public final class LabPbrAtlasBuilder {
         int byteCount = Math.multiplyExact(Math.multiplyExact(atlasWidth, atlasHeight), 4);
         byte[] normalPixels = new byte[byteCount];
         byte[] materialPixels = new byte[byteCount];
-        fillDefaults(normalPixels, materialPixels, fallbackRoughness, fallbackF0);
+        byte[] auxiliaryPixels = new byte[byteCount];
+        fillDefaults(normalPixels, materialPixels, auxiliaryPixels,
+                fallbackRoughness, fallbackF0);
 
         int decodedNormals = 0;
         int decodedSpeculars = 0;
@@ -55,7 +57,8 @@ public final class LabPbrAtlasBuilder {
                     companionSet.normal(),
                     width,
                     height,
-                    image -> copyNormal(image, normalPixels, atlasWidth, atlasHeight,
+                    image -> copyNormal(image, normalPixels, auxiliaryPixels,
+                            atlasWidth, atlasHeight,
                             startX, startY, width, height));
             decodedNormals += normalResult.decoded() ? 1 : 0;
             sizeMismatches += normalResult.sizeMismatch() ? 1 : 0;
@@ -66,7 +69,8 @@ public final class LabPbrAtlasBuilder {
                     companionSet.specular(),
                     width,
                     height,
-                    image -> copyMaterial(image, materialPixels, atlasWidth, atlasHeight,
+                    image -> copyMaterial(image, materialPixels, auxiliaryPixels,
+                            atlasWidth, atlasHeight,
                             startX, startY, width, height, fallbackF0));
             decodedSpeculars += specularResult.decoded() ? 1 : 0;
             sizeMismatches += specularResult.sizeMismatch() ? 1 : 0;
@@ -78,6 +82,7 @@ public final class LabPbrAtlasBuilder {
                 atlasHeight,
                 normalPixels,
                 materialPixels,
+                auxiliaryPixels,
                 decodedNormals,
                 decodedSpeculars,
                 sizeMismatches,
@@ -85,12 +90,14 @@ public final class LabPbrAtlasBuilder {
     }
 
     public static Atlases empty() {
-        return new Atlases(0, 0, new byte[0], new byte[0], 0, 0, 0, 0);
+        return new Atlases(0, 0, new byte[0], new byte[0], new byte[0],
+                0, 0, 0, 0);
     }
 
     private static void fillDefaults(
             byte[] normalPixels,
             byte[] materialPixels,
+            byte[] auxiliaryPixels,
             float fallbackRoughness,
             float fallbackF0) {
         int roughness = toUnorm8(fallbackRoughness);
@@ -104,6 +111,12 @@ public final class LabPbrAtlasBuilder {
             materialPixels[offset + 1] = 0;
             materialPixels[offset + 2] = (byte) f0;
             materialPixels[offset + 3] = 0;
+            // R=material AO, G=height, B=raw LabPBR F0/metal id,
+            // A=raw porosity/SSS. Defaults are neutral and reversible.
+            auxiliaryPixels[offset] = (byte) 255;
+            auxiliaryPixels[offset + 1] = (byte) 128;
+            auxiliaryPixels[offset + 2] = (byte) f0;
+            auxiliaryPixels[offset + 3] = 0;
         }
     }
 
@@ -148,6 +161,7 @@ public final class LabPbrAtlasBuilder {
     private static void copyNormal(
             NativeImage source,
             byte[] target,
+            byte[] auxiliary,
             int atlasWidth,
             int atlasHeight,
             int startX,
@@ -174,6 +188,8 @@ public final class LabPbrAtlasBuilder {
                 target[output + 1] = (byte) ARGB.green(argb);
                 target[output + 2] = (byte) toUnorm8(normalZ);
                 target[output + 3] = (byte) ARGB.alpha(argb);
+                auxiliary[output] = (byte) ARGB.blue(argb);
+                auxiliary[output + 1] = (byte) ARGB.alpha(argb);
             }
         }
     }
@@ -181,6 +197,7 @@ public final class LabPbrAtlasBuilder {
     private static void copyMaterial(
             NativeImage source,
             byte[] target,
+            byte[] auxiliary,
             int atlasWidth,
             int atlasHeight,
             int startX,
@@ -217,6 +234,8 @@ public final class LabPbrAtlasBuilder {
                 target[output + 3] = (byte) (emission == 255
                         ? 0
                         : Math.round(emission * 255.0F / 254.0F));
+                auxiliary[output + 2] = (byte) encodedF0OrMetal;
+                auxiliary[output + 3] = (byte) ARGB.blue(argb);
             }
         }
     }
@@ -242,12 +261,14 @@ public final class LabPbrAtlasBuilder {
             int height,
             byte[] normalPixels,
             byte[] materialPixels,
+            byte[] auxiliaryPixels,
             int decodedNormals,
             int decodedSpeculars,
             int sizeMismatches,
             int decodeErrors) {
         public long byteSize() {
-            return (long) normalPixels.length + materialPixels.length;
+            return (long) normalPixels.length + materialPixels.length
+                    + auxiliaryPixels.length;
         }
     }
 }
