@@ -57,9 +57,29 @@ ccl::unique_ptr<ccl::ShaderGraph> build_material_graph(
     const bool transmissive =
         (material.flags & CYCLES_BRIDGE_MATERIAL_TRANSMISSION) != 0U;
     const bool water = (material.flags & CYCLES_BRIDGE_MATERIAL_WATER) != 0U;
+    const bool foliage = (material.flags & CYCLES_BRIDGE_MATERIAL_FOLIAGE) != 0U;
     ccl::PrincipledBsdfNode* principled = graph->create_node<ccl::PrincipledBsdfNode>();
-    principled->set_roughness(transmissive ? (water ? 0.05F : 0.15F) : 0.8F);
-    if (transmissive) {
+    principled->set_roughness(
+        transmissive ? (water ? 0.05F : 0.15F) : (foliage ? 0.501F : 0.8F));
+    if (foliage) {
+        principled->set_ior(1.45F);
+        principled->set_thin_wall(true);
+        principled->set_diffuse_roughness(0.247F);
+        principled->set_subsurface_weight(1.0F);
+        principled->set_subsurface_radius(ccl::make_float3(1.0F));
+        principled->set_subsurface_scale(0.2F);
+        principled->set_subsurface_anisotropy(0.357F);
+        principled->set_specular_ior_level(0.5F);
+        principled->set_transmission_weight(0.229F);
+        principled->set_sheen_weight(1.0F);
+        principled->set_sheen_roughness(0.5F);
+        principled->set_coat_weight(0.075F);
+        principled->set_coat_roughness(0.03F);
+        principled->set_coat_ior(1.5F);
+        graph->connect(albedo->output("Vector"), principled->input("Specular Tint"));
+        graph->connect(albedo->output("Vector"), principled->input("Sheen Tint"));
+        graph->connect(albedo->output("Vector"), principled->input("Coat Tint"));
+    } else if (transmissive) {
         principled->set_transmission_weight(1.0F);
         principled->set_ior(water ? 1.333F : 1.5F);
         principled->set_thin_wall(water);
@@ -107,7 +127,7 @@ ccl::unique_ptr<ccl::ShaderGraph> build_material_graph(
             settings.pbr_height_distance);
         graph->connect(surface_normal, principled->input("Normal"));
 
-        if (transmissive) {
+        if (transmissive || foliage) {
             graph->connect(albedo->output("Vector"), principled->input("Base Color"));
         } else {
             ccl::MathNode* f0_to_specular = graph->create_node<ccl::MathNode>();
