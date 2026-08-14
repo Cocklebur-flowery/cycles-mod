@@ -19,6 +19,7 @@ import java.util.Objects;
 import java.util.Optional;
 
 public final class CyclesFramePresenter {
+    private final AutomaticExposureStage automaticExposure = new AutomaticExposureStage();
     private TextureTarget nativeFrameTarget;
     private boolean ready;
     private long uploadCount;
@@ -47,6 +48,7 @@ public final class CyclesFramePresenter {
             .order(ByteOrder.nativeOrder());
     private long displaySettingsRevision = Long.MIN_VALUE;
     private int displayDepthFarBits;
+    private int displayExposureBits;
 
     public void update(NativeBridge.AcquiredFrame frame) {
         RenderSystem.assertOnRenderThread();
@@ -155,8 +157,9 @@ public final class CyclesFramePresenter {
                 settings.workingSpace());
         performanceProbe.endDisplayStage(
                 DisplayPerformanceProbe.Stage.COLOR_LUT, stageStart);
+        float effectiveExposureEv = automaticExposure.update(source, settings, System.nanoTime());
         stageStart = performanceProbe.beginDisplayStage();
-        updateDisplayUniforms(settings, outputDisplay, depthFar);
+        updateDisplayUniforms(settings, outputDisplay, depthFar, effectiveExposureEv);
         performanceProbe.endDisplayStage(
                 DisplayPerformanceProbe.Stage.UNIFORMS, stageStart);
         stageStart = performanceProbe.beginDisplayStage();
@@ -231,6 +234,8 @@ public final class CyclesFramePresenter {
         colorLutDescriptor = null;
         displaySettingsRevision = Long.MIN_VALUE;
         displayDepthFarBits = 0;
+        displayExposureBits = 0;
+        automaticExposure.reset();
         if (nativeFrameTarget != null) {
             nativeFrameTarget.destroyBuffers();
             nativeFrameTarget = null;
@@ -403,11 +408,14 @@ public final class CyclesFramePresenter {
     private void updateDisplayUniforms(
             CyclesRenderSettings settings,
             CyclesRenderSettings.DisplayDevice outputDisplay,
-            float depthFar) {
+            float depthFar,
+            float effectiveExposureEv) {
         int depthBits = Float.floatToIntBits(depthFar);
+        int exposureBits = Float.floatToIntBits(effectiveExposureEv);
         if (displayUniformBuffer != null
                 && displaySettingsRevision == settings.revision()
-                && displayDepthFarBits == depthBits) {
+                && displayDepthFarBits == depthBits
+                && displayExposureBits == exposureBits) {
             return;
         }
         if (displayUniformBuffer == null) {
@@ -417,7 +425,7 @@ public final class CyclesFramePresenter {
                     96L);
         }
         displayUniformData.clear();
-        displayUniformData.putFloat((float) Math.pow(2.0, settings.exposureEv()));
+        displayUniformData.putFloat((float) Math.pow(2.0, effectiveExposureEv));
         displayUniformData.putFloat(1.0F / settings.gamma());
         displayUniformData.putFloat(Math.max(depthFar, 1.0F));
         displayUniformData.putFloat(Math.max(settings.stillSamples(), 1));
@@ -458,6 +466,7 @@ public final class CyclesFramePresenter {
                 displayUniformData);
         displaySettingsRevision = settings.revision();
         displayDepthFarBits = depthBits;
+        displayExposureBits = exposureBits;
     }
 
     private static CyclesRenderSettings.DisplayDevice outputDisplay(

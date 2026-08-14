@@ -1,7 +1,9 @@
 package dev.cyclesrenderer.render;
 
+import com.mojang.blaze3d.GpuFormat;
 import com.mojang.blaze3d.PrimitiveTopology;
 import com.mojang.blaze3d.pipeline.BindGroupLayout;
+import com.mojang.blaze3d.pipeline.ColorTargetState;
 import com.mojang.blaze3d.pipeline.RenderPipeline;
 import com.mojang.blaze3d.shaders.UniformType;
 import dev.cyclesrenderer.CyclesRendererMod;
@@ -9,6 +11,8 @@ import net.minecraft.client.renderer.BindGroupLayouts;
 import net.minecraft.client.renderer.RenderPipelines;
 import net.minecraft.resources.Identifier;
 import net.neoforged.neoforge.client.event.RegisterRenderPipelinesEvent;
+
+import java.util.Optional;
 
 public final class CyclesRenderPipelines {
     public static final String DISPLAY_UNIFORM = "CyclesDisplay";
@@ -44,12 +48,24 @@ public final class CyclesRenderPipelines {
             .withPrimitiveTopology(PrimitiveTopology.TRIANGLES)
             .build();
 
+    public static final RenderPipeline EXPOSURE_METER = RenderPipeline.builder(
+                    RenderPipelines.GLOBALS_SNIPPET)
+            .withLocation(id("pipeline/exposure_meter"))
+            .withVertexShader(id("core/screenquad"))
+            .withFragmentShader(id("core/exposure_meter"))
+            .withBindGroupLayout(BindGroupLayouts.IN_SAMPLER)
+            .withColorTargetState(new ColorTargetState(
+                    Optional.empty(), GpuFormat.RGBA16_FLOAT, ColorTargetState.WRITE_ALL))
+            .withPrimitiveTopology(PrimitiveTopology.TRIANGLES)
+            .build();
+
     private CyclesRenderPipelines() {
     }
 
     public static void register(RegisterRenderPipelinesEvent event) {
         event.registerPipeline(PRESENT);
         event.registerPipeline(SCRGB_OUTPUT);
+        event.registerPipeline(EXPOSURE_METER);
     }
 
     private static Identifier id(String path) {
