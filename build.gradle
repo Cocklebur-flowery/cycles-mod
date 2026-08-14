@@ -156,6 +156,13 @@ dependencies {
     // For more info:
     // http://www.gradle.org/docs/current/userguide/artifact_dependencies_tutorial.html
     // http://www.gradle.org/docs/current/userguide/dependency_management.html
+
+    testImplementation 'org.junit.jupiter:junit-jupiter:5.14.2'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher:1.14.2'
+}
+
+tasks.named('test', Test).configure {
+    useJUnitPlatform()
 }
 
 tasks.register('configureNative', Exec) {
