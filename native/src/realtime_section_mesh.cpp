@@ -1,4 +1,5 @@
 #include "realtime_section_mesh.h"
+#include "labpbr_attributes.h"
 
 #include <algorithm>
 #include <cmath>
@@ -114,13 +115,19 @@ void write_slot_contents(
     ccl::Attribute* normal_attribute = mesh->attributes.add(ccl::ATTR_STD_VERTEX_NORMAL);
     ccl::Attribute* uv_attribute = mesh->attributes.add(ccl::ATTR_STD_UV);
     ccl::Attribute* color_attribute = mesh->attributes.add(ccl::ATTR_STD_VERTEX_COLOR);
+    ccl::Attribute* uv_bounds_attribute = mesh->attributes.add(
+        ccl::ustring(labpbr::kUvBoundsAttribute),
+        ccl::TypeRGBA,
+        ccl::ATTR_ELEMENT_CORNER);
     normal_attribute->modified = true;
     uv_attribute->modified = true;
     color_attribute->modified = true;
+    uv_bounds_attribute->modified = true;
     ccl::packed_normal* normals =
         normal_attribute->data_for_write<ccl::packed_normal>();
     ccl::float2* uvs = uv_attribute->data_for_write<ccl::float2>();
     ccl::uchar4* colors = color_attribute->data_for_write<ccl::uchar4>();
+    ccl::float4* uv_bounds = uv_bounds_attribute->data_for_write<ccl::float4>();
 
     const std::size_t active_triangles = section == nullptr
         ? 0U : section->triangles.size();
@@ -139,6 +146,19 @@ void write_slot_contents(
                 source_triangle.vertex_1,
                 source_triangle.vertex_2,
             };
+            float minimum_u = std::numeric_limits<float>::max();
+            float minimum_v = std::numeric_limits<float>::max();
+            float maximum_u = std::numeric_limits<float>::lowest();
+            float maximum_v = std::numeric_limits<float>::lowest();
+            for (std::size_t corner = 0; corner < 3U; ++corner) {
+                const CyclesBridgeVertex& vertex = section->vertices[indices[corner]];
+                minimum_u = std::min(minimum_u, vertex.texture_u);
+                minimum_v = std::min(minimum_v, vertex.texture_v);
+                maximum_u = std::max(maximum_u, vertex.texture_u);
+                maximum_v = std::max(maximum_v, vertex.texture_v);
+            }
+            const ccl::float4 triangle_uv_bounds = ccl::make_float4(
+                minimum_u, minimum_v, maximum_u, maximum_v);
             for (std::size_t corner = 0; corner < 3U; ++corner) {
                 write_vertex(
                     positions,
@@ -149,6 +169,7 @@ void write_slot_contents(
                     section->vertices[indices[corner]],
                     section_offset,
                     rec709_to_working);
+                uv_bounds[output_vertex + corner] = triangle_uv_bounds;
             }
             triangle_shaders[triangle] = static_cast<int>(
                 source_triangle.material_index);
@@ -156,6 +177,7 @@ void write_slot_contents(
             for (std::size_t corner = 0; corner < 3U; ++corner) {
                 write_degenerate_vertex(
                     positions, normals, uvs, colors, output_vertex + corner);
+                uv_bounds[output_vertex + corner] = ccl::zero_float4();
             }
             triangle_shaders[triangle] = 0;
         }
