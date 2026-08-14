@@ -54,8 +54,16 @@ ccl::unique_ptr<ccl::ShaderGraph> build_material_graph(
     graph->connect(texture->output("Color"), albedo->input("Vector1"));
     graph->connect(vertex_color->output("Color"), albedo->input("Vector2"));
 
+    const bool transmissive =
+        (material.flags & CYCLES_BRIDGE_MATERIAL_TRANSMISSION) != 0U;
+    const bool water = (material.flags & CYCLES_BRIDGE_MATERIAL_WATER) != 0U;
     ccl::PrincipledBsdfNode* principled = graph->create_node<ccl::PrincipledBsdfNode>();
-    principled->set_roughness(0.8F);
+    principled->set_roughness(transmissive ? (water ? 0.05F : 0.15F) : 0.8F);
+    if (transmissive) {
+        principled->set_transmission_weight(1.0F);
+        principled->set_ior(water ? 1.333F : 1.5F);
+        principled->set_thin_wall(water);
+    }
     ccl::ShaderOutput* surface = principled->output("BSDF");
 
     if (material.pbr_format == CYCLES_BRIDGE_PBR_LAB_1_3) {
@@ -78,12 +86,9 @@ ccl::unique_ptr<ccl::ShaderGraph> build_material_graph(
         material_channels->set_color_type(ccl::NODE_COMBSEP_COLOR_RGB);
         graph->connect(material_texture->output("Color"), material_channels->input("Color"));
         graph->connect(material_channels->output("Red"), principled->input("Roughness"));
-        graph->connect(material_channels->output("Green"), principled->input("Metallic"));
-
-        ccl::MathNode* f0_to_specular = graph->create_node<ccl::MathNode>();
-        f0_to_specular->set_math_type(ccl::NODE_MATH_MULTIPLY);
-        f0_to_specular->set_value2(12.5F);
-        graph->connect(material_channels->output("Blue"), f0_to_specular->input("Value1"));
+        if (!transmissive) {
+            graph->connect(material_channels->output("Green"), principled->input("Metallic"));
+        }
 
         ccl::ImageTextureNode* auxiliary_texture = create_texture_node(
             graph.get(), images[material.auxiliary_texture_index], ccl::u_colorspace_data);
@@ -102,28 +107,37 @@ ccl::unique_ptr<ccl::ShaderGraph> build_material_graph(
             settings.pbr_height_distance);
         graph->connect(surface_normal, principled->input("Normal"));
 
-        ccl::VectorMathNode* occluded_albedo = graph->create_node<ccl::VectorMathNode>();
-        occluded_albedo->set_math_type(ccl::NODE_VECTOR_MATH_SCALE);
-        graph->connect(albedo->output("Vector"), occluded_albedo->input("Vector1"));
-        graph->connect(auxiliary_channels->output("Red"), occluded_albedo->input("Scale"));
-        const SurfaceInputs surface_inputs = apply_porosity_wetness(
-            graph.get(),
-            auxiliary_texture->output("Alpha"),
-            occluded_albedo->output("Vector"),
-            f0_to_specular->output("Value"),
-            settings.pbr_wetness);
-        graph->connect(surface_inputs.albedo, principled->input("Base Color"));
-        graph->connect(surface_inputs.specular, principled->input("Specular IOR Level"));
-        connect_subsurface(
-            graph.get(), auxiliary_texture->output("Alpha"), principled,
-            settings.pbr_subsurface_scale);
+        if (transmissive) {
+            graph->connect(albedo->output("Vector"), principled->input("Base Color"));
+        } else {
+            ccl::MathNode* f0_to_specular = graph->create_node<ccl::MathNode>();
+            f0_to_specular->set_math_type(ccl::NODE_MATH_MULTIPLY);
+            f0_to_specular->set_value2(12.5F);
+            graph->connect(material_channels->output("Blue"), f0_to_specular->input("Value1"));
 
-        surface = apply_exact_metal_closures(
-            graph.get(),
-            auxiliary_channels->output("Blue"),
-            material_channels->output("Red"),
-            surface_normal,
-            surface);
+            ccl::VectorMathNode* occluded_albedo = graph->create_node<ccl::VectorMathNode>();
+            occluded_albedo->set_math_type(ccl::NODE_VECTOR_MATH_SCALE);
+            graph->connect(albedo->output("Vector"), occluded_albedo->input("Vector1"));
+            graph->connect(auxiliary_channels->output("Red"), occluded_albedo->input("Scale"));
+            const SurfaceInputs surface_inputs = apply_porosity_wetness(
+                graph.get(),
+                auxiliary_texture->output("Alpha"),
+                occluded_albedo->output("Vector"),
+                f0_to_specular->output("Value"),
+                settings.pbr_wetness);
+            graph->connect(surface_inputs.albedo, principled->input("Base Color"));
+            graph->connect(surface_inputs.specular, principled->input("Specular IOR Level"));
+            connect_subsurface(
+                graph.get(), auxiliary_texture->output("Alpha"), principled,
+                settings.pbr_subsurface_scale);
+
+            surface = apply_exact_metal_closures(
+                graph.get(),
+                auxiliary_channels->output("Blue"),
+                material_channels->output("Red"),
+                surface_normal,
+                surface);
+        }
 
         ccl::EmissionNode* emission = graph->create_node<ccl::EmissionNode>();
         graph->connect(albedo->output("Vector"), emission->input("Color"));

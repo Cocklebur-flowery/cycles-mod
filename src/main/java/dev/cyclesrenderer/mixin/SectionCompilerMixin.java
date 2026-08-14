@@ -5,6 +5,8 @@ import net.minecraft.client.renderer.SectionBufferBuilderPack;
 import net.minecraft.client.color.block.BlockColors;
 import net.minecraft.client.renderer.block.BlockAndTintGetter;
 import net.minecraft.client.renderer.block.BlockQuadOutput;
+import net.minecraft.client.renderer.block.FluidModel;
+import net.minecraft.client.renderer.block.FluidStateModelSet;
 import net.minecraft.client.renderer.block.ModelBlockRenderer;
 import net.minecraft.client.renderer.block.dispatch.BlockStateModel;
 import net.minecraft.client.renderer.chunk.ChunkSectionLayer;
@@ -13,6 +15,7 @@ import net.minecraft.client.renderer.chunk.SectionCompiler;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.SectionPos;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.material.FluidState;
 import com.mojang.blaze3d.vertex.VertexSorting;
 import net.neoforged.neoforge.client.event.AddSectionGeometryEvent;
 import org.spongepowered.asm.mixin.Mixin;
@@ -90,6 +93,19 @@ abstract class SectionCompilerMixin {
                 state,
                 model,
                 seed);
+    }
+
+    @Redirect(
+            method = "compile(Lnet/minecraft/core/SectionPos;Lnet/minecraft/client/renderer/chunk/RenderSectionRegion;Lcom/mojang/blaze3d/vertex/VertexSorting;Lnet/minecraft/client/renderer/SectionBufferBuilderPack;Ljava/util/List;)Lnet/minecraft/client/renderer/chunk/SectionCompiler$Results;",
+            at = @At(
+                    value = "INVOKE",
+                    target = "Lnet/minecraft/client/renderer/block/FluidStateModelSet;get(Lnet/minecraft/world/level/material/FluidState;)Lnet/minecraft/client/renderer/block/FluidModel;"))
+    private FluidModel cyclesrenderer$captureFluidMaterial(
+            FluidStateModelSet models,
+            FluidState state) {
+        FluidModel model = models.get(state);
+        SectionGeometryCollector.captureFluidMaterial(state, model);
+        return model;
     }
 
     @Inject(

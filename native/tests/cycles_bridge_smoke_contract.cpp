@@ -23,6 +23,53 @@ bool duplicate_win32_handle(HANDLE source, HANDLE& duplicate) {
         DUPLICATE_SAME_ACCESS) != FALSE;
 }
 
+bool verify_material_flag_contract(CyclesBridgeRenderer* renderer) {
+    const std::array<std::uint8_t, 4> texture_pixels = {{255U, 255U, 255U, 255U}};
+    const std::array<CyclesBridgeTexture, 1> textures = {{
+        {1U, 1U, 0U, 4U, CYCLES_BRIDGE_TEXTURE_COLOR_SRGB, {0U, 0U, 0U}},
+    }};
+    CyclesBridgeSceneResources resources{};
+    resources.struct_size = sizeof(resources);
+    resources.struct_version = 1U;
+    resources.material_count = 1U;
+    resources.texture_count = 1U;
+    resources.texture_byte_count = static_cast<std::uint32_t>(texture_pixels.size());
+
+    const auto reset_with_flags = [&](std::uint32_t flags) {
+        const std::array<CyclesBridgeMaterial, 1> materials = {{
+            {0U,
+             flags,
+             0.0F,
+             0.5F,
+             CYCLES_BRIDGE_TEXTURE_INDEX_INVALID,
+             CYCLES_BRIDGE_TEXTURE_INDEX_INVALID,
+             CYCLES_BRIDGE_PBR_NONE,
+             CYCLES_BRIDGE_TEXTURE_INDEX_INVALID},
+        }};
+        return cycles_bridge_reset_scene(
+            renderer,
+            &resources,
+            materials.data(),
+            textures.data(),
+            texture_pixels.data());
+    };
+
+    if (reset_with_flags(CYCLES_BRIDGE_MATERIAL_WATER)
+            != CYCLES_BRIDGE_STATUS_INVALID_ARGUMENT
+        || reset_with_flags(1U << 31U) != CYCLES_BRIDGE_STATUS_INVALID_ARGUMENT
+        || !require_ok(
+            reset_with_flags(CYCLES_BRIDGE_MATERIAL_TRANSMISSION),
+            "glass material flags")
+        || !require_ok(
+            reset_with_flags(
+                CYCLES_BRIDGE_MATERIAL_TRANSMISSION | CYCLES_BRIDGE_MATERIAL_WATER),
+            "water material flags")) {
+        std::cerr << "material transmission flag contract was not enforced\n";
+        return false;
+    }
+    return true;
+}
+
 }  // namespace
 
 bool run_bridge_contract_scenarios(SmokeContext& context) {
@@ -304,6 +351,10 @@ bool run_bridge_contract_scenarios(SmokeContext& context) {
     if (!require_ok(
             cycles_bridge_apply_settings(renderer, &settings),
             "Blue Noise First settings")) {
+        return false;
+    }
+
+    if (!verify_material_flag_contract(renderer)) {
         return false;
     }
 

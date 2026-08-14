@@ -30,11 +30,19 @@ bool run_render_scenarios(SmokeContext& context) {
     }};
     triangles = {{
         {0U, 1U, 2U, 0U},
-        {0U, 2U, 3U, 0U},
+        {0U, 2U, 3U, 1U},
     }};
-    const std::array<CyclesBridgeMaterial, 1> materials = {{
+    const std::array<CyclesBridgeMaterial, 2> materials = {{
         {0U,
          CYCLES_BRIDGE_MATERIAL_CUTOUT,
+         0.0F,
+         0.5F,
+         1U,
+         2U,
+         CYCLES_BRIDGE_PBR_LAB_1_3,
+         3U},
+        {0U,
+         CYCLES_BRIDGE_MATERIAL_TRANSMISSION | CYCLES_BRIDGE_MATERIAL_WATER,
          0.0F,
          0.5F,
          1U,
@@ -117,8 +125,14 @@ bool run_render_scenarios(SmokeContext& context) {
     section.vertex_count = static_cast<std::uint32_t>(vertices.size());
     section.triangle_count = static_cast<std::uint32_t>(triangles.size());
 
+    settings.transmission_bounces = 2U;
+    settings.revision++;
     std::cerr << "[smoke] Streaming textured section; " << renderer_info(renderer) << '\n';
     if (!require_ok(
+            cycles_bridge_apply_settings(renderer, &settings),
+            "transmission settings")
+        || !wait_for_settings(renderer, settings.revision)
+        || !require_ok(
             cycles_bridge_reset_scene(
                 renderer,
                 &resources,

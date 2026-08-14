@@ -38,6 +38,8 @@ enum CyclesBridgeDeviceUpdatePhase : std::uint32_t {
 enum CyclesBridgeMaterialFlags : std::uint32_t {
     CYCLES_BRIDGE_MATERIAL_CUTOUT = 1U << 0U,
     CYCLES_BRIDGE_MATERIAL_BLEND = 1U << 1U,
+    CYCLES_BRIDGE_MATERIAL_TRANSMISSION = 1U << 2U,
+    CYCLES_BRIDGE_MATERIAL_WATER = 1U << 3U,
 };
 
 enum CyclesBridgePbrFormat : std::uint32_t {
