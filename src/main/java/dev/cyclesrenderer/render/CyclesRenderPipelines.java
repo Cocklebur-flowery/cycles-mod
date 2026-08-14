@@ -18,6 +18,8 @@ public final class CyclesRenderPipelines {
     public static final String DISPLAY_UNIFORM = "CyclesDisplay";
     public static final String COLOR_LUT_SAMPLER = "ColorLutSampler";
     public static final String HDR_OUTPUT_UNIFORM = "HdrOutput";
+    public static final String DEPTH_SAMPLER = "DepthSampler";
+    public static final String POST_DOF_UNIFORM = "PostDepthOfField";
 
     private static final BindGroupLayout DISPLAY_LAYOUT = BindGroupLayout.builder()
             .withSampler(COLOR_LUT_SAMPLER)
@@ -26,6 +28,11 @@ public final class CyclesRenderPipelines {
 
     private static final BindGroupLayout HDR_OUTPUT_LAYOUT = BindGroupLayout.builder()
             .withUniform(HDR_OUTPUT_UNIFORM, UniformType.UNIFORM_BUFFER)
+            .build();
+
+    private static final BindGroupLayout POST_DOF_LAYOUT = BindGroupLayout.builder()
+            .withSampler(DEPTH_SAMPLER)
+            .withUniform(POST_DOF_UNIFORM, UniformType.UNIFORM_BUFFER)
             .build();
 
     public static final RenderPipeline PRESENT = RenderPipeline.builder(
@@ -72,6 +79,18 @@ public final class CyclesRenderPipelines {
             .withPrimitiveTopology(PrimitiveTopology.TRIANGLES)
             .build();
 
+    public static final RenderPipeline POST_DEPTH_OF_FIELD = RenderPipeline.builder(
+                    RenderPipelines.GLOBALS_SNIPPET)
+            .withLocation(id("pipeline/post_depth_of_field"))
+            .withVertexShader(id("core/screenquad"))
+            .withFragmentShader(id("core/post_depth_of_field"))
+            .withBindGroupLayout(BindGroupLayouts.IN_SAMPLER)
+            .withBindGroupLayout(POST_DOF_LAYOUT)
+            .withColorTargetState(new ColorTargetState(
+                    Optional.empty(), GpuFormat.RGBA16_FLOAT, ColorTargetState.WRITE_ALL))
+            .withPrimitiveTopology(PrimitiveTopology.TRIANGLES)
+            .build();
+
     private CyclesRenderPipelines() {
     }
 
@@ -80,6 +99,7 @@ public final class CyclesRenderPipelines {
         event.registerPipeline(SCRGB_OUTPUT);
         event.registerPipeline(SDR_OUTPUT);
         event.registerPipeline(EXPOSURE_METER);
+        event.registerPipeline(POST_DEPTH_OF_FIELD);
     }
 
     private static Identifier id(String path) {

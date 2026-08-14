@@ -20,6 +20,7 @@ import java.util.Optional;
 
 public final class CyclesFramePresenter {
     private final AutomaticExposureStage automaticExposure = new AutomaticExposureStage();
+    private final PostDepthOfFieldStage postDepthOfField = new PostDepthOfFieldStage();
     private TextureTarget nativeFrameTarget;
     private boolean ready;
     private long uploadCount;
@@ -111,7 +112,9 @@ public final class CyclesFramePresenter {
                 output,
                 settings,
                 depthFar,
+                settings.focusDistance(),
                 Objects.requireNonNull(nativeFrameTarget.getColorTextureView()),
+                null,
                 performanceProbe);
     }
 
@@ -133,7 +136,28 @@ public final class CyclesFramePresenter {
                 output,
                 settings,
                 depthFar,
+                settings.focusDistance(),
                 Objects.requireNonNull(source),
+                null,
+                performanceProbe);
+    }
+
+    public void presentExternal(
+            RenderTarget output,
+            CyclesRenderSettings settings,
+            float depthFar,
+            float focusDistance,
+            GpuTextureView source,
+            GpuTextureView depth,
+            DisplayPerformanceProbe performanceProbe) {
+        RenderSystem.assertOnRenderThread();
+        presentTexture(
+                output,
+                settings,
+                depthFar,
+                focusDistance,
+                Objects.requireNonNull(source),
+                Objects.requireNonNull(depth),
                 performanceProbe);
     }
 
@@ -149,8 +173,20 @@ public final class CyclesFramePresenter {
             RenderTarget output,
             CyclesRenderSettings settings,
             float depthFar,
+            float focusDistance,
             GpuTextureView source,
+            GpuTextureView depth,
             DisplayPerformanceProbe performanceProbe) {
+        GpuTextureView displaySource = depth == null
+                ? source
+                : postDepthOfField.apply(
+                        source,
+                        depth,
+                        settings,
+                        focusDistance,
+                        depthFar,
+                        output.width,
+                        output.height);
         long stageStart = performanceProbe.beginDisplayStage();
         HdrDisplayTransform.Selection outputTransform =
                 HdrDisplayTransform.select(settings);
@@ -160,7 +196,8 @@ public final class CyclesFramePresenter {
                 settings.workingSpace());
         performanceProbe.endDisplayStage(
                 DisplayPerformanceProbe.Stage.COLOR_LUT, stageStart);
-        float effectiveExposureEv = automaticExposure.update(source, settings, System.nanoTime());
+        float effectiveExposureEv = automaticExposure.update(
+                displaySource, settings, System.nanoTime());
         stageStart = performanceProbe.beginDisplayStage();
         updateDisplayUniforms(settings, outputTransform, depthFar, effectiveExposureEv);
         performanceProbe.endDisplayStage(
@@ -176,7 +213,7 @@ public final class CyclesFramePresenter {
             RenderSystem.bindDefaultUniforms(renderPass);
             renderPass.bindTexture(
                     "InSampler",
-                    source,
+                    displaySource,
                     RenderSystem.getSamplerCache().getClampToEdge(FilterMode.NEAREST));
             renderPass.bindTexture(
                     CyclesRenderPipelines.COLOR_LUT_SAMPLER,
@@ -244,6 +281,7 @@ public final class CyclesFramePresenter {
         displayExposureBits = 0;
         displayTransform = null;
         automaticExposure.reset();
+        postDepthOfField.reset();
         if (nativeFrameTarget != null) {
             nativeFrameTarget.destroyBuffers();
             nativeFrameTarget = null;

@@ -363,12 +363,23 @@ public final class CyclesRendererMod {
             if (INTEROP_BUFFER.hasActiveFrame()) {
                 long displayStart = PERFORMANCE_MONITOR.beginCpuStage();
                 PERFORMANCE_MONITOR.gpuMarker(PerformanceSample.GpuMarker.DISPLAY_BEGIN);
-                FRAME_PRESENTER.presentExternal(
-                        mainTarget,
-                        renderSettings,
-                        cameraInput.depthFar(),
-                        INTEROP_BUFFER.frameTextureView(),
-                        PERFORMANCE_MONITOR);
+                if (INTEROP_BUFFER.hasDepthFrame()) {
+                    FRAME_PRESENTER.presentExternal(
+                            mainTarget,
+                            renderSettings,
+                            cameraInput.depthFar(),
+                            cameraInput.focusDistance(),
+                            INTEROP_BUFFER.frameTextureView(),
+                            INTEROP_BUFFER.depthTextureView(),
+                            PERFORMANCE_MONITOR);
+                } else {
+                    FRAME_PRESENTER.presentExternal(
+                            mainTarget,
+                            renderSettings,
+                            cameraInput.depthFar(),
+                            INTEROP_BUFFER.frameTextureView(),
+                            PERFORMANCE_MONITOR);
+                }
                 PERFORMANCE_MONITOR.gpuMarker(PerformanceSample.GpuMarker.DISPLAY_END);
                 PERFORMANCE_MONITOR.endCpuStage(
                         PerformanceSample.CpuStage.DISPLAY_SUBMIT, displayStart);

@@ -50,6 +50,9 @@ import java.nio.LongBuffer;
 
 public final class VulkanExternalBufferPrototype implements AutoCloseable {
     public static final int BYTES_PER_PIXEL = 8;
+    private static final int DEPTH_BYTES_PER_PIXEL = 4;
+    private static final int SLOT_BYTES_PER_PIXEL =
+            BYTES_PER_PIXEL + DEPTH_BYTES_PER_PIXEL;
     public static final int SLOT_COUNT = 3;
 
     private static final int HANDLE_TYPE =
@@ -72,14 +75,19 @@ public final class VulkanExternalBufferPrototype implements AutoCloseable {
     private long logicalBytes;
     private boolean nativeBound;
     private TextureTarget frameTarget;
+    private TextureTarget depthTarget;
     private GpuFence pendingCopyFence;
     private long pendingGeneration;
     private int pendingWidth;
     private int pendingHeight;
+    private int pendingDepthWidth;
+    private int pendingDepthHeight;
     private int pendingSlotIndex;
     private long displayedGeneration;
     private int displayedWidth;
     private int displayedHeight;
+    private int displayedDepthWidth;
+    private int displayedDepthHeight;
     private int displayedSlotIndex;
     private long copyCount;
     private long generationGaps;
@@ -210,12 +218,28 @@ public final class VulkanExternalBufferPrototype implements AutoCloseable {
         pendingGeneration = state.generation();
         pendingWidth = state.width();
         pendingHeight = state.height();
+        pendingDepthWidth = state.depthWidth();
+        pendingDepthHeight = state.depthHeight();
         pendingSlotIndex = state.slotIndex();
         try {
-            validateFrame(pendingWidth, pendingHeight, pendingSlotIndex);
-            ensureFrameTarget(pendingWidth, pendingHeight);
+            validateFrame(
+                    pendingWidth,
+                    pendingHeight,
+                    pendingDepthWidth,
+                    pendingDepthHeight,
+                    pendingSlotIndex);
+            ensureFrameTargets(
+                    pendingWidth,
+                    pendingHeight,
+                    pendingDepthWidth,
+                    pendingDepthHeight);
             long start = System.nanoTime();
-            encodeCopy(pendingWidth, pendingHeight, pendingSlotIndex);
+            encodeCopy(
+                    pendingWidth,
+                    pendingHeight,
+                    pendingDepthWidth,
+                    pendingDepthHeight,
+                    pendingSlotIndex);
             lastCopyMicros = nanosToMicros(System.nanoTime() - start);
             emaCopyMicros = emaCopyMicros == 0L
                     ? lastCopyMicros
@@ -230,6 +254,8 @@ public final class VulkanExternalBufferPrototype implements AutoCloseable {
             pendingGeneration = 0L;
             pendingWidth = 0;
             pendingHeight = 0;
+            pendingDepthWidth = 0;
+            pendingDepthHeight = 0;
             pendingSlotIndex = 0;
             throw error;
         }
@@ -267,6 +293,20 @@ public final class VulkanExternalBufferPrototype implements AutoCloseable {
         return java.util.Objects.requireNonNull(frameTarget.getColorTextureView());
     }
 
+    public boolean hasDepthFrame() {
+        return hasFrame()
+                && depthTarget != null
+                && displayedDepthWidth > 0
+                && displayedDepthHeight > 0;
+    }
+
+    public GpuTextureView depthTextureView() {
+        if (!hasDepthFrame()) {
+            throw new IllegalStateException("Vulkan interop depth frame is not ready");
+        }
+        return java.util.Objects.requireNonNull(depthTarget.getColorTextureView());
+    }
+
     public long generation() {
         return displayedGeneration;
     }
@@ -291,7 +331,12 @@ public final class VulkanExternalBufferPrototype implements AutoCloseable {
         finishPendingCopy(true);
     }
 
-    private void validateFrame(int width, int height, int slotIndex) {
+    private void validateFrame(
+            int width,
+            int height,
+            int depthWidth,
+            int depthHeight,
+            int slotIndex) {
         if (slotIndex < 0 || slotIndex >= SLOT_COUNT) {
             throw new IllegalStateException(
                     "native interop frame has invalid slot " + slotIndex);
@@ -300,17 +345,31 @@ public final class VulkanExternalBufferPrototype implements AutoCloseable {
             throw new IllegalStateException(
                     "native interop frame has invalid dimensions " + width + "x" + height);
         }
+        if ((depthWidth == 0) != (depthHeight == 0)
+                || depthWidth < 0
+                || depthHeight < 0) {
+            throw new IllegalStateException(
+                    "native interop frame has invalid depth dimensions "
+                            + depthWidth + "x" + depthHeight);
+        }
         long frameBytes;
         try {
-            frameBytes = Math.multiplyExact(
+            long colorBytes = Math.multiplyExact(
                     Math.multiplyExact((long) width, height),
                     BYTES_PER_PIXEL);
+            long depthBytes = Math.multiplyExact(
+                    Math.multiplyExact((long) depthWidth, depthHeight),
+                    DEPTH_BYTES_PER_PIXEL);
+            frameBytes = Math.addExact(colorBytes, depthBytes);
         } catch (ArithmeticException error) {
             throw new IllegalStateException(
                     "native interop frame dimensions overflow " + width + "x" + height,
                     error);
         }
-        if (frameBytes > logicalBytes || frameBytes > allocationBytes) {
+        long slotEnd = Math.addExact(
+                Math.multiplyExact((long) slotIndex, slotStrideBytes),
+                frameBytes);
+        if (frameBytes > slotStrideBytes || slotEnd > allocationBytes) {
             throw new IllegalStateException(
                     "native interop frame " + width + "x" + height
                             + " requires " + frameBytes + " bytes, capacity is "
@@ -319,7 +378,11 @@ public final class VulkanExternalBufferPrototype implements AutoCloseable {
         }
     }
 
-    private void ensureFrameTarget(int width, int height) {
+    private void ensureFrameTargets(
+            int width,
+            int height,
+            int depthWidth,
+            int depthHeight) {
         if (frameTarget == null) {
             frameTarget = new TextureTarget(
                     "Cycles Vulkan interop frame",
@@ -330,14 +393,42 @@ public final class VulkanExternalBufferPrototype implements AutoCloseable {
         } else if (frameTarget.width != width || frameTarget.height != height) {
             frameTarget.resize(width, height);
         }
+        if (depthWidth <= 0 || depthHeight <= 0) {
+            return;
+        }
+        if (depthTarget == null) {
+            depthTarget = new TextureTarget(
+                    "Cycles Vulkan interop depth",
+                    depthWidth,
+                    depthHeight,
+                    false,
+                    GpuFormat.R32_FLOAT);
+        } else if (depthTarget.width != depthWidth || depthTarget.height != depthHeight) {
+            depthTarget.resize(depthWidth, depthHeight);
+        }
     }
 
-    private void encodeCopy(int width, int height, int slotIndex) {
+    private void encodeCopy(
+            int width,
+            int height,
+            int depthWidth,
+            int depthHeight,
+            int slotIndex) {
         if (vulkanDevice == null || frameTarget == null) {
             throw new IllegalStateException("Vulkan interop copy target is not initialized");
         }
         if (!(frameTarget.getColorTexture() instanceof VulkanGpuTexture destination)) {
             throw new IllegalStateException("interop copy target is not a Vulkan texture");
+        }
+        VulkanGpuTexture depthDestination = null;
+        if (depthWidth > 0 && depthHeight > 0) {
+            if (depthTarget == null
+                    || !(depthTarget.getColorTexture()
+                    instanceof VulkanGpuTexture vulkanDepth)) {
+                throw new IllegalStateException(
+                        "interop depth copy target is not a Vulkan texture");
+            }
+            depthDestination = vulkanDepth;
         }
         VulkanCommandEncoder encoder = vulkanDevice.createCommandEncoder();
         GpuFence nextFence = encoder.createFence();
@@ -351,23 +442,31 @@ public final class VulkanExternalBufferPrototype implements AutoCloseable {
                         VK13.VK_ACCESS_2_MEMORY_WRITE_BIT,
                         VK13.VK_PIPELINE_STAGE_2_COPY_BIT,
                         VK13.VK_ACCESS_2_TRANSFER_READ_BIT);
-                VkBufferImageCopy.Buffer region = VkBufferImageCopy.calloc(1, stack);
-                region.bufferOffset(Math.multiplyExact((long) slotIndex, slotStrideBytes));
-                region.bufferRowLength(width);
-                region.bufferImageHeight(height);
-                VkImageSubresourceLayers subresource = region.imageSubresource();
-                subresource.aspectMask(VK10.VK_IMAGE_ASPECT_COLOR_BIT);
-                subresource.mipLevel(0);
-                subresource.baseArrayLayer(0);
-                subresource.layerCount(1);
-                region.imageOffset().set(0, 0, 0);
-                region.imageExtent().set(width, height, 1);
+                long slotOffset = Math.multiplyExact((long) slotIndex, slotStrideBytes);
+                VkBufferImageCopy.Buffer region = copyRegion(
+                        stack, slotOffset, width, height);
                 VK12.vkCmdCopyBufferToImage(
                         commandBuffer,
                         buffer,
                         destination.vkImage(),
                         VK10.VK_IMAGE_LAYOUT_GENERAL,
                         region);
+                if (depthDestination != null) {
+                    long colorBytes = Math.multiplyExact(
+                            Math.multiplyExact((long) width, height),
+                            BYTES_PER_PIXEL);
+                    VkBufferImageCopy.Buffer depthRegion = copyRegion(
+                            stack,
+                            Math.addExact(slotOffset, colorBytes),
+                            depthWidth,
+                            depthHeight);
+                    VK12.vkCmdCopyBufferToImage(
+                            commandBuffer,
+                            buffer,
+                            depthDestination.vkImage(),
+                            VK10.VK_IMAGE_LAYOUT_GENERAL,
+                            depthRegion);
+                }
                 pipelineBarrier(
                         commandBuffer,
                         stack,
@@ -394,6 +493,25 @@ public final class VulkanExternalBufferPrototype implements AutoCloseable {
             nextFence.close();
             throw error;
         }
+    }
+
+    private static VkBufferImageCopy.Buffer copyRegion(
+            MemoryStack stack,
+            long bufferOffset,
+            int width,
+            int height) {
+        VkBufferImageCopy.Buffer region = VkBufferImageCopy.calloc(1, stack);
+        region.bufferOffset(bufferOffset);
+        region.bufferRowLength(width);
+        region.bufferImageHeight(height);
+        VkImageSubresourceLayers subresource = region.imageSubresource();
+        subresource.aspectMask(VK10.VK_IMAGE_ASPECT_COLOR_BIT);
+        subresource.mipLevel(0);
+        subresource.baseArrayLayer(0);
+        subresource.layerCount(1);
+        region.imageOffset().set(0, 0, 0);
+        region.imageExtent().set(width, height, 1);
+        return region;
     }
 
     private static void pipelineBarrier(
@@ -435,10 +553,14 @@ public final class VulkanExternalBufferPrototype implements AutoCloseable {
         displayedGeneration = pendingGeneration;
         displayedWidth = pendingWidth;
         displayedHeight = pendingHeight;
+        displayedDepthWidth = pendingDepthWidth;
+        displayedDepthHeight = pendingDepthHeight;
         displayedSlotIndex = pendingSlotIndex;
         pendingGeneration = 0L;
         pendingWidth = 0;
         pendingHeight = 0;
+        pendingDepthWidth = 0;
+        pendingDepthHeight = 0;
         pendingSlotIndex = 0;
         copyCount++;
     }
@@ -691,14 +813,22 @@ public final class VulkanExternalBufferPrototype implements AutoCloseable {
             frameTarget.destroyBuffers();
             frameTarget = null;
         }
+        if (depthTarget != null) {
+            depthTarget.destroyBuffers();
+            depthTarget = null;
+        }
         releaseHandles();
         displayedGeneration = 0L;
         displayedWidth = 0;
         displayedHeight = 0;
+        displayedDepthWidth = 0;
+        displayedDepthHeight = 0;
         displayedSlotIndex = 0;
         pendingGeneration = 0L;
         pendingWidth = 0;
         pendingHeight = 0;
+        pendingDepthWidth = 0;
+        pendingDepthHeight = 0;
         nativeActive = false;
         copyCount = 0L;
         generationGaps = 0L;
@@ -742,7 +872,7 @@ public final class VulkanExternalBufferPrototype implements AutoCloseable {
                             * (settings.resolutionPercentage() / 100.0)));
             long bytes = Math.multiplyExact(
                     Math.multiplyExact((long) width, height),
-                    BYTES_PER_PIXEL);
+                    SLOT_BYTES_PER_PIXEL);
             return new Capacity(width, height, bytes);
         }
     }
