@@ -27,7 +27,7 @@ final class FoliageSolidifierTest {
     }
 
     @Test
-    void appendsOneBackFaceAndOneWallPerSilhouetteSegment() {
+    void appendsBackFaceAndVerticalWallsWithoutHorizontalCaps() {
         float[] vertices = {
                 0.0F, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F, 0.0F,
                 1.0F, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F, 1.0F, 0.0F,
@@ -54,9 +54,9 @@ final class FoliageSolidifierTest {
                 List.of(new FoliageSolidifier.Quad(
                         0, SectionGeometrySnapshot.MATERIAL_FOLIAGE, silhouette)));
 
-        assertEquals(5, result.addedQuads());
-        assertEquals(24, result.colors().length);
-        assertEquals(12, result.triangles().length
+        assertEquals(3, result.addedQuads());
+        assertEquals(16, result.colors().length);
+        assertEquals(8, result.triangles().length
                 / SectionGeometrySnapshot.TRIANGLE_INT_STRIDE);
         assertEquals(-FoliageSolidifier.THICKNESS,
                 result.vertices()[4 * SectionGeometrySnapshot.VERTEX_FLOAT_STRIDE + 2],

@@ -52,7 +52,7 @@ final class FoliageSolidifier {
         }
         int addedQuads = 0;
         for (Quad quad : quads) {
-            addedQuads = Math.addExact(addedQuads, 1 + quad.silhouette().segments().size());
+            addedQuads = Math.addExact(addedQuads, 1 + verticalWallCount(quad.silhouette()));
         }
         int addedVertices = Math.multiplyExact(addedQuads, 4);
         int addedTriangles = Math.multiplyExact(addedQuads, 2);
@@ -74,7 +74,9 @@ final class FoliageSolidifier {
         for (Quad quad : quads) {
             appendBackFace(sourceVertices, sourceColors, quad, output);
             for (Segment segment : quad.silhouette().segments()) {
-                appendWall(sourceVertices, sourceColors, quad, segment, output);
+                if (isVerticalWall(segment)) {
+                    appendWall(sourceVertices, sourceColors, quad, segment, output);
+                }
             }
         }
         int actualAddedQuads = (output.triangleCursor - sourceTriangleCount) / 2;
@@ -87,6 +89,14 @@ final class FoliageSolidifier {
                         triangles,
                         output.triangleCursor * SectionGeometrySnapshot.TRIANGLE_INT_STRIDE),
                 actualAddedQuads);
+    }
+
+    private static int verticalWallCount(Silhouette silhouette) {
+        return (int) silhouette.segments().stream().filter(FoliageSolidifier::isVerticalWall).count();
+    }
+
+    private static boolean isVerticalWall(Segment segment) {
+        return Math.abs(segment.startS() - segment.endS()) <= UV_EPSILON;
     }
 
     static boolean coversSprite(float[] vertices, int vertexBase, Silhouette silhouette) {
