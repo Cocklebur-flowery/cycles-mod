@@ -1,0 +1,60 @@
+# <type>(<scope>): <imperative summary>
+#
+# Subject:
+# - Describe one coherent outcome in imperative English.
+# - Use an allowed type and the narrowest stable Cycles scope.
+# - Avoid file lists, vague status words, and trailing punctuation.
+#
+# Standard body:
+#
+# Why:
+# - State the confirmed problem, requirement, invariant, or measured bottleneck.
+#
+# Changes:
+# - Describe observable behavior and the responsibility that now owns it.
+# - Include the relevant failure, reset, fallback, or cleanup path.
+#
+# Validation:
+# - PASS `<command or suite>` — state the variant and what it proved.
+# - KNOWN RED `<command or suite>` — name the earliest failing domain.
+# - NOT RUN `<check>` — state the exact reason.
+#
+# High-risk additions for ABI, native lifecycle, Vulkan/CUDA interop, shaders,
+# settings, resources, devices, frame transport, or runtime compatibility:
+#
+# Contracts:
+# - ABI / layouts: <version, size, offsets, enums, flags, rejection behavior>
+# - Ownership / lifecycle: <thread, handle, lease, generation, reset, close>
+# - Settings / resources: <keys, IDs, defaults, formats, pipeline order>
+#
+# Variants / Backends:
+# - <default | DLSS> / <OPTIX | CUDA | CPU> — <result or exclusion reason>
+#
+# Compatibility / Risks:
+# - State migration, fallback, upstream revision, packaging, and rollback.
+#
+# Runtime evidence:
+# - PASS `<Minecraft workflow>` — include backend, device, mode, and observation.
+# - NOT RUN `<workflow>` — state the exact reason.
+#
+# Known limitations:
+# - Name remaining red domains without claiming partial work is complete.
+#
+# Stage:
+# - <stage document or independently verifiable stage>
+#
+# Optional footers (only when true):
+# Refs: <issue, contract, upstream revision, or authoritative document>
+# BREAKING CHANGE: <consumer impact, rejection behavior, and migration>
+# Co-authored-by: <actual contributor name> <verified email>
+#
+# Allowed types:
+# feat fix perf refactor test docs build ci chore revert
+#
+# Common scopes:
+# render scene native abi interop vulkan camera sampling denoiser color hdr pbr
+# material texture config ui mixin runtime diagnostics cycles offline build patch
+# repo docs
+#
+# Remove unused sections. Never report PASS for a check that was not run.
+# See docs/commit-conventions.md for message levels and Cycles-specific rules.

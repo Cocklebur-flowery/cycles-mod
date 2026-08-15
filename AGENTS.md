@@ -317,7 +317,22 @@ When commits are authorized:
 - Do not mix another owner's work into a commit.
 - Do not declare a feature complete when only a preparatory contract, UI, or
   partial backend exists.
-- Record performed validation and known limitations in the handoff.
+- Follow [the commit message conventions](docs/commit-conventions.md) and use
+  the root `.gitmessage` as the semantic template.
+- Use `<type>(<scope>): <imperative summary>` subjects. Normal feature, fix,
+  refactor, performance, and build commits must record `Why`, `Changes`, and
+  `Validation`.
+- ABI, native lifecycle, interop, shader, settings, resources, devices,
+  backends, output, or compatibility changes must also record affected
+  contracts, variants/backends, risks, runtime evidence, and known limits.
+- Validation entries must use `PASS`, `FAIL`, `KNOWN RED`, `BLOCKED`, or
+  `NOT RUN`, name the actual command or workflow, and state what it proved.
+- Never report an overall command as passing when a subdomain failed; preserve
+  the first actionable red domain and any later skipped domains.
+- Keep the commit message and handoff consistent; neither may claim a broader
+  validation surface than was actually exercised.
+- After committing, verify the author, body, exact file list, and remaining
+  working-tree state.
 
 Never use destructive Git operations to make the working tree look clean.
 
