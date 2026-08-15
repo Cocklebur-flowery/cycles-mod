@@ -319,14 +319,18 @@ When commits are authorized:
   partial backend exists.
 - Follow [the commit message conventions](docs/commit-conventions.md) and use
   the root `.gitmessage` as the semantic template.
-- Use `<type>(<scope>): <imperative summary>` subjects. Normal feature, fix,
-  refactor, performance, and build commits must record `Why`, `Changes`, and
-  `Validation`.
+- Use `<type>(<scope>): <imperative summary>` subjects. Level S is limited to
+  small, non-semantic documentation, comment, spelling, link, or formatting
+  changes. All other normal commits are Level M and must record `Why`,
+  `Changes`, and `Validation`.
 - ABI, native lifecycle, interop, shader, settings, resources, devices,
   backends, output, or compatibility changes must also record affected
   contracts, variants/backends, risks, runtime evidence, and known limits.
 - Validation entries must use `PASS`, `FAIL`, `KNOWN RED`, `BLOCKED`, or
   `NOT RUN`, name the actual command or workflow, and state what it proved.
+- Keep commands repository-relative and reproducible. Never record secrets,
+  credentials, private home paths, host-specific identifiers, or raw logs in a
+  commit message.
 - Never report an overall command as passing when a subdomain failed; preserve
   the first actionable red domain and any later skipped domains.
 - Keep the commit message and handoff consistent; neither may claim a broader

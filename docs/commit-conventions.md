@@ -1,10 +1,12 @@
 # Cycles Renderer Git 提交信息规范
 
-> 规范版本：0.1
+> 规范版本：0.2
 >
 > 状态：仓库级提交规范
 >
 > 最后更新：2026-08-16
+>
+> 生效边界：自 `5ff245e` 的后续提交起适用；既有历史不追溯整改
 
 本文规定 Cycles Renderer 提交信息如何记录变更原因、跨语言契约、资源所有权、验证变体和运行证据。目标是让 Git 历史不仅说明“改了什么”，还足以支持 ABI 回归、GPU/Backend 差异、Session 生命周期、画面变化和长周期维护调查。
 
@@ -324,6 +326,13 @@ Validation:
 - 一个 smoke frame 不等于真实 Scene、steady-state、resize 或 close PASS。
 - 不允许用较早 timeout 隐藏后续域；说明 skipped/blocked 原因。
 - 只记录本次实际执行证据，不从旧基线复制结果。
+- 临时或一次性检查应记录实际的仓库相对命令；稳定命名的 suite/workflow
+  必须能从仓库验证入口或文档定位，不能使用无法复现的自定义简称。
+- 不记录 Token、凭据、私有主目录、用户名、主机名、设备序列号或其他
+  与结论无关的机器标识。设备相关验证只保留 Backend、设备类别和复现所需
+  的最小环境信息。
+- 不把原始日志倾倒进正文；记录首个可行动错误、受影响域和仓库内可定位的
+  诊断入口。
 
 ### 7.5 Variants / Backends
 
@@ -475,13 +484,17 @@ PBR、Color、HDR、Denoiser、Transparency、Camera 和 Shader 提交应说明�
 
 ## 12. Revert 规范
 
-保留 Git 自动生成标题并说明原因、恢复行为和验证：
+Revert 仍使用统一的 type/scope 标题，并在正文说明原因、恢复行为和验证。
+使用 `Reverts` footer 保存被撤销提交的完整 hash：
 
 ```text
-Revert "fix(pbr): preserve tinted glass transmission"
+revert(pbr): restore the previous glass transmission
 
 Why:
 - The change introduced a green transmission regression in the smoke scene.
+
+Changes:
+- Restore the material behavior from before the regressing change.
 
 Validation:
 - PASS `<focused PBR smoke>` — restored the previous texture-content baseline.
