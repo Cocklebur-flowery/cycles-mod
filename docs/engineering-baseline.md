@@ -2,9 +2,9 @@
 
 状态：当前事实清单
 
-检查日期：2026-08-15（Asia/Shanghai）
+检查日期：2026-08-16（Asia/Shanghai）
 
-检查对象：S5 ABI schema 最小原型（工作树基于 `ce94544`）
+检查对象：Panorama session lifecycle 修复（工作树基于 `ce9cb72`）
 
 本文件只描述上述提交附近的当前事实、验证证据和已知红项。它不是历史阶段
 记录，也不替代源码、构建配置、ABI 断言或测试。ABI、稳定契约、验证入口或
@@ -93,16 +93,17 @@ run-client.cmd verifyProject --rerun-tasks --console=plain
 | 领域 | 状态 | 结果 |
 | --- | --- | --- |
 | Native configure/build | `PASS` | Release DLL、smoke、scene-update 目标构建成功 |
-| `cyclesrenderer_smoke_contract` | `PASS` | 4.58 秒完成 |
-| `cyclesrenderer_smoke_color` | `PASS` | 4.51 秒完成 |
-| `cyclesrenderer_smoke_render` | `FAIL` / `KNOWN RED` | 绿色纹理断言通过；随后在 `panorama 0` 帧发布等待超时 |
-| `cyclesrenderer_smoke_denoiser` | `BLOCKED` / `NOT RUN` | 本次聚焦 render 复核未独立执行 |
-| `cyclesrenderer_smoke_scene_lifecycle` | `BLOCKED` / `NOT RUN` | 本次聚焦 render 复核未独立执行 |
-| `cyclesrenderer_scene_update` | `PASS` | 5.20 秒完成 |
+| `cyclesrenderer_smoke_contract` | `PASS` | 4.49 秒完成 |
+| `cyclesrenderer_smoke_color` | `PASS` | 4.52 秒完成 |
+| `cyclesrenderer_smoke_render` | `PASS` | 17.58 秒完成；7 种 panorama 与 perspective restore 全部发布新帧 |
+| `cyclesrenderer_smoke_denoiser` | `FAIL` / `KNOWN RED` | 17.87 秒；OptiX Still 阶段保持 raw frame variant |
+| `cyclesrenderer_smoke_scene_lifecycle` | `BLOCKED` / `Skipped` | denoiser 前置失败，按 suite 契约返回 77 |
+| `cyclesrenderer_scene_update` | `PASS` | 5.21 秒完成 |
 
-2026-08-15 聚焦复核确认绿色断言已通过，render suite 继续执行 camera shift、
-autofocus、DoF 和 pass viewer 后，约 142 秒在独立的 `panorama 0` 等待处超时。
-绿色断言阈值没有删除或放宽。
+2026-08-16 修复确认 camera type 和 panorama subtype 都属于 Cycles session 拓扑。
+二者变化现在触发 session reset，而不是只重置 accumulation。render suite 锁定每次
+panorama subtype 切换的 reset level，并分别验证 topology reset 前的 pass cache 与
+reset 后的 cache 失效；绿色纹理阈值、相机投影数学和各 panorama 参数均未改变。
 
 根因是 transmission smoke 扩展把第二个初始平面三角形改成 WATER，却继续把这张
 混合材质画面作为纯 CUTOUT 绿色纹理基准。修复仅恢复首帧两个三角形均使用 CUTOUT；
@@ -110,7 +111,11 @@ WATER 和玻璃材质仍在同一资源重置中创建并接受合法性校验�
 
 ### 4.3 Experimental DLSS Native 变体
 
-命令：
+标准 DLSS 输出目录被正在运行的 Minecraft 客户端加载，重链接会得到 `LNK1104`。
+未结束用户客户端；改用相同源码、Cycles DLSS 依赖和 CMake 选项的忽略目录
+`build/native-dlss-panorama-verify` 完成构建和全量 CTest。
+
+命令等价于：
 
 ```text
 run-client.cmd verifyProject -PexperimentalDlss=true --rerun-tasks --console=plain
@@ -118,17 +123,20 @@ run-client.cmd verifyProject -PexperimentalDlss=true --rerun-tasks --console=pla
 
 | 领域 | 状态 | 结果 |
 | --- | --- | --- |
-| Native configure/build | `PASS` | DLSS Release DLL、smoke、scene-update 目标构建成功 |
-| `cyclesrenderer_smoke_contract` | `PASS` | 4.93 秒完成 |
-| `cyclesrenderer_smoke_color` | `PASS` | 5.10 秒完成 |
-| `cyclesrenderer_smoke_render` | `FAIL` / `KNOWN RED` | 绿色纹理断言通过；随后在 `panorama 0` 帧发布等待超时 |
-| `cyclesrenderer_smoke_denoiser` | `BLOCKED` / `NOT RUN` | 本次聚焦 render 复核未独立执行 |
-| `cyclesrenderer_smoke_scene_lifecycle` | `BLOCKED` / `NOT RUN` | 本次聚焦 render 复核未独立执行 |
-| `cyclesrenderer_scene_update` | `PASS` | 5.84 秒完成 |
+| Native configure/build | `PASS` | 独立目录的 DLSS Release DLL、smoke、scene-update 目标构建成功 |
+| `cyclesrenderer_smoke_contract` | `PASS` | 5.04 秒完成 |
+| `cyclesrenderer_smoke_color` | `PASS` | 5.11 秒完成 |
+| `cyclesrenderer_smoke_render` | `PASS` | 18.28 秒完成；7 种 panorama 与 perspective restore 全部发布新帧 |
+| `cyclesrenderer_smoke_denoiser` | `FAIL` / `KNOWN RED` | 20.78 秒；DLSS 场景通过，随后 OptiX Still 阶段保持 raw frame variant |
+| `cyclesrenderer_smoke_scene_lifecycle` | `BLOCKED` / `Skipped` | denoiser 前置失败，按 suite 契约返回 77 |
+| `cyclesrenderer_scene_update` | `PASS` | 5.76 秒完成 |
 
-2026-08-15 DLSS 聚焦复核得到相同结果：绿色断言通过，后续相机、DoF 与 pass
-viewer 场景均执行，约 145 秒在独立的 `panorama 0` 等待处超时。因此绿色纹理
-门禁已在默认和 DLSS 两种 native 变体关闭；全景超时是下一项独立红项。
+默认和 DLSS 均证明首次 Perspective→Panorama、6 次 subtype 变化及最终
+Panorama→Perspective 会重建 session 并发布对应 camera revision。原 panorama
+超时已关闭；两种变体的新最早红项一致推进到 OptiX denoiser 状态转换。
+
+本轮 native 构建包含随后独立收口为 `ce9cb72` 的 PBR 玻璃着色修复；该文件未由
+本阶段修改，也不进入 panorama 提交。PBR 与 panorama 的提交边界保持分离。
 
 ### 4.4 S5 ABI schema 最小原型
 
@@ -170,14 +178,15 @@ CTest 则为每个能力域启动独立进程。目标域自身失败返回 1；
 | frame publication / generation | `PASS` | 两种变体均收到 2 个 `FRAME_UPDATED` 帧，generation 与 Combined pass 正常 |
 | initial scene textured content / render | `PASS` | 默认与 DLSS 均通过原绿色主导像素断言；阈值未变 |
 | camera shift / autofocus / DoF / pass viewer | `PASS` | 两种聚焦 render 运行均到达并通过这些场景 |
-| panorama | `KNOWN RED` | 默认与 DLSS 均在 `panorama 0` 帧发布等待超时 |
-| denoiser | `BLOCKED` / `NOT RUN` | 本次未越过 panorama 前置，也未独立复跑 |
-| scene lifecycle / dynamic resolution | `BLOCKED` / `NOT RUN` | 本次未越过 panorama 前置，也未独立复跑 |
+| panorama | `PASS` | 默认与 DLSS 的 7 种 subtype 及 perspective restore 均发布新帧；每次拓扑变化均为 session reset |
+| denoiser | `FAIL` / `KNOWN RED` | 默认与 DLSS 均在 OptiX Still 阶段得到 sampling state 3、effective 1，但 active frame variant 仍为 raw |
+| scene lifecycle / dynamic resolution | `BLOCKED` / `Skipped` | denoiser 前置失败，独立 suite 按契约返回 77 |
 | scene-update contract | `PASS` | 默认与 DLSS 独立 CTest 均通过 |
 
 S3 已消除“一个 CTest 红项令后续领域完全无报告”的问题。S4 又将初始场景的帧到达
 与内容验收拆成连续断言。PBR 复核保持该内容断言原样，并修正了测试场景材质职责；
-当前最早的 render 红项已推进到 `panorama 0` 帧发布超时。
+panorama lifecycle 修复后 render 域已在两种变体全绿；当前最早红项推进到
+denoiser 域的 Still Denoised frame variant 转换。
 
 ## 6. 游戏内验证状态
 
@@ -238,7 +247,11 @@ smoke ready frame 推断。
 5. `S5 DONE`：经用户明确允许与 panorama 红项解耦，已为
    `CyclesBridgeVulkanInteropState` 建立单结构 schema 原型；ABI 版本、公开 C 头和
    80-byte 布局均未改变。
-6. `PANORAMA BUG NEXT`：定位并关闭默认、DLSS 共同的 `panorama 0` 帧发布超时。
-7. 完成上述稳定性门禁后，才开始 `NativeBridge` 或 `cycles_engine.cpp` 的生产代码拆分。
+6. `PANORAMA BUG DONE`：camera type 与 panorama subtype 变化均按 session 拓扑
+   重建；默认与 DLSS render suite 全部通过。
+7. `DENOISER BUG NEXT`：定位 OptiX Still 阶段 effective denoiser 已启用、但
+   active frame variant 仍停留 raw 的生命周期错配。
+8. denoiser 关闭后独立复跑 scene-lifecycle / dynamic resolution；全部稳定性门禁
+   关闭后，才开始 `NativeBridge` 或 `cycles_engine.cpp` 的生产代码拆分。
 
 任何新功能开发在上述稳定化阶段完成前继续冻结。

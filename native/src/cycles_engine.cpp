@@ -2651,11 +2651,16 @@ class CyclesEngine::Impl final {
                 const bool camera_shift_changed = settings_revision_ > 0
                     && (settings.camera_shift_x != requested_settings_.camera_shift_x
                         || settings.camera_shift_y != requested_settings_.camera_shift_y);
+                const bool camera_topology_changed = settings_revision_ > 0
+                    && (settings.camera_type != requested_settings_.camera_type
+                        || settings.panorama_type
+                            != requested_settings_.panorama_type);
                 if (settings.device_policy != requested_settings_.device_policy
                     || denoiser_topology_changed
                     || atmosphere_changed
                     || material_shader_changed
                     || camera_shift_changed
+                    || camera_topology_changed
                     || settings.depth_of_field_mode
                         != requested_settings_.depth_of_field_mode
                     || settings.working_space != requested_settings_.working_space) {

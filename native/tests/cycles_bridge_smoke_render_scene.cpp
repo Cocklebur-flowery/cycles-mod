@@ -339,6 +339,7 @@ bool run_render_scenarios(SmokeContext& context) {
         return false;
     }
 
+    const std::uint64_t all_passes_mask = (1ULL << CYCLES_BRIDGE_PASS_COUNT) - 1ULL;
     CyclesBridgeDiagnostics render_start_diagnostics{};
     render_start_diagnostics.struct_size = sizeof(render_start_diagnostics);
     render_start_diagnostics.struct_version = 1;
@@ -357,6 +358,24 @@ bool run_render_scenarios(SmokeContext& context) {
                   << '/' << render_start_diagnostics.max_render_reset_micros
                   << '/' << render_start_diagnostics.max_render_prepare_micros
                   << '/' << render_start_diagnostics.max_session_start_micros << '\n';
+        return false;
+    }
+    if (render_start_diagnostics.cached_raw_pass_mask != all_passes_mask
+        || render_start_diagnostics.cached_denoised_pass_mask != 0U
+        || render_start_diagnostics.pass_cache_entry_count
+            < CYCLES_BRIDGE_PASS_COUNT
+        || render_start_diagnostics.pass_cache_bytes == 0U
+        || render_start_diagnostics.pass_cache_bytes
+            > render_start_diagnostics.pass_cache_budget_bytes) {
+        std::cerr << "unexpected pre-panorama raw pass cache state: raw="
+                  << render_start_diagnostics.cached_raw_pass_mask
+                  << ";denoised="
+                  << render_start_diagnostics.cached_denoised_pass_mask
+                  << ";entries="
+                  << render_start_diagnostics.pass_cache_entry_count
+                  << ";bytes=" << render_start_diagnostics.pass_cache_bytes
+                  << ";budget="
+                  << render_start_diagnostics.pass_cache_budget_bytes << '\n';
         return false;
     }
 
@@ -382,7 +401,8 @@ bool run_render_scenarios(SmokeContext& context) {
                 cycles_bridge_query_diagnostics(renderer, &panorama_diagnostics),
                 "panorama diagnostics")
             || panorama_diagnostics.camera_type != CYCLES_BRIDGE_CAMERA_PANORAMA
-            || panorama_diagnostics.panorama_type != panorama_type) {
+            || panorama_diagnostics.panorama_type != panorama_type
+            || panorama_diagnostics.reset_level != CYCLES_BRIDGE_RESET_SESSION) {
             std::cerr << stage << " did not reach the native camera diagnostics\n";
             return false;
         }
@@ -418,7 +438,6 @@ bool run_render_scenarios(SmokeContext& context) {
         std::cerr << "device update phases were not captured for the completed scene\n";
         return false;
     }
-    const std::uint64_t all_passes_mask = (1ULL << CYCLES_BRIDGE_PASS_COUNT) - 1ULL;
     const float expected_physical_fov = 2.0F * std::atan(
         36.0F / (2.0F * 18.0F * (static_cast<float>(kWidth) / kHeight)));
     if (diagnostics.sampling_pattern
@@ -436,11 +455,10 @@ bool run_render_scenarios(SmokeContext& context) {
         || diagnostics.aperture_blades != 6U
         || std::abs(diagnostics.aperture_rotation_radians - 0.2617994F) > 1.0e-5F
         || std::abs(diagnostics.aperture_ratio - 1.2F) > 1.0e-6F
-        || diagnostics.cached_raw_pass_mask != all_passes_mask
+        || diagnostics.cached_raw_pass_mask != 0U
         || diagnostics.cached_denoised_pass_mask != 0U
-        || diagnostics.pass_cache_entry_count < CYCLES_BRIDGE_PASS_COUNT
-        || diagnostics.pass_cache_bytes == 0U
-        || diagnostics.pass_cache_bytes > diagnostics.pass_cache_budget_bytes
+        || diagnostics.pass_cache_entry_count != 0U
+        || diagnostics.pass_cache_bytes != 0U
         || diagnostics.pass_cache_hit_count == 0U
         || diagnostics.registered_pass_mask != all_passes_mask
         || diagnostics.pass_registry_rebuild_count
@@ -450,7 +468,7 @@ bool run_render_scenarios(SmokeContext& context) {
         || ((diagnostics.device_type == 1U || diagnostics.device_type == 2U)
             && diagnostics.device_uuid_valid == 0U)
         || (diagnostics.device_type == 3U && diagnostics.device_uuid_valid != 0U)) {
-        std::cerr << "unexpected raw pass cache state: sampling-pattern="
+        std::cerr << "unexpected post-panorama render state: sampling-pattern="
                   << diagnostics.sampling_pattern
                   << ";clip=" << diagnostics.effective_camera_clip_near
                   << '/' << diagnostics.effective_camera_clip_far
