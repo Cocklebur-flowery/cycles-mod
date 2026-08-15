@@ -31,14 +31,29 @@ struct GlassClosures {
     ccl::ShaderOutput* surface = nullptr;
 };
 
-GlassClosures create_glass_closures(ccl::ShaderGraph* graph) {
+GlassClosures create_glass_closures(
+    ccl::ShaderGraph* graph,
+    ccl::ShaderOutput* texture_tint) {
     constexpr float kGlassIor = 1.5F;
+    constexpr float kTextureTintWeight = 0.08F;
+
+    // Minecraft glass textures contain dark painted border texels. Feeding those
+    // values directly into a transmissive closure compounds the attenuation at
+    // the front and back interfaces and can turn an otherwise clear block black.
+    // Keep the dielectric base neutral and use the texture only as a bounded,
+    // weak tint; the alpha-driven closure mix below still renders painted texels.
+    ccl::MixNode* bounded_tint = graph->create_node<ccl::MixNode>();
+    bounded_tint->set_mix_type(ccl::NODE_MIX_BLEND);
+    bounded_tint->set_use_clamp(true);
+    bounded_tint->set_fac(kTextureTintWeight);
+    bounded_tint->set_color1(ccl::make_float3(1.0F));
+    graph->connect(texture_tint, bounded_tint->input("Color2"));
 
     ccl::GlassBsdfNode* glass = graph->create_node<ccl::GlassBsdfNode>();
-    glass->set_color(ccl::make_float3(1.0F));
     glass->set_roughness(0.01F);
     glass->set_IOR(kGlassIor);
     glass->set_distribution(ccl::CLOSURE_BSDF_MICROFACET_MULTI_GGX_GLASS_ID);
+    graph->connect(bounded_tint->output("Color"), glass->input("Color"));
 
     ccl::FresnelNode* fresnel = graph->create_node<ccl::FresnelNode>();
     fresnel->set_IOR(kGlassIor);
@@ -53,6 +68,8 @@ GlassClosures create_glass_closures(ccl::ShaderGraph* graph) {
     graph->connect(transmitted->output("Value"), transmitted_rgb->input("Green"));
     graph->connect(transmitted->output("Value"), transmitted_rgb->input("Blue"));
 
+    // IOR 1.5 reflects 4% at normal incidence. Passing the shadow ray through
+    // both pane interfaces therefore retains about 0.96^2 = 92.16% of sunlight.
     ccl::TransparentBsdfNode* shadow_transmission =
         graph->create_node<ccl::TransparentBsdfNode>();
     graph->connect(transmitted_rgb->output("Color"), shadow_transmission->input("Color"));
@@ -143,7 +160,7 @@ ccl::unique_ptr<ccl::ShaderGraph> build_material_graph(
     }
     ccl::ShaderOutput* surface = principled->output("BSDF");
     const GlassClosures glass_closures = glass
-        ? create_glass_closures(graph.get())
+        ? create_glass_closures(graph.get(), surface_albedo)
         : GlassClosures{};
 
     if (material.pbr_format == CYCLES_BRIDGE_PBR_LAB_1_3) {
