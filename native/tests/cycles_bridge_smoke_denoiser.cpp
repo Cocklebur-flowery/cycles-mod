@@ -7,6 +7,24 @@
 
 namespace cyclesrenderer::smoke {
 
+namespace {
+
+constexpr std::uint32_t kRawObservationDelayMillis = 10000U;
+
+bool request_immediate_still(
+    CyclesBridgeRenderer* renderer,
+    CyclesBridgeRenderSettings& settings,
+    const char* operation) {
+    settings.stationary_delay_millis = 0U;
+    settings.revision++;
+    return require_ok(
+               cycles_bridge_apply_settings(renderer, &settings),
+               operation)
+        && wait_for_settings(renderer, settings.revision);
+}
+
+}  // namespace
+
 bool run_denoiser_scenarios(SmokeContext& context) {
     CyclesBridgeRenderer* renderer = context.renderer;
     const CyclesBridgeCapabilities& capabilities = context.capabilities;
@@ -58,7 +76,7 @@ bool run_denoiser_scenarios(SmokeContext& context) {
     if ((capabilities.denoiser_mask & CYCLES_BRIDGE_DENOISER_OPTIX) != 0U) {
         std::cerr << "[smoke] Enabling the detected OptiX denoiser\n";
         settings.denoiser_mode = 2U;
-        settings.stationary_delay_millis = 500U;
+        settings.stationary_delay_millis = kRawObservationDelayMillis;
         settings.revision++;
         if (!require_ok(
                 cycles_bridge_apply_settings(renderer, &settings),
@@ -79,6 +97,8 @@ bool run_denoiser_scenarios(SmokeContext& context) {
                     != CYCLES_BRIDGE_DENOISER_SCHEDULE_SETTLING)
             || diagnostics.denoiser_schedule_skip_count == 0U
             || diagnostics.active_frame_variant != CYCLES_BRIDGE_FRAME_VARIANT_RAW
+            || !request_immediate_still(
+                renderer, settings, "OptiX immediate Still settings")
             || !wait_for_denoised_still(
                 renderer, camera, frame, pixels, diagnostics, info, 1U, "OptiX")) {
             std::cerr << "detected OptiX denoiser did not follow Interactive Raw -> Still Denoised: "
@@ -152,7 +172,7 @@ bool run_denoiser_scenarios(SmokeContext& context) {
 
     std::cerr << "[smoke] Enabling the detected OpenImageDenoise denoiser\n";
     settings.denoiser_mode = 3U;
-    settings.stationary_delay_millis = 500U;
+    settings.stationary_delay_millis = kRawObservationDelayMillis;
     settings.revision++;
     if (!require_ok(
             cycles_bridge_apply_settings(renderer, &settings),
@@ -173,6 +193,8 @@ bool run_denoiser_scenarios(SmokeContext& context) {
                 != CYCLES_BRIDGE_DENOISER_SCHEDULE_SETTLING)
         || diagnostics.denoiser_schedule_skip_count == 0U
         || diagnostics.active_frame_variant != CYCLES_BRIDGE_FRAME_VARIANT_RAW
+        || !request_immediate_still(
+            renderer, settings, "OpenImageDenoise immediate Still settings")
         || !wait_for_denoised_still(
             renderer, camera, frame, pixels, diagnostics, info, 2U, "OpenImageDenoise")) {
         std::cerr << "detected OpenImageDenoise denoiser did not follow Interactive Raw -> Still Denoised: "

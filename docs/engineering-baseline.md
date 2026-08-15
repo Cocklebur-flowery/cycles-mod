@@ -4,7 +4,7 @@
 
 检查日期：2026-08-16（Asia/Shanghai）
 
-检查对象：Panorama session lifecycle 修复（工作树基于 `ce9cb72`）
+检查对象：Native denoiser 与 scene lifecycle 验收（工作树基于 `38a2916`）
 
 本文件只描述上述提交附近的当前事实、验证证据和已知红项。它不是历史阶段
 记录，也不替代源码、构建配置、ABI 断言或测试。ABI、稳定契约、验证入口或
@@ -61,7 +61,7 @@ Java `MemoryLayout`/offset 常量和 C++ 全字段 size/offset 断言。公开 C
 形成。该日志可以证明 Native bridge 曾进入 OptiX/scene staging，但不能作为
 最终产品修复基线的一次干净、提交后实机验收。
 
-## 4. 2026-08-14 自动验证与 2026-08-15 聚焦复核
+## 4. 2026-08-16 自动验证与生命周期复核
 
 ### 4.1 Java 与打包
 
@@ -93,12 +93,12 @@ run-client.cmd verifyProject --rerun-tasks --console=plain
 | 领域 | 状态 | 结果 |
 | --- | --- | --- |
 | Native configure/build | `PASS` | Release DLL、smoke、scene-update 目标构建成功 |
-| `cyclesrenderer_smoke_contract` | `PASS` | 4.49 秒完成 |
-| `cyclesrenderer_smoke_color` | `PASS` | 4.52 秒完成 |
-| `cyclesrenderer_smoke_render` | `PASS` | 17.58 秒完成；7 种 panorama 与 perspective restore 全部发布新帧 |
-| `cyclesrenderer_smoke_denoiser` | `FAIL` / `KNOWN RED` | 17.87 秒；OptiX Still 阶段保持 raw frame variant |
-| `cyclesrenderer_smoke_scene_lifecycle` | `BLOCKED` / `Skipped` | denoiser 前置失败，按 suite 契约返回 77 |
-| `cyclesrenderer_scene_update` | `PASS` | 5.21 秒完成 |
+| `cyclesrenderer_smoke_contract` | `PASS` | 4.54 秒完成 |
+| `cyclesrenderer_smoke_color` | `PASS` | 4.64 秒完成 |
+| `cyclesrenderer_smoke_render` | `PASS` | 17.70 秒完成；7 种 panorama 与 perspective restore 全部发布新帧 |
+| `cyclesrenderer_smoke_denoiser` | `PASS` | 21.50 秒；OptiX 与 OIDN 均完成 Interactive Raw → Still Denoised |
+| `cyclesrenderer_smoke_scene_lifecycle` | `PASS` | 22.57 秒；前置域全绿后实际执行，不再 Skipped |
+| `cyclesrenderer_scene_update` | `PASS` | 7.72 秒完成 |
 
 2026-08-16 修复确认 camera type 和 panorama subtype 都属于 Cycles session 拓扑。
 二者变化现在触发 session reset，而不是只重置 accumulation。render suite 锁定每次
@@ -111,11 +111,8 @@ WATER 和玻璃材质仍在同一资源重置中创建并接受合法性校验�
 
 ### 4.3 Experimental DLSS Native 变体
 
-标准 DLSS 输出目录被正在运行的 Minecraft 客户端加载，重链接会得到 `LNK1104`。
-未结束用户客户端；改用相同源码、Cycles DLSS 依赖和 CMake 选项的忽略目录
-`build/native-dlss-panorama-verify` 完成构建和全量 CTest。
-
-命令等价于：
+本轮标准 DLSS 输出目录没有被客户端占用，直接从统一入口重新配置、重建并执行
+全量 CTest：
 
 ```text
 run-client.cmd verifyProject -PexperimentalDlss=true --rerun-tasks --console=plain
@@ -124,19 +121,17 @@ run-client.cmd verifyProject -PexperimentalDlss=true --rerun-tasks --console=pla
 | 领域 | 状态 | 结果 |
 | --- | --- | --- |
 | Native configure/build | `PASS` | 独立目录的 DLSS Release DLL、smoke、scene-update 目标构建成功 |
-| `cyclesrenderer_smoke_contract` | `PASS` | 5.04 秒完成 |
-| `cyclesrenderer_smoke_color` | `PASS` | 5.11 秒完成 |
-| `cyclesrenderer_smoke_render` | `PASS` | 18.28 秒完成；7 种 panorama 与 perspective restore 全部发布新帧 |
-| `cyclesrenderer_smoke_denoiser` | `FAIL` / `KNOWN RED` | 20.78 秒；DLSS 场景通过，随后 OptiX Still 阶段保持 raw frame variant |
-| `cyclesrenderer_smoke_scene_lifecycle` | `BLOCKED` / `Skipped` | denoiser 前置失败，按 suite 契约返回 77 |
-| `cyclesrenderer_scene_update` | `PASS` | 5.76 秒完成 |
+| `cyclesrenderer_smoke_contract` | `PASS` | 5.08 秒完成 |
+| `cyclesrenderer_smoke_color` | `PASS` | 5.25 秒完成 |
+| `cyclesrenderer_smoke_render` | `PASS` | 18.84 秒完成；7 种 panorama 与 perspective restore 全部发布新帧 |
+| `cyclesrenderer_smoke_denoiser` | `PASS` | 24.12 秒；DLSS realtime、OptiX 与 OIDN 路径全部通过 |
+| `cyclesrenderer_smoke_scene_lifecycle` | `PASS` | 23.73 秒；前置域全绿后实际执行，不再 Skipped |
+| `cyclesrenderer_scene_update` | `PASS` | 5.75 秒完成 |
 
 默认和 DLSS 均证明首次 Perspective→Panorama、6 次 subtype 变化及最终
 Panorama→Perspective 会重建 session 并发布对应 camera revision。原 panorama
-超时已关闭；两种变体的新最早红项一致推进到 OptiX denoiser 状态转换。
-
-本轮 native 构建包含随后独立收口为 `ce9cb72` 的 PBR 玻璃着色修复；该文件未由
-本阶段修改，也不进入 panorama 提交。PBR 与 panorama 的提交边界保持分离。
+超时已关闭；denoiser 与 scene lifecycle 随后也在两种变体实际通过。当前自动化
+验证没有已知红项，下一验收边界是最终 HEAD 的 Minecraft 实机生命周期。
 
 ### 4.4 S5 ABI schema 最小原型
 
@@ -158,7 +153,7 @@ ctest --test-dir build/native-dlss --build-config Release -R ^cyclesrenderer_smo
 | 默认 Native build/contract | `PASS` | 生成断言参与 DLL 编译；contract CTest 通过 |
 | DLSS Native build/contract | `PASS` | 生成断言参与 DLSS DLL 编译；contract CTest 通过 |
 | ABI 兼容性 | `PASS` | ABI 仍为 43，interop state 仍为 80 bytes，字段顺序与 offset 未变 |
-| 完整 `verifyProject` | `NOT RUN` | 已知独立 `panorama 0` 红项仍会阻断完整 render suite，本阶段未重复消耗该长链验证 |
+| S5 原型阶段的完整 `verifyProject` | `NOT RUN` | 当时的独立 `panorama 0` 红项会阻断完整 render suite；当前完整结果见 4.2 与 4.3 |
 
 ## 5. 分域测试结果
 
@@ -179,14 +174,17 @@ CTest 则为每个能力域启动独立进程。目标域自身失败返回 1；
 | initial scene textured content / render | `PASS` | 默认与 DLSS 均通过原绿色主导像素断言；阈值未变 |
 | camera shift / autofocus / DoF / pass viewer | `PASS` | 两种聚焦 render 运行均到达并通过这些场景 |
 | panorama | `PASS` | 默认与 DLSS 的 7 种 subtype 及 perspective restore 均发布新帧；每次拓扑变化均为 session reset |
-| denoiser | `FAIL` / `KNOWN RED` | 默认与 DLSS 均在 OptiX Still 阶段得到 sampling state 3、effective 1，但 active frame variant 仍为 raw |
-| scene lifecycle / dynamic resolution | `BLOCKED` / `Skipped` | denoiser 前置失败，独立 suite 按契约返回 77 |
+| denoiser | `PASS` | 默认与 DLSS 均完成 OptiX/OIDN 的 Interactive Raw → Still Denoised；DLSS 变体同时通过 realtime DLSS |
+| scene lifecycle / dynamic resolution | `PASS` | 默认与 DLSS 均在前置域全绿后实际执行完成，不再返回 skip 77 |
 | scene-update contract | `PASS` | 默认与 DLSS 独立 CTest 均通过 |
 
 S3 已消除“一个 CTest 红项令后续领域完全无报告”的问题。S4 又将初始场景的帧到达
 与内容验收拆成连续断言。PBR 复核保持该内容断言原样，并修正了测试场景材质职责；
-panorama lifecycle 修复后 render 域已在两种变体全绿；当前最早红项推进到
-denoiser 域的 Still Denoised frame variant 转换。
+panorama lifecycle 修复后 render 域在两种变体全绿。原 denoiser 红项是 smoke 用
+500 ms 墙钟延迟同时验收 Interactive Raw 和触发 Still 的阶段竞争：Session 重建较慢
+时，测试会在调用 Still 等待 helper 之前失败。测试现先以允许范围内的最长延迟锁定
+Raw，再显式请求零延迟 Still，并继续要求真实 Denoised 新帧。生产 ABI、调度和发布
+实现未修改。
 
 ## 6. 游戏内验证状态
 
@@ -249,9 +247,12 @@ smoke ready frame 推断。
    80-byte 布局均未改变。
 6. `PANORAMA BUG DONE`：camera type 与 panorama subtype 变化均按 session 拓扑
    重建；默认与 DLSS render suite 全部通过。
-7. `DENOISER BUG NEXT`：定位 OptiX Still 阶段 effective denoiser 已启用、但
-   active frame variant 仍停留 raw 的生命周期错配。
-8. denoiser 关闭后独立复跑 scene-lifecycle / dynamic resolution；全部稳定性门禁
-   关闭后，才开始 `NativeBridge` 或 `cycles_engine.cpp` 的生产代码拆分。
+7. `DENOISER TEST RACE DONE`：默认与 DLSS 均以确定性的 Raw/Still 两阶段协议通过
+   OptiX/OIDN；DLSS realtime 路径也通过。生产 ABI 与 renderer 实现未修改。
+8. `SCENE LIFECYCLE DONE`：默认与 DLSS 的 scene-lifecycle / dynamic resolution
+   已在前置域全绿后实际执行通过，不再显示 Skipped。
+9. `MINECRAFT LIFECYCLE NEXT`：在最终提交之后完成 F8 启用首帧、持续移动、关闭、
+   再启用、resize/动态分辨率与退出验收。实机门禁关闭后，才开始 `NativeBridge`、
+   `CyclesClientConfig` 或 `cycles_engine.cpp` 的生产代码拆分。
 
 任何新功能开发在上述稳定化阶段完成前继续冻结。

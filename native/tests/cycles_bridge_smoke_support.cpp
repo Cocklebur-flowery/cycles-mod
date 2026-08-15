@@ -423,6 +423,9 @@ bool wait_for_denoised_still(
     std::string& info,
     std::uint32_t expected_denoiser,
     const char* denoiser_name) {
+    const std::uint64_t initial_generation = frame.generation;
+    std::uint32_t updated_frame_count = 0U;
+    std::uint64_t last_updated_generation = initial_generation;
     for (int attempt = 0; attempt < 400; ++attempt) {
         camera.frame_id++;
         if (!require_ok(
@@ -435,6 +438,10 @@ bool wait_for_denoised_still(
             return false;
         }
         info = renderer_info(renderer);
+        if ((frame.flags & CYCLES_BRIDGE_FRAME_UPDATED) != 0U) {
+            updated_frame_count++;
+            last_updated_generation = frame.generation;
+        }
         if (diagnostics.sampling_state == CYCLES_BRIDGE_SAMPLING_STILL
             && diagnostics.effective_denoiser == expected_denoiser
             && diagnostics.selected_denoiser == expected_denoiser
@@ -459,7 +466,23 @@ bool wait_for_denoised_still(
               << ";reason=" << diagnostics.denoiser_schedule_reason
               << ";run/skip=" << diagnostics.denoiser_schedule_run_count
               << '/' << diagnostics.denoiser_schedule_skip_count
-              << ";variant=" << diagnostics.active_frame_variant << '\n';
+              << ";variant=" << diagnostics.active_frame_variant
+              << ";frame_flags=" << frame.flags
+              << ";initial_generation=" << initial_generation
+              << ";frame_generation=" << frame.generation
+              << ";diagnostic_generation=" << diagnostics.frame_generation
+              << ";updated_frames=" << updated_frame_count
+              << ";last_updated_generation=" << last_updated_generation
+              << ";sample=" << diagnostics.sample_count << '/'
+              << diagnostics.target_sample_count
+              << ";produced=" << diagnostics.produced_frame_count
+              << ";copied=" << diagnostics.copied_frame_count
+              << ";frame_age_us=" << diagnostics.frame_age_micros
+              << ";camera_revision=" << diagnostics.camera_revision
+              << ";render_starts=" << diagnostics.render_start_count
+              << ";cache_raw=" << diagnostics.cached_raw_pass_mask
+              << ";cache_denoised=" << diagnostics.cached_denoised_pass_mask
+              << ";cache_entries=" << diagnostics.pass_cache_entry_count << '\n';
     return false;
 }
 
