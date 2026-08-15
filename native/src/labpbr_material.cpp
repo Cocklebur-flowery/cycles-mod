@@ -31,14 +31,16 @@ struct GlassClosures {
     ccl::ShaderOutput* surface = nullptr;
 };
 
-GlassClosures create_glass_closures(ccl::ShaderGraph* graph) {
+GlassClosures create_glass_closures(
+    ccl::ShaderGraph* graph,
+    ccl::ShaderOutput* tint) {
     constexpr float kGlassIor = 1.5F;
 
     ccl::GlassBsdfNode* glass = graph->create_node<ccl::GlassBsdfNode>();
-    glass->set_color(ccl::make_float3(1.0F));
     glass->set_roughness(0.01F);
     glass->set_IOR(kGlassIor);
     glass->set_distribution(ccl::CLOSURE_BSDF_MICROFACET_MULTI_GGX_GLASS_ID);
+    graph->connect(tint, glass->input("Color"));
 
     ccl::FresnelNode* fresnel = graph->create_node<ccl::FresnelNode>();
     fresnel->set_IOR(kGlassIor);
@@ -53,9 +55,16 @@ GlassClosures create_glass_closures(ccl::ShaderGraph* graph) {
     graph->connect(transmitted->output("Value"), transmitted_rgb->input("Green"));
     graph->connect(transmitted->output("Value"), transmitted_rgb->input("Blue"));
 
+    ccl::VectorMathNode* tinted_transmission =
+        graph->create_node<ccl::VectorMathNode>();
+    tinted_transmission->set_math_type(ccl::NODE_VECTOR_MATH_MULTIPLY);
+    graph->connect(tint, tinted_transmission->input("Vector1"));
+    graph->connect(transmitted_rgb->output("Color"), tinted_transmission->input("Vector2"));
+
     ccl::TransparentBsdfNode* shadow_transmission =
         graph->create_node<ccl::TransparentBsdfNode>();
-    graph->connect(transmitted_rgb->output("Color"), shadow_transmission->input("Color"));
+    graph->connect(
+        tinted_transmission->output("Vector"), shadow_transmission->input("Color"));
 
     ccl::LightPathNode* light_path = graph->create_node<ccl::LightPathNode>();
     ccl::MixClosureNode* ray_visibility = graph->create_node<ccl::MixClosureNode>();
@@ -141,10 +150,12 @@ ccl::unique_ptr<ccl::ShaderGraph> build_material_graph(
     } else if (glass) {
         principled->set_ior(1.45F);
     }
-    ccl::ShaderOutput* surface = principled->output("BSDF");
     const GlassClosures glass_closures = glass
-        ? create_glass_closures(graph.get())
+        ? create_glass_closures(graph.get(), surface_albedo)
         : GlassClosures{};
+    ccl::ShaderOutput* surface = glass
+        ? glass_closures.surface
+        : principled->output("BSDF");
 
     if (material.pbr_format == CYCLES_BRIDGE_PBR_LAB_1_3) {
         ccl::ImageTextureNode* normal_texture = create_texture_node(
@@ -247,13 +258,7 @@ ccl::unique_ptr<ccl::ShaderGraph> build_material_graph(
         graph->connect(surface_albedo, principled->input("Base Color"));
     }
 
-    if (glass) {
-        ccl::MixClosureNode* textured_glass = graph->create_node<ccl::MixClosureNode>();
-        graph->connect(texture->output("Alpha"), textured_glass->input("Fac"));
-        graph->connect(glass_closures.surface, textured_glass->input("Closure1"));
-        graph->connect(surface, textured_glass->input("Closure2"));
-        surface = textured_glass->output("Closure");
-    } else if ((material.flags & CYCLES_BRIDGE_MATERIAL_BLEND) != 0U) {
+    if (!glass && (material.flags & CYCLES_BRIDGE_MATERIAL_BLEND) != 0U) {
         ccl::TransparentBsdfNode* transparent = graph->create_node<ccl::TransparentBsdfNode>();
         ccl::MixClosureNode* blend = graph->create_node<ccl::MixClosureNode>();
         graph->connect(texture->output("Alpha"), blend->input("Fac"));
