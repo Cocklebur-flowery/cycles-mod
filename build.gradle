@@ -36,6 +36,15 @@ base {
 }
 
 def nativeSourceDirectory = layout.projectDirectory.dir('native')
+def abiSchemaFile = layout.projectDirectory.file(
+        'abi/cycles_bridge_vulkan_interop_state.json').asFile
+def abiGeneratorScript = layout.projectDirectory.file(
+        'native/cmake/GenerateAbiLayout.cmake').asFile
+def generatedAbiJavaDirectory = layout.buildDirectory.dir(
+        'generated/sources/abi/main/java').get().asFile
+def generatedAbiJavaFile = new File(
+        generatedAbiJavaDirectory,
+        'dev/cyclesrenderer/nativebridge/VulkanInteropStateAbi.java')
 def experimentalDlss = providers.gradleProperty('experimentalDlss')
         .map { it.toBoolean() }
         .getOrElse(false)
@@ -55,6 +64,8 @@ def cyclesSourceDirectory = layout.projectDirectory.dir(".deps/${cyclesVariant}"
 def cyclesBuildDirectory = layout.projectDirectory.dir(".deps/${cyclesVariant}-build").asFile
 def cyclesInstallDirectory = layout.projectDirectory.dir(".deps/${cyclesVariant}-install").asFile
 def clientFmlConfigFile = layout.projectDirectory.file('run/config/fml.toml').asFile
+
+sourceSets.main.java.srcDir(generatedAbiJavaDirectory)
 
 // Mojang ships Java 25 to end users in 26.2, so mods should target Java 25.
 java.toolchain.languageVersion = JavaLanguageVersion.of(25)
@@ -165,10 +176,27 @@ tasks.named('test', Test).configure {
     useJUnitPlatform()
 }
 
+tasks.register('generateAbiLayouts', Exec) {
+    group = 'build setup'
+    description = 'Generates Java ABI layouts from the bridge schema.'
+    inputs.file(abiSchemaFile)
+    inputs.file(abiGeneratorScript)
+    outputs.file(generatedAbiJavaFile)
+    commandLine 'cmake',
+            "-DABI_SCHEMA_FILE=${abiSchemaFile.absolutePath}",
+            "-DABI_JAVA_OUTPUT=${generatedAbiJavaFile.absolutePath}",
+            '-P', abiGeneratorScript.absolutePath
+}
+
+tasks.named('compileJava').configure {
+    dependsOn 'generateAbiLayouts'
+}
+
 tasks.register('configureNative', Exec) {
     group = 'build'
     description = 'Configures the Windows x64 native renderer bridge.'
     inputs.dir(nativeSourceDirectory)
+    inputs.file(abiSchemaFile)
     outputs.file(new File(nativeBuildDirectory, 'CMakeCache.txt'))
     commandLine 'cmake',
             '-S', nativeSourceDirectory.asFile.absolutePath,

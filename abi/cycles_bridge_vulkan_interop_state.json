@@ -1,0 +1,25 @@
+{
+  "name": "CyclesBridgeVulkanInteropState",
+  "java_class": "VulkanInteropStateAbi",
+  "java_package": "dev.cyclesrenderer.nativebridge",
+  "size": 80,
+  "fields": [
+    { "name": "struct_size", "type": "uint32", "offset": 0 },
+    { "name": "struct_version", "type": "uint32", "offset": 4 },
+    { "name": "flags", "type": "uint32", "offset": 8 },
+    { "name": "width", "type": "uint32", "offset": 12 },
+    { "name": "height", "type": "uint32", "offset": 16 },
+    { "name": "sample_count", "type": "uint32", "offset": 20 },
+    { "name": "generation", "type": "uint64", "offset": 24 },
+    { "name": "completed_frame_count", "type": "uint64", "offset": 32 },
+    { "name": "last_sync_micros", "type": "uint32", "offset": 40 },
+    { "name": "ema_sync_micros", "type": "uint32", "offset": 44 },
+    { "name": "max_sync_micros", "type": "uint32", "offset": 48 },
+    { "name": "slot_index", "type": "uint32", "offset": 52 },
+    { "name": "slot_count", "type": "uint32", "offset": 56 },
+    { "name": "ready_slot_count", "type": "uint32", "offset": 60 },
+    { "name": "producer_wait_count", "type": "uint64", "offset": 64 },
+    { "name": "depth_width", "type": "uint32", "offset": 72 },
+    { "name": "depth_height", "type": "uint32", "offset": 76 }
+  ]
+}

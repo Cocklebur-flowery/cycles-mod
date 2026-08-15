@@ -4,7 +4,7 @@
 
 检查日期：2026-08-15（Asia/Shanghai）
 
-检查对象：PBR 绿色纹理门禁复核（产品基线 `355ff77`）
+检查对象：S5 ABI schema 最小原型（工作树基于 `ce94544`）
 
 本文件只描述上述提交附近的当前事实、验证证据和已知红项。它不是历史阶段
 记录，也不替代源码、构建配置、ABI 断言或测试。ABI、稳定契约、验证入口或
@@ -38,15 +38,16 @@
 | 当前 C ABI | ABI 43 | `NativeBridge.ABI_VERSION`、`cycles_bridge_abi_version()`、native build info |
 | 设置结构 | `CyclesBridgeRenderSettings` 为 392 bytes | Java layout 检查、C++ `static_assert` |
 | 诊断结构 | `CyclesBridgeDiagnostics` 为 672 bytes | Java layout 检查、C++ `static_assert` |
-| Vulkan interop | buffer/state 均为 80 bytes；state 的 depth dimensions 位于尾部 | Java layout 检查、C++ `static_assert` |
+| Vulkan interop | buffer/state 均为 80 bytes；state 的 depth dimensions 位于尾部 | `cycles_bridge_vulkan_interop_state.json`、生成的 Java layout、生成的 C++ `static_assert` |
 | Java 测试 | camera 自动曝光/对焦/射线/直方图与 LabPBR 资源测试 | `src/test/java` |
 | 项目验证入口 | Gradle `verifyProject` 先执行 Java `build`，再运行所选 native 变体的全部 CTest | `build.gradle` |
 | Native 测试入口 | CTest 注册 5 个独立 smoke 能力域与 `cyclesrenderer_scene_update` | `native/CMakeLists.txt` |
 | Native smoke 结构 | 无参数入口保留完整顺序；CTest 通过 `--suite` 独立报告 contract、color、render、denoiser 与 scene-lifecycle | `native/tests/cycles_bridge_smoke*.cpp` |
 
-跨语言 ABI 目前仍由 C 头结构、C++ size/offset 断言、Java `MemoryLayout` 和
-smoke contract 多处人工维护。断言能够发现部分漂移，但尚不存在单一 schema
-生成链。
+S5 仅将 `CyclesBridgeVulkanInteropState` 作为最小原型：单一 JSON schema 生成
+Java `MemoryLayout`/offset 常量和 C++ 全字段 size/offset 断言。公开 C 头中的结构
+声明保持不变，其他 ABI 结构仍由 C 头、C++ 断言、Java layout 和 smoke contract
+多处人工维护。因此这不是全量 ABI 生成链，也没有改变 ABI 43 或结构布局。
 
 ## 3. 已收口的启动故障
 
@@ -128,6 +129,28 @@ run-client.cmd verifyProject -PexperimentalDlss=true --rerun-tasks --console=pla
 2026-08-15 DLSS 聚焦复核得到相同结果：绿色断言通过，后续相机、DoF 与 pass
 viewer 场景均执行，约 145 秒在独立的 `panorama 0` 等待处超时。因此绿色纹理
 门禁已在默认和 DLSS 两种 native 变体关闭；全景超时是下一项独立红项。
+
+### 4.4 S5 ABI schema 最小原型
+
+执行命令：
+
+```text
+run-client.cmd compileJava --rerun-tasks --console=plain
+run-client.cmd test jar --rerun-tasks --console=plain
+run-client.cmd buildNative --rerun-tasks --console=plain
+run-client.cmd buildNative -PexperimentalDlss=true --rerun-tasks --console=plain
+ctest --test-dir build/native --build-config Release -R ^cyclesrenderer_smoke_contract$ --output-on-failure
+ctest --test-dir build/native-dlss --build-config Release -R ^cyclesrenderer_smoke_contract$ --output-on-failure
+```
+
+| 领域 | 状态 | 结果 |
+| --- | --- | --- |
+| schema 生成 | `PASS` | 同一 CMake 生成器产出 Java layout/offset 常量和 C++ 全字段断言 |
+| Java compile/test/jar | `PASS` | 生成任务接入 source set，编译、现有测试与打包成功 |
+| 默认 Native build/contract | `PASS` | 生成断言参与 DLL 编译；contract CTest 通过 |
+| DLSS Native build/contract | `PASS` | 生成断言参与 DLSS DLL 编译；contract CTest 通过 |
+| ABI 兼容性 | `PASS` | ABI 仍为 43，interop state 仍为 80 bytes，字段顺序与 offset 未变 |
+| 完整 `verifyProject` | `NOT RUN` | 已知独立 `panorama 0` 红项仍会阻断完整 render suite，本阶段未重复消耗该长链验证 |
 
 ## 5. 分域测试结果
 
@@ -212,8 +235,10 @@ smoke ready frame 推断。
    两种 native 变体均证明帧发布正常，内容断言保持不变并独立报告。
 4. `PBR BUG DONE`：默认与 DLSS 均通过未放宽的绿色纹理内容断言；修复隔离了
    CUTOUT 颜色基准与 WATER/玻璃材质覆盖场景。
-5. `PANORAMA BUG NEXT`：定位并关闭默认、DLSS 共同的 `panorama 0` 帧发布超时。
-6. `S5`：上述红项关闭后，为一个小型 interop 结构建立 ABI schema 生成原型。
-7. 完成上述门禁后，才开始 `NativeBridge` 或 `cycles_engine.cpp` 的生产代码拆分。
+5. `S5 DONE`：经用户明确允许与 panorama 红项解耦，已为
+   `CyclesBridgeVulkanInteropState` 建立单结构 schema 原型；ABI 版本、公开 C 头和
+   80-byte 布局均未改变。
+6. `PANORAMA BUG NEXT`：定位并关闭默认、DLSS 共同的 `panorama 0` 帧发布超时。
+7. 完成上述稳定性门禁后，才开始 `NativeBridge` 或 `cycles_engine.cpp` 的生产代码拆分。
 
 任何新功能开发在上述稳定化阶段完成前继续冻结。

@@ -404,25 +404,6 @@ public final class NativeBridge {
                     JAVA_INT.withName("slot_stride_bytes"),
                     JAVA_LONG.withName("ready_semaphore_handle"),
                     JAVA_LONG.withName("release_semaphore_handle"));
-    private static final MemoryLayout VULKAN_INTEROP_STATE_LAYOUT =
-            MemoryLayout.structLayout(
-                    JAVA_INT.withName("struct_size"),
-                    JAVA_INT.withName("struct_version"),
-                    JAVA_INT.withName("flags"),
-                    JAVA_INT.withName("width"),
-                    JAVA_INT.withName("height"),
-                    JAVA_INT.withName("sample_count"),
-                    JAVA_LONG.withName("generation"),
-                    JAVA_LONG.withName("completed_frame_count"),
-                    JAVA_INT.withName("last_sync_micros"),
-                    JAVA_INT.withName("ema_sync_micros"),
-                    JAVA_INT.withName("max_sync_micros"),
-                    JAVA_INT.withName("slot_index"),
-                    JAVA_INT.withName("slot_count"),
-                    JAVA_INT.withName("ready_slot_count"),
-                    JAVA_LONG.withName("producer_wait_count"),
-                    JAVA_INT.withName("depth_width"),
-                    JAVA_INT.withName("depth_height"));
     private static final MemoryLayout VERTEX_LAYOUT = MemoryLayout.structLayout(
             JAVA_FLOAT.withName("position_x"),
             JAVA_FLOAT.withName("position_y"),
@@ -472,7 +453,8 @@ public final class NativeBridge {
                 || COLOR_LUT_DESCRIPTOR_LAYOUT.byteSize() != 72L
                 || DIAGNOSTICS_LAYOUT.byteSize() != 672L
                 || VULKAN_INTEROP_BUFFER_LAYOUT.byteSize() != 80L
-                || VULKAN_INTEROP_STATE_LAYOUT.byteSize() != 80L
+                || VulkanInteropStateAbi.LAYOUT.byteSize()
+                        != VulkanInteropStateAbi.BYTE_SIZE
                 || VERTEX_LAYOUT.byteSize() != 40L
                 || TRIANGLE_LAYOUT.byteSize() != 16L
                 || MATERIAL_LAYOUT.byteSize() != 32L
@@ -886,7 +868,7 @@ public final class NativeBridge {
             this.capabilitiesSegment = libraryArena.allocate(CAPABILITIES_LAYOUT);
             this.diagnosticsSegment = libraryArena.allocate(DIAGNOSTICS_LAYOUT);
             this.vulkanInteropStateSegment = libraryArena.allocate(
-                    VULKAN_INTEROP_STATE_LAYOUT);
+                    VulkanInteropStateAbi.LAYOUT);
             this.framePixelsSegment = libraryArena.allocate(MAX_NATIVE_FRAME_BYTES, 16);
             this.framePixels = framePixelsSegment.asByteBuffer();
             this.buildInfo = buildInfo;
@@ -1172,28 +1154,46 @@ public final class NativeBridge {
                 VulkanInteropStateCall call) throws Throwable {
             vulkanInteropStateSegment.fill((byte) 0);
             vulkanInteropStateSegment.set(
-                    JAVA_INT, 0L,
-                    Math.toIntExact(VULKAN_INTEROP_STATE_LAYOUT.byteSize()));
-            vulkanInteropStateSegment.set(JAVA_INT, 4L, STRUCT_VERSION);
+                    JAVA_INT, VulkanInteropStateAbi.STRUCT_SIZE_OFFSET,
+                    Math.toIntExact(VulkanInteropStateAbi.BYTE_SIZE));
+            vulkanInteropStateSegment.set(
+                    JAVA_INT, VulkanInteropStateAbi.STRUCT_VERSION_OFFSET,
+                    STRUCT_VERSION);
             checkRendererStatus(
                     call.invoke(renderer, vulkanInteropStateSegment),
                     "Vulkan interop state query");
             return new VulkanInteropState(
-                    vulkanInteropStateSegment.get(JAVA_INT, 8L),
-                    vulkanInteropStateSegment.get(JAVA_INT, 12L),
-                    vulkanInteropStateSegment.get(JAVA_INT, 16L),
-                    vulkanInteropStateSegment.get(JAVA_INT, 20L),
-                    vulkanInteropStateSegment.get(JAVA_LONG, 24L),
-                    vulkanInteropStateSegment.get(JAVA_LONG, 32L),
-                    vulkanInteropStateSegment.get(JAVA_INT, 40L),
-                    vulkanInteropStateSegment.get(JAVA_INT, 44L),
-                    vulkanInteropStateSegment.get(JAVA_INT, 48L),
-                    vulkanInteropStateSegment.get(JAVA_INT, 52L),
-                    vulkanInteropStateSegment.get(JAVA_INT, 56L),
-                    vulkanInteropStateSegment.get(JAVA_INT, 60L),
-                    vulkanInteropStateSegment.get(JAVA_LONG, 64L),
-                    vulkanInteropStateSegment.get(JAVA_INT, 72L),
-                    vulkanInteropStateSegment.get(JAVA_INT, 76L));
+                    vulkanInteropStateSegment.get(
+                            JAVA_INT, VulkanInteropStateAbi.FLAGS_OFFSET),
+                    vulkanInteropStateSegment.get(
+                            JAVA_INT, VulkanInteropStateAbi.WIDTH_OFFSET),
+                    vulkanInteropStateSegment.get(
+                            JAVA_INT, VulkanInteropStateAbi.HEIGHT_OFFSET),
+                    vulkanInteropStateSegment.get(
+                            JAVA_INT, VulkanInteropStateAbi.SAMPLE_COUNT_OFFSET),
+                    vulkanInteropStateSegment.get(
+                            JAVA_LONG, VulkanInteropStateAbi.GENERATION_OFFSET),
+                    vulkanInteropStateSegment.get(
+                            JAVA_LONG,
+                            VulkanInteropStateAbi.COMPLETED_FRAME_COUNT_OFFSET),
+                    vulkanInteropStateSegment.get(
+                            JAVA_INT, VulkanInteropStateAbi.LAST_SYNC_MICROS_OFFSET),
+                    vulkanInteropStateSegment.get(
+                            JAVA_INT, VulkanInteropStateAbi.EMA_SYNC_MICROS_OFFSET),
+                    vulkanInteropStateSegment.get(
+                            JAVA_INT, VulkanInteropStateAbi.MAX_SYNC_MICROS_OFFSET),
+                    vulkanInteropStateSegment.get(
+                            JAVA_INT, VulkanInteropStateAbi.SLOT_INDEX_OFFSET),
+                    vulkanInteropStateSegment.get(
+                            JAVA_INT, VulkanInteropStateAbi.SLOT_COUNT_OFFSET),
+                    vulkanInteropStateSegment.get(
+                            JAVA_INT, VulkanInteropStateAbi.READY_SLOT_COUNT_OFFSET),
+                    vulkanInteropStateSegment.get(
+                            JAVA_LONG, VulkanInteropStateAbi.PRODUCER_WAIT_COUNT_OFFSET),
+                    vulkanInteropStateSegment.get(
+                            JAVA_INT, VulkanInteropStateAbi.DEPTH_WIDTH_OFFSET),
+                    vulkanInteropStateSegment.get(
+                            JAVA_INT, VulkanInteropStateAbi.DEPTH_HEIGHT_OFFSET));
         }
 
         @FunctionalInterface

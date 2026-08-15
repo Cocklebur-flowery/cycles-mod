@@ -1,6 +1,7 @@
 #include "cycles_bridge.h"
 
 #include "cycles_engine.h"
+#include "cycles_bridge_vulkan_interop_state_asserts.h"
 
 #include <Windows.h>
 
@@ -78,12 +79,6 @@ static_assert(offsetof(CyclesBridgeVulkanInteropBuffer, memory_handle) == 32);
 static_assert(offsetof(CyclesBridgeVulkanInteropBuffer, device_uuid) == 40);
 static_assert(offsetof(CyclesBridgeVulkanInteropBuffer, slot_count) == 56);
 static_assert(offsetof(CyclesBridgeVulkanInteropBuffer, ready_semaphore_handle) == 64);
-static_assert(sizeof(CyclesBridgeVulkanInteropState) == 80);
-static_assert(offsetof(CyclesBridgeVulkanInteropState, generation) == 24);
-static_assert(offsetof(CyclesBridgeVulkanInteropState, last_sync_micros) == 40);
-static_assert(offsetof(CyclesBridgeVulkanInteropState, producer_wait_count) == 64);
-static_assert(offsetof(CyclesBridgeVulkanInteropState, depth_width) == 72);
-static_assert(offsetof(CyclesBridgeVulkanInteropState, depth_height) == 76);
 static_assert(sizeof(CyclesBridgeVertex) == 40);
 static_assert(offsetof(CyclesBridgeVertex, packed_rgba) == 32);
 static_assert(sizeof(CyclesBridgeTriangle) == 16);

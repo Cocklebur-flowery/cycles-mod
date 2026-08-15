@@ -14,6 +14,39 @@ set(CYCLES_INSTALL_DIR "${CYCLESRENDERER_ROOT}/.deps/cycles-install" CACHE PATH 
 set(CYCLES_WINDOWS_LIB_DIR "${CYCLES_SOURCE_DIR}/lib/windows_x64" CACHE PATH "Blender Windows dependency tree")
 set(OIDN_ROOT_DIR "${CYCLES_WINDOWS_LIB_DIR}/openimagedenoise")
 
+set(
+    CYCLESRENDERER_ABI_SCHEMA
+    "${CYCLESRENDERER_ROOT}/abi/cycles_bridge_vulkan_interop_state.json"
+)
+set(
+    CYCLESRENDERER_ABI_GENERATOR
+    "${CMAKE_CURRENT_SOURCE_DIR}/cmake/GenerateAbiLayout.cmake"
+)
+set(
+    CYCLESRENDERER_GENERATED_ABI_DIR
+    "${CMAKE_BINARY_DIR}/generated/abi"
+)
+set(
+    CYCLESRENDERER_VULKAN_INTEROP_STATE_ASSERTS
+    "${CYCLESRENDERER_GENERATED_ABI_DIR}/cycles_bridge_vulkan_interop_state_asserts.h"
+)
+set_property(
+    DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+    "${CYCLESRENDERER_ABI_SCHEMA}"
+    "${CYCLESRENDERER_ABI_GENERATOR}"
+)
+execute_process(
+    COMMAND
+        "${CMAKE_COMMAND}"
+        "-DABI_SCHEMA_FILE=${CYCLESRENDERER_ABI_SCHEMA}"
+        "-DABI_CPP_OUTPUT=${CYCLESRENDERER_VULKAN_INTEROP_STATE_ASSERTS}"
+        -P "${CYCLESRENDERER_ABI_GENERATOR}"
+    RESULT_VARIABLE CYCLESRENDERER_ABI_GENERATION_RESULT
+)
+if(NOT CYCLESRENDERER_ABI_GENERATION_RESULT EQUAL 0)
+    message(FATAL_ERROR "Failed to generate native ABI layout assertions")
+endif()
+
 set(CYCLES_RELEASE_LIB_DIR "${CYCLES_BUILD_DIR}/lib/Release")
 
 function(require_file path description)
@@ -83,6 +116,7 @@ target_include_directories(cyclesrenderer_native
     PUBLIC
         include
     PRIVATE
+        "${CYCLESRENDERER_GENERATED_ABI_DIR}"
         "${CYCLES_SOURCE_DIR}/src"
         "${CYCLES_SOURCE_DIR}/third_party/atomic"
         "${CYCLES_SOURCE_DIR}/third_party/cuew/include"
