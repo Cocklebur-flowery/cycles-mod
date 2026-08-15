@@ -28,9 +28,10 @@ bool run_render_scenarios(SmokeContext& context) {
         {2.0F, 4.0F, 0.0F, 0.0F, 0.0F, 1.0F, 1.0F, 1.0F, 0xFFFFFFFFU, 0U},
         {-2.0F, 4.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F, 1.0F, 0xFFFFFFFFU, 0U},
     }};
+    // Keep the initial color baseline entirely CUTOUT; transmission materials are exercised later.
     triangles = {{
         {0U, 1U, 2U, 0U},
-        {0U, 2U, 3U, 1U},
+        {0U, 2U, 3U, 0U},
     }};
     const std::array<CyclesBridgeMaterial, 3> materials = {{
         {0U,
