@@ -476,32 +476,20 @@ public final class NativeBridge {
                 int slotStrideBytes) throws Throwable {
             boolean nativeCalled = false;
             try (Arena arena = Arena.ofConfined()) {
-                if (width <= 0 || height <= 0 || allocationBytes <= 0L
-                        || memoryHandle == 0L || readySemaphoreHandle == 0L
-                        || releaseSemaphoreHandle == 0L || slotCount <= 0
-                        || slotStrideBytes <= 0) {
-                    throw new IllegalArgumentException(
-                            "invalid Vulkan interop buffer descriptor");
-                }
-                byte[] uuid = parseDeviceUuid(deviceUuid);
-                MemorySegment descriptor = arena.allocate(VULKAN_INTEROP_BUFFER_LAYOUT);
-                descriptor.set(
-                        JAVA_INT, 0L,
-                        Math.toIntExact(VULKAN_INTEROP_BUFFER_LAYOUT.byteSize()));
-                descriptor.set(JAVA_INT, 4L, STRUCT_VERSION);
-                descriptor.set(JAVA_INT, 8L, width);
-                descriptor.set(JAVA_INT, 12L, height);
-                descriptor.set(JAVA_INT, 16L, PIXEL_FORMAT_RGBA16_FLOAT);
-                descriptor.set(JAVA_INT, 20L, 1);
-                descriptor.set(JAVA_LONG, 24L, allocationBytes);
-                descriptor.set(JAVA_LONG, 32L, memoryHandle);
-                for (int index = 0; index < uuid.length; index++) {
-                    descriptor.set(JAVA_BYTE, 40L + index, uuid[index]);
-                }
-                descriptor.set(JAVA_INT, 56L, slotCount);
-                descriptor.set(JAVA_INT, 60L, slotStrideBytes);
-                descriptor.set(JAVA_LONG, 64L, readySemaphoreHandle);
-                descriptor.set(JAVA_LONG, 72L, releaseSemaphoreHandle);
+                MemorySegment descriptor =
+                        NativeVulkanInteropMarshaller.writeBufferDescriptor(
+                                arena,
+                                STRUCT_VERSION,
+                                PIXEL_FORMAT_RGBA16_FLOAT,
+                                width,
+                                height,
+                                allocationBytes,
+                                memoryHandle,
+                                readySemaphoreHandle,
+                                releaseSemaphoreHandle,
+                                deviceUuid,
+                                slotCount,
+                                slotStrideBytes);
                 nativeCalled = true;
                 int status = (int) library.bindVulkanInteropBuffer.invokeExact(
                         renderer, descriptor);
@@ -544,70 +532,17 @@ public final class NativeBridge {
 
         private VulkanInteropState queryVulkanInteropState(
                 VulkanInteropStateCall call) throws Throwable {
-            vulkanInteropStateSegment.fill((byte) 0);
-            vulkanInteropStateSegment.set(
-                    JAVA_INT, VulkanInteropStateAbi.STRUCT_SIZE_OFFSET,
-                    Math.toIntExact(VulkanInteropStateAbi.BYTE_SIZE));
-            vulkanInteropStateSegment.set(
-                    JAVA_INT, VulkanInteropStateAbi.STRUCT_VERSION_OFFSET,
-                    STRUCT_VERSION);
+            NativeVulkanInteropMarshaller.prepareState(
+                    vulkanInteropStateSegment, STRUCT_VERSION);
             checkRendererStatus(
                     call.invoke(renderer, vulkanInteropStateSegment),
                     "Vulkan interop state query");
-            return new VulkanInteropState(
-                    vulkanInteropStateSegment.get(
-                            JAVA_INT, VulkanInteropStateAbi.FLAGS_OFFSET),
-                    vulkanInteropStateSegment.get(
-                            JAVA_INT, VulkanInteropStateAbi.WIDTH_OFFSET),
-                    vulkanInteropStateSegment.get(
-                            JAVA_INT, VulkanInteropStateAbi.HEIGHT_OFFSET),
-                    vulkanInteropStateSegment.get(
-                            JAVA_INT, VulkanInteropStateAbi.SAMPLE_COUNT_OFFSET),
-                    vulkanInteropStateSegment.get(
-                            JAVA_LONG, VulkanInteropStateAbi.GENERATION_OFFSET),
-                    vulkanInteropStateSegment.get(
-                            JAVA_LONG,
-                            VulkanInteropStateAbi.COMPLETED_FRAME_COUNT_OFFSET),
-                    vulkanInteropStateSegment.get(
-                            JAVA_INT, VulkanInteropStateAbi.LAST_SYNC_MICROS_OFFSET),
-                    vulkanInteropStateSegment.get(
-                            JAVA_INT, VulkanInteropStateAbi.EMA_SYNC_MICROS_OFFSET),
-                    vulkanInteropStateSegment.get(
-                            JAVA_INT, VulkanInteropStateAbi.MAX_SYNC_MICROS_OFFSET),
-                    vulkanInteropStateSegment.get(
-                            JAVA_INT, VulkanInteropStateAbi.SLOT_INDEX_OFFSET),
-                    vulkanInteropStateSegment.get(
-                            JAVA_INT, VulkanInteropStateAbi.SLOT_COUNT_OFFSET),
-                    vulkanInteropStateSegment.get(
-                            JAVA_INT, VulkanInteropStateAbi.READY_SLOT_COUNT_OFFSET),
-                    vulkanInteropStateSegment.get(
-                            JAVA_LONG, VulkanInteropStateAbi.PRODUCER_WAIT_COUNT_OFFSET),
-                    vulkanInteropStateSegment.get(
-                            JAVA_INT, VulkanInteropStateAbi.DEPTH_WIDTH_OFFSET),
-                    vulkanInteropStateSegment.get(
-                            JAVA_INT, VulkanInteropStateAbi.DEPTH_HEIGHT_OFFSET));
+            return NativeVulkanInteropMarshaller.decodeState(vulkanInteropStateSegment);
         }
 
         @FunctionalInterface
         private interface VulkanInteropStateCall {
             int invoke(MemorySegment renderer, MemorySegment state) throws Throwable;
-        }
-
-        private static byte[] parseDeviceUuid(String value) {
-            if (value == null || value.length() != 32) {
-                throw new IllegalArgumentException("invalid Vulkan device UUID: " + value);
-            }
-            byte[] result = new byte[16];
-            for (int index = 0; index < result.length; index++) {
-                int high = Character.digit(value.charAt(index * 2), 16);
-                int low = Character.digit(value.charAt(index * 2 + 1), 16);
-                if (high < 0 || low < 0) {
-                    throw new IllegalArgumentException(
-                            "invalid Vulkan device UUID: " + value);
-                }
-                result[index] = (byte) ((high << 4) | low);
-            }
-            return result;
         }
 
         private void upsertSection(SectionGeometrySnapshot snapshot) throws Throwable {

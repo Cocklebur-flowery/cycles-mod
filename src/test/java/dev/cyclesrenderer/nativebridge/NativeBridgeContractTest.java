@@ -26,6 +26,8 @@ import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static java.lang.foreign.ValueLayout.JAVA_BYTE;
+import static java.lang.foreign.ValueLayout.JAVA_INT;
+import static java.lang.foreign.ValueLayout.JAVA_LONG;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -45,6 +47,8 @@ class NativeBridgeContractTest {
             "529c0c70873dfad6f97f474c7ec510e769e3c232b9e1a063d1e49623ce0f3128";
     private static final String EXPECTED_FRAME_REQUEST_BYTES_SHA256 =
             "2e9b6a719c40ab8f25855bb56f29639504d6d3283d89c5428aaddebe01d8b2fe";
+    private static final String EXPECTED_VULKAN_REQUEST_BYTES_SHA256 =
+            "3b965ce4bfa01deb727a33b90c356149eb18907bd29518ef22a2687d430abb4b";
 
     @Test
     void publicFacadeRemainsStable() throws IllegalAccessException {
@@ -235,6 +239,93 @@ class NativeBridgeContractTest {
             lease.close();
         }
         assertEquals(1, releaseCount.get());
+    }
+
+    @Test
+    void nativeVulkanMarshallerPreservesRequestBytesAndErrors() {
+        try (Arena arena = Arena.ofConfined()) {
+            MemorySegment descriptor =
+                    NativeVulkanInteropMarshaller.writeBufferDescriptor(
+                            arena,
+                            1,
+                            NativeBridge.PIXEL_FORMAT_RGBA16_FLOAT,
+                            1920,
+                            1080,
+                            0x0102030405060708L,
+                            0x1112131415161718L,
+                            0x2122232425262728L,
+                            0x3132333435363738L,
+                            "00112233445566778899aabbccddeeff",
+                            3,
+                            24883200);
+            MemorySegment state = arena.allocate(VulkanInteropStateAbi.LAYOUT);
+            state.fill((byte) 0x5a);
+            NativeVulkanInteropMarshaller.prepareState(state, 1);
+
+            String fingerprint = sha256(concatenate(descriptor, state));
+            assertEquals(EXPECTED_VULKAN_REQUEST_BYTES_SHA256, fingerprint,
+                    "Native Vulkan request bytes changed: " + fingerprint);
+
+            IllegalArgumentException invalidDescriptor = assertThrows(
+                    IllegalArgumentException.class,
+                    () -> NativeVulkanInteropMarshaller.writeBufferDescriptor(
+                            arena, 1, 2, 0, 1080, 1L, 1L, 2L, 3L,
+                            "00112233445566778899aabbccddeeff", 3, 8));
+            assertEquals(
+                    "invalid Vulkan interop buffer descriptor",
+                    invalidDescriptor.getMessage());
+
+            IllegalArgumentException invalidUuid = assertThrows(
+                    IllegalArgumentException.class,
+                    () -> NativeVulkanInteropMarshaller.writeBufferDescriptor(
+                            arena, 1, 2, 1920, 1080, 1L, 1L, 2L, 3L,
+                            "bad", 3, 8));
+            assertEquals("invalid Vulkan device UUID: bad", invalidUuid.getMessage());
+        }
+    }
+
+    @Test
+    void nativeVulkanMarshallerPreservesStateDecoding() {
+        try (Arena arena = Arena.ofConfined()) {
+            MemorySegment state = arena.allocate(VulkanInteropStateAbi.LAYOUT);
+            NativeVulkanInteropMarshaller.prepareState(state, 1);
+            state.set(JAVA_INT,
+                    VulkanInteropStateAbi.FLAGS_OFFSET, 31);
+            state.set(JAVA_INT,
+                    VulkanInteropStateAbi.WIDTH_OFFSET, 1920);
+            state.set(JAVA_INT,
+                    VulkanInteropStateAbi.HEIGHT_OFFSET, 1080);
+            state.set(JAVA_INT,
+                    VulkanInteropStateAbi.SAMPLE_COUNT_OFFSET, 64);
+            state.set(JAVA_LONG,
+                    VulkanInteropStateAbi.GENERATION_OFFSET, 101L);
+            state.set(JAVA_LONG,
+                    VulkanInteropStateAbi.COMPLETED_FRAME_COUNT_OFFSET, 202L);
+            state.set(JAVA_INT,
+                    VulkanInteropStateAbi.LAST_SYNC_MICROS_OFFSET, 303);
+            state.set(JAVA_INT,
+                    VulkanInteropStateAbi.EMA_SYNC_MICROS_OFFSET, 404);
+            state.set(JAVA_INT,
+                    VulkanInteropStateAbi.MAX_SYNC_MICROS_OFFSET, 505);
+            state.set(JAVA_INT,
+                    VulkanInteropStateAbi.SLOT_INDEX_OFFSET, 1);
+            state.set(JAVA_INT,
+                    VulkanInteropStateAbi.SLOT_COUNT_OFFSET, 3);
+            state.set(JAVA_INT,
+                    VulkanInteropStateAbi.READY_SLOT_COUNT_OFFSET, 2);
+            state.set(JAVA_LONG,
+                    VulkanInteropStateAbi.PRODUCER_WAIT_COUNT_OFFSET, 606L);
+            state.set(JAVA_INT,
+                    VulkanInteropStateAbi.DEPTH_WIDTH_OFFSET, 1280);
+            state.set(JAVA_INT,
+                    VulkanInteropStateAbi.DEPTH_HEIGHT_OFFSET, 720);
+
+            assertEquals(
+                    new NativeBridge.VulkanInteropState(
+                            31, 1920, 1080, 64, 101L, 202L,
+                            303, 404, 505, 1, 3, 2, 606L, 1280, 720),
+                    NativeVulkanInteropMarshaller.decodeState(state));
+        }
     }
 
     private static List<String> publicSurfaceLines() throws IllegalAccessException {
