@@ -5,7 +5,7 @@
 检查日期：2026-08-16（Asia/Shanghai）
 
 检查对象：C/B/E 职责治理、E6 Minecraft 生命周期验收、R0 独立热点复核
-与 R0A/R0B/R1 收口（R1 基于 `6cc1028` 的最终工作树；E6 实机证据对应
+与 R0A/R0B/R1/R2 收口（R2 基于 `45d0a75` 的最终工作树；E6 实机证据对应
 父提交 `976f15c` 的最终工作树）
 
 本文件只描述上述提交附近的当前事实、验证证据和已知红项。它不是历史阶段
@@ -233,6 +233,7 @@ Raw，再显式请求零延迟 Still，并继续要求真实 Denoised 新帧。�
 | DLSS 持续移动稳定性 | `PASS` | revision 与 interop generation 持续发布；未出现 renderer fallback/failed，最终正常退出 |
 | R0B binding 边界生命周期 | `PASS` | 用户确认 F8 启用首帧、持续更新、关闭、再启用与退出正常；2026-08-16 14:37–14:38 日志记录两次 ABI 43/OptiX 自检、两次 FrameGraph 接管、两次恢复原版与 FML 正常关闭 |
 | R1 controller 边界生命周期 | `PASS` | 用户确认 F9/F10 及 F8 启用、首帧、移动、关闭、再启用与退出正常；2026-08-16 14:51–14:52 日志记录两次 ABI 43/OptiX bridge ready、两次 FrameGraph 接管、两次恢复原版与 Minecraft/FML 正常关闭，未记录 native frame failure 或 renderer fallback |
+| R2 allocation / resize 生命周期 | `PASS` | 用户确认 `480x270`→`960x540` capacity rebuild、异形窗口 resize、持续出帧、F8 关闭/再启用/首帧与退出正常；2026-08-16 15:16–15:20 日志记录容量重建、重建后重新接管、独立关闭/再启用、再次恢复原版与 Minecraft/FML 正常关闭，未记录 Cycles failure/fallback |
 
 这些项目必须通过实际客户端验证关闭，不能由 Java、Native 编译或 320x180
 smoke ready frame 推断。
@@ -260,8 +261,9 @@ smoke ready frame 推断。
   接线、事件薄转发和 `ensureNativeBridgeReady()`、
   `isExperimentalRendererEnabled()`、`shouldReplaceVanillaWorld()` 三个公开静态门面，
   同时保持 MOD/资源/key ID、Logger category、事件 priority/顺序与关闭顺序。
-- `VulkanFrameInterop` 存在 allocation/native bind 与逐帧 copy/fence/target 两套生命周期，
-  R2 抽离 allocation；frame copy 继续由原门面协调。公开方法、telemetry 字段、
+- R2 已将 `VulkanFrameInterop` 的 allocation/native bind 生命周期抽入 431 行的
+  package-private `VulkanSharedAllocation`；原门面由 917 行减至 574 行并继续独占逐帧
+  copy/fence/target 协调。公开方法、telemetry 字段、
   native 8 B/px color-only 兼容、Java 12 B/px color+depth 分配、3-slot 策略/上限、
   HANDLE/timeline/release 与 drain-before-unbind/close 顺序均为稳定契约。
 - R0A 已将 scene-lifecycle suite 移入
@@ -340,8 +342,8 @@ smoke ready frame 推断。
     默认与 DLSS 完整门禁均通过，render/scene-lifecycle 无 Skipped。
 17. `R0B DONE`：engine 到 display driver 已收口为单一 binding 边界；
     默认/DLSS 完整门禁与 Minecraft DLSS 启用、关闭、再启用、退出验收通过。
-18. `R1 DONE / R2 NEXT`：客户端 renderer controller 已完成抽离并通过双变体门禁与
-    Minecraft 生命周期验收；下一阶段单独抽离 Vulkan allocation，并执行对应门禁与
-    capacity/resize/退出里程碑。
+18. `R1 DONE / R2 DONE / R5 NEXT`：客户端 renderer controller 与 Vulkan allocation
+    已分别完成抽离并通过双变体门禁；Minecraft 的 capacity rebuild、异形窗口 resize、
+    关闭/再启用和退出里程碑也已通过。下一阶段只做最终热点与工程基线收口。
 
-新功能开发继续冻结；当前只允许按路线图 R2、R5 串行收口。
+新功能开发继续冻结；当前只允许按路线图 R5 收口。

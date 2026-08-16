@@ -6,8 +6,8 @@
 
 建立基线：`6e42ee7`
 
-执行进度：C、B、E、R0、R0A、R0B 和 R1 已完成。下一阶段为 R2
-Vulkan interop allocation 拆分。
+执行进度：C、B、E、R0、R0A、R0B、R1 和 R2 已完成。下一阶段为 R5
+最终基线收口。
 
 本文件规定稳定化门禁关闭后的生产代码职责拆分顺序。它描述治理边界、依赖、
 验证和提交纪律，不替代当前源码、ABI schema、测试或
@@ -77,7 +77,7 @@ C  配置职责拆分
 | C | `DONE` | 配置持久化/runtime snapshot、Draft、option model 与 catalog 已分离 |
 | B | `DONE` | NativeBridge 公共门面稳定，layouts、symbols、marshalling、decoding 与 session ownership 已分离 |
 | E | `DONE` | Engine 已收口为渲染协调器；默认/DLSS 自动门禁和 E6 Minecraft 生命周期验收通过 |
-| R | `IN PROGRESS` | R0 二次独立复核与 R0A/R0B/R1 收口已完成；R2 为当前阶段，R3/R4 明确不机械扩张 |
+| R | `IN PROGRESS` | R0 二次独立复核与 R0A/R0B/R1/R2 收口已完成；R5 为当前阶段，R3/R4 明确不机械扩张 |
 
 配置阶段是低风险的拆分纪律验证，不替代两个主要核心文件。配置阶段完成后必须
 立即进入 `NativeBridge`，不得无限扩张 UI 或配置功能。
@@ -306,7 +306,7 @@ Scene/Camera revision 协调、状态、首个错误和 reset/close。
 | 对象 | 判定 | 证据与处置 |
 | --- | --- | --- |
 | `CyclesRendererMod` | `DONE` | R1 已将 renderer 运行状态机抽入 package-private `CyclesRendererController`；入口类由 624 行减至 171 行，只保留 NeoForge/key/config/reload 接线、三个公开静态门面与薄转发 |
-| `VulkanFrameInterop` | `SPLIT` | 917 行同时拥有长寿命 Vulkan allocation/Win32 HANDLE/native bind 和逐帧 acquire/copy/fence/TextureTarget 两套生命周期 |
+| `VulkanFrameInterop` | `DONE` | R2 已将长寿命 allocation/HANDLE/native bind 抽入 431 行的 package-private `VulkanSharedAllocation`；原门面由 917 行减至 574 行并只协调逐帧 acquire/copy/fence/TextureTarget 与公开 telemetry |
 | `vulkan_interop_display.h` | `DONE` | R0B 已删除向 engine 暴露的 7 个可变引用 getter；display driver 现只接收单一 `VulkanInteropBinding&` 边界，文件与状态所有权不变 |
 | `cycles_bridge_smoke_render_scene.cpp` | `DONE` | R0A 已将 115 行 scene-lifecycle 函数体机械移入独立源文件；原文件现为 522 行且只定义 render suite |
 | `CyclesSettingsList` | `KEEP` | 512 行均服务 F9 列表筛选、依赖可见性、控件构造、输入归一化与 narration；没有第二资源生命周期或反向依赖 |
@@ -398,6 +398,13 @@ DLSS F8 启用、首帧、关闭、再启用和退出。
 建议提交：`refactor(runtime): isolate the client renderer controller`
 
 ### R2：抽离 Vulkan interop allocation
+
+状态：`DONE`。package-private `VulkanSharedAllocation` 现独占 capability validation、
+VkBuffer/VkDeviceMemory、ready/release timeline semaphore、Win32 HANDLE 导出与转交、
+native bind/unbind 和 allocation close；`VulkanFrameInterop` 保留逐帧 copy 生命周期与
+原有全部公开 API。Java 构建与测试、默认和 DLSS 完整 `verifyProject` 均通过。用户随后
+完成 `480x270` 到 `960x540` capacity rebuild、异形窗口 resize、F8 关闭、再启用、
+首帧和退出验收；日志证明重建和两轮关闭/接管后正常关闭，没有 Cycles failure/fallback。
 
 从 `VulkanFrameInterop` 抽出单一 package-private allocation 组件，独占 VkBuffer、
 VkDeviceMemory、ready/release timeline semaphore、Win32 HANDLE 导出、capability validation、
