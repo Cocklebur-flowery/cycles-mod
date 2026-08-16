@@ -4,7 +4,7 @@
 
 检查日期：2026-08-16（Asia/Shanghai）
 
-检查对象：Native denoiser 与 scene lifecycle 验收（工作树基于 `38a2916`）
+检查对象：Scene revision 修复与 Minecraft 核心生命周期验收（HEAD `e3c8f1a`）
 
 本文件只描述上述提交附近的当前事实、验证证据和已知红项。它不是历史阶段
 记录，也不替代源码、构建配置、ABI 断言或测试。ABI、稳定契约、验证入口或
@@ -57,9 +57,11 @@ Java `MemoryLayout`/offset 常量和 C++ 全字段 size/offset 断言。公开 C
 | backend 初始化原始异常被通用错误覆盖 | `PASS` | `3a4812b fix(native): preserve backend initialization errors` |
 | DLSS runtime kernels 与开发安装树不同步 | `PASS` | `fca5bd6 fix(dev): synchronize DLSS runtime kernels`；用户确认原故障已修复 |
 
-`run/logs/latest.log` 对应的客户端在 18:06 启动，而最后两个修复提交在 18:07
-形成。该日志可以证明 Native bridge 曾进入 OptiX/scene staging，但不能作为
-最终产品修复基线的一次干净、提交后实机验收。
+2026-08-16 10:19 的 DLSS 客户端实机运行使用了随后原样提交为 `e3c8f1a` 的
+两文件工作树；提交动作发生在实机退出之后，期间没有继续修改产品源码。因此该次
+运行是最终源码内容的实机证据，但不是一次“提交后重新启动”的证据。提交完成后，
+默认与 DLSS 两套完整 `verifyProject` 已在 `e3c8f1a` 上重新执行并通过。两类证据
+在本基线中分别记录，不互相冒充。
 
 ## 4. 2026-08-16 自动验证与生命周期复核
 
@@ -93,12 +95,12 @@ run-client.cmd verifyProject --rerun-tasks --console=plain
 | 领域 | 状态 | 结果 |
 | --- | --- | --- |
 | Native configure/build | `PASS` | Release DLL、smoke、scene-update 目标构建成功 |
-| `cyclesrenderer_smoke_contract` | `PASS` | 4.54 秒完成 |
-| `cyclesrenderer_smoke_color` | `PASS` | 4.64 秒完成 |
-| `cyclesrenderer_smoke_render` | `PASS` | 17.70 秒完成；7 种 panorama 与 perspective restore 全部发布新帧 |
-| `cyclesrenderer_smoke_denoiser` | `PASS` | 21.50 秒；OptiX 与 OIDN 均完成 Interactive Raw → Still Denoised |
-| `cyclesrenderer_smoke_scene_lifecycle` | `PASS` | 22.57 秒；前置域全绿后实际执行，不再 Skipped |
-| `cyclesrenderer_scene_update` | `PASS` | 7.72 秒完成 |
+| `cyclesrenderer_smoke_contract` | `PASS` | 4.72 秒完成 |
+| `cyclesrenderer_smoke_color` | `PASS` | 4.62 秒完成 |
+| `cyclesrenderer_smoke_render` | `PASS` | 17.96 秒完成；7 种 panorama 与 perspective restore 全部发布新帧 |
+| `cyclesrenderer_smoke_denoiser` | `PASS` | 21.21 秒；OptiX 与 OIDN 均完成 Interactive Raw → Still Denoised |
+| `cyclesrenderer_smoke_scene_lifecycle` | `PASS` | 21.37 秒；前置域全绿后实际执行，不再 Skipped |
+| `cyclesrenderer_scene_update` | `PASS` | 5.28 秒；等待实际发布的 `scene_timing_revision` 追平请求 revision |
 
 2026-08-16 修复确认 camera type 和 panorama subtype 都属于 Cycles session 拓扑。
 二者变化现在触发 session reset，而不是只重置 accumulation。render suite 锁定每次
@@ -121,17 +123,18 @@ run-client.cmd verifyProject -PexperimentalDlss=true --rerun-tasks --console=pla
 | 领域 | 状态 | 结果 |
 | --- | --- | --- |
 | Native configure/build | `PASS` | 独立目录的 DLSS Release DLL、smoke、scene-update 目标构建成功 |
-| `cyclesrenderer_smoke_contract` | `PASS` | 5.08 秒完成 |
-| `cyclesrenderer_smoke_color` | `PASS` | 5.25 秒完成 |
-| `cyclesrenderer_smoke_render` | `PASS` | 18.84 秒完成；7 种 panorama 与 perspective restore 全部发布新帧 |
-| `cyclesrenderer_smoke_denoiser` | `PASS` | 24.12 秒；DLSS realtime、OptiX 与 OIDN 路径全部通过 |
-| `cyclesrenderer_smoke_scene_lifecycle` | `PASS` | 23.73 秒；前置域全绿后实际执行，不再 Skipped |
-| `cyclesrenderer_scene_update` | `PASS` | 5.75 秒完成 |
+| `cyclesrenderer_smoke_contract` | `PASS` | 5.11 秒完成 |
+| `cyclesrenderer_smoke_color` | `PASS` | 5.16 秒完成 |
+| `cyclesrenderer_smoke_render` | `PASS` | 18.01 秒完成；7 种 panorama 与 perspective restore 全部发布新帧 |
+| `cyclesrenderer_smoke_denoiser` | `PASS` | 23.24 秒；DLSS realtime、OptiX 与 OIDN 路径全部通过 |
+| `cyclesrenderer_smoke_scene_lifecycle` | `PASS` | 23.51 秒；前置域全绿后实际执行，不再 Skipped |
+| `cyclesrenderer_scene_update` | `PASS` | 5.70 秒；等待实际发布的 `scene_timing_revision` 追平请求 revision |
 
 默认和 DLSS 均证明首次 Perspective→Panorama、6 次 subtype 变化及最终
 Panorama→Perspective 会重建 session 并发布对应 camera revision。原 panorama
-超时已关闭；denoiser 与 scene lifecycle 随后也在两种变体实际通过。当前自动化
-验证没有已知红项，下一验收边界是最终 HEAD 的 Minecraft 实机生命周期。
+超时已关闭；denoiser 与 scene lifecycle 随后也在两种变体实际通过。`e3c8f1a`
+上的默认与 DLSS 完整自动化验证没有已知红项；Minecraft 核心实机生命周期结果见
+第 6 节。
 
 ### 4.4 S5 ABI schema 最小原型
 
@@ -191,14 +194,17 @@ Raw，再显式请求零延迟 Still，并继续要求真实 Denoised 新帧。�
 | 场景 | 状态 | 说明 |
 | --- | --- | --- |
 | 原 backend/DLSS kernel 故障 | `PASS` | 用户确认修复 |
-| 最终 HEAD 干净启动 | `NOT RUN` | 尚无一次明确在最终提交之后启动的留档 |
-| F8 启用并产生真实世界首帧 | `NOT RUN` | 最新日志跨越修复提交时间，不能用于最终验收 |
-| F8 关闭并恢复原版 | `NOT RUN` | 本基线未执行 |
-| F8 再次启用 | `NOT RUN` | 本基线未执行 |
-| resize / 动态分辨率 | `NOT RUN` | 本基线未执行 |
+| 最终 HEAD 同内容工作树启动 | `PASS` | `runDLSSclientExp.bat` 使用后来原样提交为 `e3c8f1a` 的源码启动；Native ABI 43 / OptiX 自检成功 |
+| F8 启用并产生真实世界首帧 | `PASS` | 实机确认；telemetry 最终达到 sample 64、504 sections |
+| F8 关闭并恢复原版 | `PASS` | 用户完成实机往返确认；当前日志未单独记录按键事件 |
+| F8 再次启用 | `PASS` | 用户完成连续关闭/再启用确认，无黑屏、陈旧画面或 native failure |
+| 持续移动与新区块更新 | `PASS` | scene revision 从 0 推进到 153，`scene_timing_revision` 最终追平 153；最大暂时落后 2，结束时为 0 |
+| 世界退出并重进 | `PASS` | 用户实机确认重进后可以再次启用；最终一次退出正常保存并关闭世界 |
+| resize / 动态分辨率实机 | `NOT RUN` | 默认与 DLSS native lifecycle suite 已通过，但本次未单独记录 Minecraft 窗口 resize |
 | Physical / Post-process DoF | `NOT RUN` | 本基线未执行 |
 | SDR / HDR / screenshot fallback | `NOT RUN` | 本基线未执行完整矩阵 |
-| 默认 / DLSS 持续移动稳定性 | `NOT RUN` | 本基线未执行 |
+| 默认持续移动稳定性 | `NOT RUN` | 本次实机使用 experimental DLSS 变体，不能外推默认 artifact |
+| DLSS 持续移动稳定性 | `PASS` | revision 持续发布；未出现 fallback/failed，scene queue 最大约 42 ms，最终正常退出 |
 
 这些项目必须通过实际客户端验证关闭，不能由 Java、Native 编译或 320x180
 smoke ready frame 推断。
@@ -251,8 +257,15 @@ smoke ready frame 推断。
    OptiX/OIDN；DLSS realtime 路径也通过。生产 ABI 与 renderer 实现未修改。
 8. `SCENE LIFECYCLE DONE`：默认与 DLSS 的 scene-lifecycle / dynamic resolution
    已在前置域全绿后实际执行通过，不再显示 Skipped。
-9. `MINECRAFT LIFECYCLE NEXT`：在最终提交之后完成 F8 启用首帧、持续移动、关闭、
-   再启用、resize/动态分辨率与退出验收。实机门禁关闭后，才开始 `NativeBridge`、
-   `CyclesClientConfig` 或 `cycles_engine.cpp` 的生产代码拆分。
+9. `MINECRAFT CORE LIFECYCLE DONE`：与 `e3c8f1a` 内容相同的 DLSS 工作树已完成
+   F8 启用首帧、持续移动、关闭、再启用、世界重进与退出验收；revision 153 最终
+   发布且没有 fallback/failed。窗口 resize、DoF 与 HDR 仍按第 6 节保持独立
+   `NOT RUN`，不得被本结论覆盖。
+10. `FINAL HEAD AUTOMATION DONE`：提交后默认与 DLSS 两套完整 `verifyProject`
+    均重新执行，Java build 和 6 个 native 域全部通过，没有 Skipped 或已知红项。
+11. `ARCHITECTURE REFACTOR UNBLOCKED`：可以开始低风险、串行的责任治理。第一步
+    只读核对残留 `Prototype` 类型的真实职责与调用方；确认命名边界后再做纯命名
+    阶段。随后为 `CyclesClientConfig` 建立持久化、runtime snapshot 与 editor model
+    的特征测试和拆分计划。`NativeBridge` 与 `cycles_engine.cpp` 继续后置。
 
-任何新功能开发在上述稳定化阶段完成前继续冻结。
+新功能开发继续冻结；当前只允许按上述顺序进行有特征测试保护的串行架构治理。
