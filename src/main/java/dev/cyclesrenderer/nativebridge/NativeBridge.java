@@ -4,11 +4,7 @@ import dev.cyclesrenderer.config.CyclesRenderSettings;
 import dev.cyclesrenderer.scene.SectionGeometrySnapshot;
 
 import java.lang.foreign.Arena;
-import java.lang.foreign.FunctionDescriptor;
-import java.lang.foreign.Linker;
 import java.lang.foreign.MemorySegment;
-import java.lang.foreign.SymbolLookup;
-import java.lang.invoke.MethodHandle;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.charset.StandardCharsets;
@@ -234,7 +230,7 @@ public final class NativeBridge {
         }
         BridgeState state = requireState();
         try {
-            state.closeWin32Handle.invokeExact(handle);
+            state.library.closeWin32Handle.invokeExact(handle);
         } catch (Throwable error) {
             rethrowFatalError(error);
             throw new IllegalStateException(
@@ -362,29 +358,7 @@ public final class NativeBridge {
     }
 
     private static final class BridgeState implements AutoCloseable {
-        private final Arena libraryArena;
-        private final MethodHandle fillTestFrame;
-        private final MethodHandle destroyRenderer;
-        private final MethodHandle writeRendererInfo;
-        private final MethodHandle queryCapabilities;
-        private final MethodHandle queryColorLut;
-        private final MethodHandle queryPassDescriptor;
-        private final MethodHandle applySettings;
-        private final MethodHandle queryDiagnostics;
-        private final MethodHandle bindVulkanInteropBuffer;
-        private final MethodHandle unbindVulkanInteropBuffer;
-        private final MethodHandle queryVulkanInteropState;
-        private final MethodHandle acquireVulkanInteropFrame;
-        private final MethodHandle releaseVulkanInteropFrame;
-        private final MethodHandle closeWin32Handle;
-        private final MethodHandle resetScene;
-        private final MethodHandle upsertSection;
-        private final MethodHandle removeSection;
-        private final MethodHandle commitScene;
-        private final MethodHandle updateCamera;
-        private final MethodHandle acquireFrame;
-        private final MethodHandle releaseFrame;
-        private final MethodHandle renderFrame;
+        private final NativeLibrary library;
         private final MemorySegment renderer;
         private final MemorySegment cameraSegment;
         private final MemorySegment frameInfoSegment;
@@ -404,172 +378,32 @@ public final class NativeBridge {
         private boolean closed;
 
         private BridgeState(
-                Arena libraryArena,
-                MethodHandle fillTestFrame,
-                MethodHandle destroyRenderer,
-                MethodHandle writeRendererInfo,
-                MethodHandle queryCapabilities,
-                MethodHandle queryColorLut,
-                MethodHandle queryPassDescriptor,
-                MethodHandle applySettings,
-                MethodHandle queryDiagnostics,
-                MethodHandle bindVulkanInteropBuffer,
-                MethodHandle unbindVulkanInteropBuffer,
-                MethodHandle queryVulkanInteropState,
-                MethodHandle acquireVulkanInteropFrame,
-                MethodHandle releaseVulkanInteropFrame,
-                MethodHandle closeWin32Handle,
-                MethodHandle resetScene,
-                MethodHandle upsertSection,
-                MethodHandle removeSection,
-                MethodHandle commitScene,
-                MethodHandle updateCamera,
-                MethodHandle acquireFrame,
-                MethodHandle releaseFrame,
-                MethodHandle renderFrame,
+                NativeLibrary library,
                 MemorySegment renderer,
                 String buildInfo,
                 String colorManagementInfo) {
-            this.libraryArena = libraryArena;
-            this.fillTestFrame = fillTestFrame;
-            this.destroyRenderer = destroyRenderer;
-            this.writeRendererInfo = writeRendererInfo;
-            this.queryCapabilities = queryCapabilities;
-            this.queryColorLut = queryColorLut;
-            this.queryPassDescriptor = queryPassDescriptor;
-            this.applySettings = applySettings;
-            this.queryDiagnostics = queryDiagnostics;
-            this.bindVulkanInteropBuffer = bindVulkanInteropBuffer;
-            this.unbindVulkanInteropBuffer = unbindVulkanInteropBuffer;
-            this.queryVulkanInteropState = queryVulkanInteropState;
-            this.acquireVulkanInteropFrame = acquireVulkanInteropFrame;
-            this.releaseVulkanInteropFrame = releaseVulkanInteropFrame;
-            this.closeWin32Handle = closeWin32Handle;
-            this.resetScene = resetScene;
-            this.upsertSection = upsertSection;
-            this.removeSection = removeSection;
-            this.commitScene = commitScene;
-            this.updateCamera = updateCamera;
-            this.acquireFrame = acquireFrame;
-            this.releaseFrame = releaseFrame;
-            this.renderFrame = renderFrame;
+            this.library = library;
             this.renderer = renderer;
-            this.cameraSegment = libraryArena.allocate(CAMERA_LAYOUT);
-            this.frameInfoSegment = libraryArena.allocate(FRAME_LAYOUT);
-            this.frameViewSegment = libraryArena.allocate(FRAME_VIEW_LAYOUT);
-            this.settingsSegment = libraryArena.allocate(SETTINGS_LAYOUT);
-            this.passDescriptorSegment = libraryArena.allocate(PASS_DESCRIPTOR_LAYOUT);
-            this.capabilitiesSegment = libraryArena.allocate(CAPABILITIES_LAYOUT);
-            this.diagnosticsSegment = libraryArena.allocate(DIAGNOSTICS_LAYOUT);
-            this.vulkanInteropStateSegment = libraryArena.allocate(
+            this.cameraSegment = library.arena.allocate(CAMERA_LAYOUT);
+            this.frameInfoSegment = library.arena.allocate(FRAME_LAYOUT);
+            this.frameViewSegment = library.arena.allocate(FRAME_VIEW_LAYOUT);
+            this.settingsSegment = library.arena.allocate(SETTINGS_LAYOUT);
+            this.passDescriptorSegment = library.arena.allocate(PASS_DESCRIPTOR_LAYOUT);
+            this.capabilitiesSegment = library.arena.allocate(CAPABILITIES_LAYOUT);
+            this.diagnosticsSegment = library.arena.allocate(DIAGNOSTICS_LAYOUT);
+            this.vulkanInteropStateSegment = library.arena.allocate(
                     VulkanInteropStateAbi.LAYOUT);
-            this.framePixelsSegment = libraryArena.allocate(MAX_NATIVE_FRAME_BYTES, 16);
+            this.framePixelsSegment = library.arena.allocate(MAX_NATIVE_FRAME_BYTES, 16);
             this.framePixels = framePixelsSegment.asByteBuffer();
             this.buildInfo = buildInfo;
             this.colorManagementInfo = colorManagementInfo;
         }
 
         private static BridgeState open(Path libraryPath) throws Throwable {
-            Arena libraryArena = Arena.ofConfined();
-            MethodHandle destroyRenderer = null;
+            NativeLibrary library = NativeLibrary.open(libraryPath);
             MemorySegment renderer = MemorySegment.NULL;
             try {
-                Linker linker = Linker.nativeLinker();
-                SymbolLookup symbols = SymbolLookup.libraryLookup(libraryPath, libraryArena);
-                MethodHandle abiVersion = downcall(linker, symbols, "cycles_bridge_abi_version",
-                        FunctionDescriptor.of(JAVA_INT));
-                MethodHandle writeBuildInfo = downcall(linker, symbols,
-                        "cycles_bridge_write_build_info",
-                        FunctionDescriptor.of(JAVA_INT, ADDRESS, JAVA_INT));
-                MethodHandle fillTestFrame = downcall(linker, symbols,
-                        "cycles_bridge_fill_test_frame",
-                        FunctionDescriptor.of(JAVA_INT, ADDRESS, JAVA_INT, JAVA_INT, JAVA_LONG));
-                MethodHandle createRenderer = downcall(linker, symbols,
-                        "cycles_bridge_create_renderer",
-                        FunctionDescriptor.of(JAVA_INT, ADDRESS));
-                destroyRenderer = downcall(linker, symbols,
-                        "cycles_bridge_destroy_renderer", FunctionDescriptor.ofVoid(ADDRESS));
-                MethodHandle writeRendererInfo = downcall(linker, symbols,
-                        "cycles_bridge_write_renderer_info",
-                        FunctionDescriptor.of(JAVA_INT, ADDRESS, ADDRESS, JAVA_INT));
-                MethodHandle queryCapabilities = downcall(linker, symbols,
-                        "cycles_bridge_query_capabilities",
-                        FunctionDescriptor.of(JAVA_INT, ADDRESS, ADDRESS));
-                MethodHandle writeColorManagementInfo = downcall(linker, symbols,
-                        "cycles_bridge_write_color_management_info",
-                        FunctionDescriptor.of(JAVA_INT, ADDRESS, ADDRESS, JAVA_INT));
-                MethodHandle queryColorLut = downcall(linker, symbols,
-                        "cycles_bridge_query_color_lut",
-                        FunctionDescriptor.of(
-                                JAVA_INT, ADDRESS, JAVA_INT, JAVA_INT, JAVA_INT, JAVA_INT,
-                                ADDRESS, ADDRESS, JAVA_LONG));
-                MethodHandle queryPassDescriptor = downcall(linker, symbols,
-                        "cycles_bridge_query_pass_descriptor",
-                        FunctionDescriptor.of(JAVA_INT, JAVA_INT, ADDRESS));
-                MethodHandle applySettings = downcall(linker, symbols,
-                        "cycles_bridge_apply_settings",
-                        FunctionDescriptor.of(JAVA_INT, ADDRESS, ADDRESS));
-                MethodHandle queryDiagnostics = downcall(linker, symbols,
-                        "cycles_bridge_query_diagnostics",
-                        FunctionDescriptor.of(JAVA_INT, ADDRESS, ADDRESS));
-                MethodHandle bindVulkanInteropBuffer = downcall(
-                        linker,
-                        symbols,
-                        "cycles_bridge_bind_vulkan_interop_buffer",
-                        FunctionDescriptor.of(JAVA_INT, ADDRESS, ADDRESS));
-                MethodHandle unbindVulkanInteropBuffer = downcall(
-                        linker,
-                        symbols,
-                        "cycles_bridge_unbind_vulkan_interop_buffer",
-                        FunctionDescriptor.of(JAVA_INT, ADDRESS));
-                MethodHandle queryVulkanInteropState = downcall(
-                        linker,
-                        symbols,
-                        "cycles_bridge_query_vulkan_interop_state",
-                        FunctionDescriptor.of(JAVA_INT, ADDRESS, ADDRESS));
-                MethodHandle acquireVulkanInteropFrame = downcall(
-                        linker,
-                        symbols,
-                        "cycles_bridge_acquire_vulkan_interop_frame",
-                        FunctionDescriptor.of(
-                                JAVA_INT, ADDRESS, JAVA_LONG, ADDRESS));
-                MethodHandle releaseVulkanInteropFrame = downcall(
-                        linker,
-                        symbols,
-                        "cycles_bridge_release_vulkan_interop_frame",
-                        FunctionDescriptor.of(JAVA_INT, ADDRESS, JAVA_LONG));
-                MethodHandle closeWin32Handle = downcall(
-                        linker,
-                        symbols,
-                        "cycles_bridge_close_win32_handle",
-                        FunctionDescriptor.ofVoid(JAVA_LONG));
-                MethodHandle resetScene = downcall(linker, symbols,
-                        "cycles_bridge_reset_scene",
-                        FunctionDescriptor.of(
-                                JAVA_INT, ADDRESS, ADDRESS, ADDRESS, ADDRESS, ADDRESS));
-                MethodHandle upsertSection = downcall(linker, symbols,
-                        "cycles_bridge_upsert_section",
-                        FunctionDescriptor.of(JAVA_INT, ADDRESS, ADDRESS, ADDRESS, ADDRESS));
-                MethodHandle removeSection = downcall(linker, symbols,
-                        "cycles_bridge_remove_section",
-                        FunctionDescriptor.of(JAVA_INT, ADDRESS, JAVA_LONG));
-                MethodHandle commitScene = downcall(linker, symbols,
-                        "cycles_bridge_commit_scene", FunctionDescriptor.of(JAVA_INT, ADDRESS));
-                MethodHandle updateCamera = downcall(linker, symbols,
-                        "cycles_bridge_update_camera",
-                        FunctionDescriptor.of(JAVA_INT, ADDRESS, ADDRESS));
-                MethodHandle acquireFrame = downcall(linker, symbols,
-                        "cycles_bridge_acquire_frame",
-                        FunctionDescriptor.of(JAVA_INT, ADDRESS, JAVA_LONG, ADDRESS));
-                MethodHandle releaseFrame = downcall(linker, symbols,
-                        "cycles_bridge_release_frame",
-                        FunctionDescriptor.of(JAVA_INT, ADDRESS, JAVA_LONG));
-                MethodHandle renderFrame = downcall(linker, symbols,
-                        "cycles_bridge_render_frame",
-                        FunctionDescriptor.of(
-                                JAVA_INT, ADDRESS, ADDRESS, ADDRESS, ADDRESS, JAVA_LONG));
-
-                int actualAbiVersion = (int) abiVersion.invokeExact();
+                int actualAbiVersion = (int) library.abiVersion.invokeExact();
                 if (actualAbiVersion != ABI_VERSION) {
                     throw new IllegalStateException(
                             "ABI mismatch: Java=" + ABI_VERSION + ", native=" + actualAbiVersion);
@@ -578,13 +412,14 @@ public final class NativeBridge {
                 String buildInfo;
                 try (Arena arena = Arena.ofConfined()) {
                     MemorySegment buffer = arena.allocate(BUILD_INFO_BYTES);
-                    checkStatus((int) writeBuildInfo.invokeExact(buffer, BUILD_INFO_BYTES),
+                    checkStatus((int) library.writeBuildInfo.invokeExact(buffer, BUILD_INFO_BYTES),
                             "build info call");
                     buildInfo = buffer.getString(0, StandardCharsets.UTF_8);
                 }
 
-                MemorySegment rendererOutput = libraryArena.allocate(ADDRESS);
-                checkStatus((int) createRenderer.invokeExact(rendererOutput), "renderer creation");
+                MemorySegment rendererOutput = library.arena.allocate(ADDRESS);
+                checkStatus((int) library.createRenderer.invokeExact(rendererOutput),
+                        "renderer creation");
                 renderer = rendererOutput.get(ADDRESS, 0L);
                 if (renderer.address() == 0L) {
                     throw new IllegalStateException("renderer creation returned a null handle");
@@ -592,56 +427,26 @@ public final class NativeBridge {
                 String colorManagementInfo;
                 try (Arena arena = Arena.ofConfined()) {
                     MemorySegment buffer = arena.allocate(COLOR_INFO_BYTES);
-                    checkStatus((int) writeColorManagementInfo.invokeExact(
+                    checkStatus((int) library.writeColorManagementInfo.invokeExact(
                             renderer, buffer, COLOR_INFO_BYTES), "color management info call");
                     colorManagementInfo = buffer.getString(0, StandardCharsets.UTF_8);
                 }
                 return new BridgeState(
-                        libraryArena,
-                        fillTestFrame,
-                        destroyRenderer,
-                        writeRendererInfo,
-                        queryCapabilities,
-                        queryColorLut,
-                        queryPassDescriptor,
-                        applySettings,
-                        queryDiagnostics,
-                        bindVulkanInteropBuffer,
-                        unbindVulkanInteropBuffer,
-                        queryVulkanInteropState,
-                        acquireVulkanInteropFrame,
-                        releaseVulkanInteropFrame,
-                        closeWin32Handle,
-                        resetScene,
-                        upsertSection,
-                        removeSection,
-                        commitScene,
-                        updateCamera,
-                        acquireFrame,
-                        releaseFrame,
-                        renderFrame,
+                        library,
                         renderer,
                         buildInfo,
                         colorManagementInfo);
             } catch (Throwable error) {
-                if (destroyRenderer != null && renderer.address() != 0L) {
+                if (renderer.address() != 0L) {
                     try {
-                        destroyRenderer.invokeExact(renderer);
+                        library.destroyRenderer.invokeExact(renderer);
                     } catch (Throwable closeError) {
                         error.addSuppressed(closeError);
                     }
                 }
-                libraryArena.close();
+                library.close();
                 throw error;
             }
-        }
-
-        private static MethodHandle downcall(
-                Linker linker,
-                SymbolLookup symbols,
-                String name,
-                FunctionDescriptor descriptor) {
-            return linker.downcallHandle(symbols.findOrThrow(name), descriptor);
         }
 
         private void resetScene(SectionGeometrySnapshot.SceneResources resources) throws Throwable {
@@ -659,7 +464,7 @@ public final class NativeBridge {
 
                 MemorySegment materials = writeMaterials(arena, resources.materials());
                 TextureSegments textureData = writeTextures(arena, resources.textures(), textureByteCount);
-                int status = (int) resetScene.invokeExact(
+                int status = (int) library.resetScene.invokeExact(
                         renderer, resourceData, materials, textureData.descriptors(), textureData.pixels());
                 checkRendererStatus(status, "scene reset");
                 generation = 0L;
@@ -705,14 +510,14 @@ public final class NativeBridge {
                 descriptor.set(JAVA_LONG, 64L, readySemaphoreHandle);
                 descriptor.set(JAVA_LONG, 72L, releaseSemaphoreHandle);
                 nativeCalled = true;
-                int status = (int) bindVulkanInteropBuffer.invokeExact(
+                int status = (int) library.bindVulkanInteropBuffer.invokeExact(
                         renderer, descriptor);
                 checkRendererStatus(status, "Vulkan interop buffer bind");
             } catch (Throwable error) {
                 if (!nativeCalled) {
-                    closeWin32Handle.invokeExact(memoryHandle);
-                    closeWin32Handle.invokeExact(readySemaphoreHandle);
-                    closeWin32Handle.invokeExact(releaseSemaphoreHandle);
+                    library.closeWin32Handle.invokeExact(memoryHandle);
+                    library.closeWin32Handle.invokeExact(readySemaphoreHandle);
+                    library.closeWin32Handle.invokeExact(releaseSemaphoreHandle);
                 }
                 throw error;
             }
@@ -720,26 +525,26 @@ public final class NativeBridge {
 
         private void unbindVulkanInteropBuffer() throws Throwable {
             checkRendererStatus(
-                    (int) unbindVulkanInteropBuffer.invokeExact(renderer),
+                    (int) library.unbindVulkanInteropBuffer.invokeExact(renderer),
                     "Vulkan interop buffer unbind");
         }
 
         private VulkanInteropState vulkanInteropState() throws Throwable {
             return queryVulkanInteropState((renderer, state) ->
-                    (int) queryVulkanInteropState.invokeExact(renderer, state));
+                    (int) library.queryVulkanInteropState.invokeExact(renderer, state));
         }
 
         private VulkanInteropState acquireVulkanInteropFrame(
                 long previousGeneration) throws Throwable {
             return queryVulkanInteropState((renderer, state) ->
-                    (int) acquireVulkanInteropFrame.invokeExact(
+                    (int) library.acquireVulkanInteropFrame.invokeExact(
                             renderer, previousGeneration, state));
         }
 
         private void releaseVulkanInteropFrame(long frameGeneration)
                 throws Throwable {
             checkRendererStatus(
-                    (int) releaseVulkanInteropFrame.invokeExact(
+                    (int) library.releaseVulkanInteropFrame.invokeExact(
                             renderer, frameGeneration),
                     "Vulkan interop frame release");
         }
@@ -840,7 +645,7 @@ public final class NativeBridge {
                         TRIANGLE_LAYOUT.byteAlignment());
                 triangles.asByteBuffer().order(ByteOrder.nativeOrder()).asIntBuffer()
                         .put(snapshot.triangleData());
-                int status = (int) upsertSection.invokeExact(
+                int status = (int) library.upsertSection.invokeExact(
                         renderer, section, vertices, triangles);
                 checkRendererStatus(status, "section upsert");
             }
@@ -848,11 +653,13 @@ public final class NativeBridge {
 
         private void removeSection(long sectionId) throws Throwable {
             checkRendererStatus(
-                    (int) removeSection.invokeExact(renderer, sectionId), "section removal");
+                    (int) library.removeSection.invokeExact(renderer, sectionId),
+                    "section removal");
         }
 
         private void commitScene() throws Throwable {
-            checkRendererStatus((int) commitScene.invokeExact(renderer), "scene commit");
+            checkRendererStatus(
+                    (int) library.commitScene.invokeExact(renderer), "scene commit");
         }
 
         private void applySettings(CyclesRenderSettings settings) throws Throwable {
@@ -958,7 +765,7 @@ public final class NativeBridge {
             settingsSegment.set(JAVA_INT, 384L, settings.pbrHeightMappingMode().nativeId());
             settingsSegment.set(JAVA_INT, 388L, settings.pbrParallaxSteps());
             checkRendererStatus(
-                    (int) applySettings.invokeExact(renderer, settingsSegment),
+                    (int) library.applySettings.invokeExact(renderer, settingsSegment),
                     "settings update");
         }
 
@@ -971,7 +778,7 @@ public final class NativeBridge {
                     JAVA_INT, 0L, Math.toIntExact(CAPABILITIES_LAYOUT.byteSize()));
             capabilitiesSegment.set(JAVA_INT, 4L, STRUCT_VERSION);
             checkRendererStatus(
-                    (int) queryCapabilities.invokeExact(renderer, capabilitiesSegment),
+                    (int) library.queryCapabilities.invokeExact(renderer, capabilitiesSegment),
                     "capability query");
             cachedCapabilities = new Capabilities(
                     capabilitiesSegment.get(JAVA_LONG, 8L),
@@ -1011,7 +818,7 @@ public final class NativeBridge {
                         JAVA_INT, 0L, Math.toIntExact(COLOR_LUT_DESCRIPTOR_LAYOUT.byteSize()));
                 descriptor.set(JAVA_INT, 4L, STRUCT_VERSION);
                 checkRendererStatus(
-                        (int) queryColorLut.invokeExact(
+                        (int) library.queryColorLut.invokeExact(
                                 renderer,
                                 displayDevice.nativeId(),
                                 effectiveView.nativeId(),
@@ -1030,7 +837,7 @@ public final class NativeBridge {
                 ByteBuffer pixels = ByteBuffer.allocateDirect(Math.toIntExact(byteCount))
                         .order(ByteOrder.nativeOrder());
                 checkRendererStatus(
-                        (int) queryColorLut.invokeExact(
+                        (int) library.queryColorLut.invokeExact(
                                 renderer,
                                 displayDevice.nativeId(),
                                 effectiveView.nativeId(),
@@ -1070,7 +877,8 @@ public final class NativeBridge {
                     JAVA_INT, 0L, Math.toIntExact(PASS_DESCRIPTOR_LAYOUT.byteSize()));
             passDescriptorSegment.set(JAVA_INT, 4L, STRUCT_VERSION);
             checkStatus(
-                    (int) queryPassDescriptor.invokeExact(passId, passDescriptorSegment),
+                    (int) library.queryPassDescriptor.invokeExact(
+                            passId, passDescriptorSegment),
                     "pass descriptor query");
             return new PassDescriptor(
                     passDescriptorSegment.get(JAVA_INT, 8L),
@@ -1087,7 +895,7 @@ public final class NativeBridge {
                     JAVA_INT, 0L, Math.toIntExact(DIAGNOSTICS_LAYOUT.byteSize()));
             diagnosticsSegment.set(JAVA_INT, 4L, STRUCT_VERSION);
             checkRendererStatus(
-                    (int) queryDiagnostics.invokeExact(renderer, diagnosticsSegment),
+                    (int) library.queryDiagnostics.invokeExact(renderer, diagnosticsSegment),
                     "diagnostics query");
             return new Diagnostics(
                     diagnosticsSegment.get(JAVA_LONG, 8L),
@@ -1243,7 +1051,7 @@ public final class NativeBridge {
             frameInfoSegment.set(JAVA_INT, 0L, Math.toIntExact(FRAME_LAYOUT.byteSize()));
             frameInfoSegment.set(JAVA_INT, 4L, STRUCT_VERSION);
             frameInfoSegment.set(JAVA_LONG, 16L, generation);
-            int status = (int) renderFrame.invokeExact(
+            int status = (int) library.renderFrame.invokeExact(
                     renderer,
                     cameraSegment,
                     frameInfoSegment,
@@ -1286,7 +1094,7 @@ public final class NativeBridge {
                 throw new IllegalArgumentException("invalid viewport " + width + "x" + height);
             }
             writeCamera(cameraSegment, width, height, frameId, input);
-            int status = (int) updateCamera.invokeExact(renderer, cameraSegment);
+            int status = (int) library.updateCamera.invokeExact(renderer, cameraSegment);
             checkRendererStatus(status, "renderer camera update");
         }
 
@@ -1296,7 +1104,7 @@ public final class NativeBridge {
                     JAVA_INT, 0L, Math.toIntExact(FRAME_VIEW_LAYOUT.byteSize()));
             frameViewSegment.set(JAVA_INT, 4L, STRUCT_VERSION);
             checkRendererStatus(
-                    (int) acquireFrame.invokeExact(
+                    (int) library.acquireFrame.invokeExact(
                             renderer, previousGeneration, frameViewSegment),
                     "renderer frame acquire");
             int width = frameViewSegment.get(JAVA_INT, 8L);
@@ -1344,7 +1152,7 @@ public final class NativeBridge {
         private void releaseFrameLease(long token) {
             try {
                 checkRendererStatus(
-                        (int) releaseFrame.invokeExact(renderer, token),
+                        (int) library.releaseFrame.invokeExact(renderer, token),
                         "renderer frame release");
             } catch (Throwable error) {
                 rethrowFatalError(error);
@@ -1357,7 +1165,8 @@ public final class NativeBridge {
             int bytes = Math.multiplyExact(Math.multiplyExact(width, height), 4);
             try (Arena arena = Arena.ofConfined()) {
                 MemorySegment output = arena.allocate(bytes, 16);
-                checkStatus((int) fillTestFrame.invokeExact(output, width, height, frameId),
+                checkStatus((int) library.fillTestFrame.invokeExact(
+                                output, width, height, frameId),
                         "test frame call");
                 ByteBuffer copied = ByteBuffer.allocate(bytes);
                 copied.put(output.asByteBuffer()).flip();
@@ -1518,7 +1327,7 @@ public final class NativeBridge {
         private String rendererInfo() throws Throwable {
             try (Arena arena = Arena.ofConfined()) {
                 MemorySegment buffer = arena.allocate(RENDERER_INFO_BYTES);
-                checkStatus((int) writeRendererInfo.invokeExact(
+                checkStatus((int) library.writeRendererInfo.invokeExact(
                         renderer, buffer, RENDERER_INFO_BYTES), "renderer info call");
                 return buffer.getString(0, StandardCharsets.UTF_8);
             }
@@ -1538,11 +1347,11 @@ public final class NativeBridge {
             }
             closed = true;
             try {
-                destroyRenderer.invokeExact(renderer);
+                library.destroyRenderer.invokeExact(renderer);
             } catch (Throwable error) {
                 rethrowFatalError(error);
             } finally {
-                libraryArena.close();
+                library.close();
             }
         }
 

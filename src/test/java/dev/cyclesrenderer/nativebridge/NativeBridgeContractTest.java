@@ -26,6 +26,8 @@ class NativeBridgeContractTest {
             "692745869890fae3afd109881a274ae29d4deeb24798d6e73964ac5a4b8c48c7";
     private static final String EXPECTED_LAYOUT_SHA256 =
             "d578c93283f841b1f794e406c537094858e397ebed6d9e520654dcda0b97a16f";
+    private static final String EXPECTED_SYMBOL_TABLE_SHA256 =
+            "082938fc97164a89f40200d9b639ec2b745f84da286d0a11294878d117193101";
 
     @Test
     void publicFacadeRemainsStable() throws IllegalAccessException {
@@ -56,6 +58,19 @@ class NativeBridgeContractTest {
         String fingerprint = fingerprint(layouts);
         assertEquals(EXPECTED_LAYOUT_SHA256, fingerprint,
                 "NativeBridge memory layouts changed: " + fingerprint);
+    }
+
+    @Test
+    void nativeSymbolNamesAndDescriptorsRemainStable() {
+        List<String> symbols = new ArrayList<>();
+        for (NativeLibrary.Symbol symbol : NativeLibrary.Symbol.values()) {
+            symbols.add(symbol.externalName + "=" + symbol.descriptor);
+        }
+        symbols.sort(Comparator.naturalOrder());
+
+        String fingerprint = fingerprint(symbols);
+        assertEquals(EXPECTED_SYMBOL_TABLE_SHA256, fingerprint,
+                "NativeBridge symbol table changed: " + fingerprint);
     }
 
     private static List<String> publicSurfaceLines() throws IllegalAccessException {
