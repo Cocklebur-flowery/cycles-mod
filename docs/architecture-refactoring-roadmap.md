@@ -6,8 +6,8 @@
 
 建立基线：`6e42ee7`
 
-执行进度：C、B、E 已完成；R0 后置热点复核完成，下一阶段为 R1 入口控制器
-拆分。
+执行进度：C、B、E 已完成；R0 二次独立复核完成。下一阶段先完成
+R0A smoke 物理职责拆分和 R0B native binding API 收口，再进入 R1。
 
 本文件规定稳定化门禁关闭后的生产代码职责拆分顺序。它描述治理边界、依赖、
 验证和提交纪律，不替代当前源码、ABI schema、测试或
@@ -31,9 +31,10 @@
 
 ## 2. 当前热点与判定
 
-以下规模只对应建立路线时的已检查基线：
+以下规模只对应建立路线时的已检查基线；“初始判定”保留当时决策，当前处置以
+第 8 节 R0 二次独立复核为准：
 
-| 文件 | 行数 | 当前判定 |
+| 文件 | 行数 | 初始判定 |
 | --- | ---: | --- |
 | `native/src/cycles_engine.cpp` | 4,028 | 多生命周期核心，必须按私有组件拆分 |
 | `src/main/java/dev/cyclesrenderer/nativebridge/NativeBridge.java` | 2,505 | 布局、绑定、marshalling、解码、session 与 DTO 混合 |
@@ -43,7 +44,9 @@
 | `src/main/java/dev/cyclesrenderer/CyclesRendererMod.java` | 624 | 入口接线，随下游组件形成逐步减负 |
 
 Native smoke 已按 contract、color、render、denoiser、scene lifecycle 与独立
-scene-update 域拆分，不再属于本路线的生产代码拆分目标。
+scene-update 域建立独立 CTest 报告。但 `cycles_bridge_smoke_render_scene.cpp`
+仍同时定义 render 与 scene-lifecycle 两个 suite 入口；这是测试源文件的物理
+职责尾项，不是生产代码热点，由 R0A 单独收口。
 
 ## 3. 全程保持的稳定契约
 
@@ -75,7 +78,7 @@ C  配置职责拆分
 | C | `DONE` | 配置持久化/runtime snapshot、Draft、option model 与 catalog 已分离 |
 | B | `DONE` | NativeBridge 公共门面稳定，layouts、symbols、marshalling、decoding 与 session ownership 已分离 |
 | E | `DONE` | Engine 已收口为渲染协调器；默认/DLSS 自动门禁和 E6 Minecraft 生命周期验收通过 |
-| R | `IN PROGRESS` | R0 只读复核完成；R1/R2 有职责证据，R3/R4 明确不机械扩张 |
+| R | `IN PROGRESS` | R0 二次独立复核完成；R0A/R0B 为进入 R1 前的小型收口，R1/R2 有职责证据，R3/R4 明确不机械扩张 |
 
 配置阶段是低风险的拆分纪律验证，不替代两个主要核心文件。配置阶段完成后必须
 立即进入 `NativeBridge`，不得无限扩张 UI 或配置功能。
@@ -297,25 +300,79 @@ Scene/Camera revision 协调、状态、首个错误和 reset/close。
 
 ### R0：热点复核结果
 
-状态：`DONE`。在 `198bca0` 上完成只读结构、调用方、状态所有权和 ABI 生成链
-复核，结论如下：
+状态：`DONE`。生产代码基线为 `198bca0`；在仅有文档差异的
+`1c12163` 上又独立复核了结构、调用方、状态所有权、ABI 生成链和所有
+不少于 500 行的生产源文件，结论如下：
 
 | 对象 | 判定 | 证据与处置 |
 | --- | --- | --- |
 | `CyclesRendererMod` | `SPLIT` | 624 行同时拥有 NeoForge 注册/按键接线和 renderer 启用、设置应用、scene/camera/frame 调度、fallback、关闭、telemetry 状态机；入口保护边界尚未满足 |
 | `VulkanFrameInterop` | `SPLIT` | 917 行同时拥有长寿命 Vulkan allocation/Win32 HANDLE/native bind 和逐帧 acquire/copy/fence/TextureTarget 两套生命周期 |
+| `vulkan_interop_display.h` | `TIGHTEN` | `VulkanInteropBinding` 已拥有 native interop 状态，但仍向 engine 暴露 7 个可变引用 getter；R0B 收口为单一 binding/shared-state 边界，不拆文件 |
+| `cycles_bridge_smoke_render_scene.cpp` | `SPLIT` | 637 行内同时定义 `run_render_scenarios` 和 `run_scene_lifecycle_scenarios`；CTest 报告已独立，R0A 只补齐物理文件边界 |
 | `CyclesSettingsList` | `KEEP` | 512 行均服务 F9 列表筛选、依赖可见性、控件构造、输入归一化与 narration；没有第二资源生命周期或反向依赖 |
 | ABI schema | `DEFER` | 现有单结构原型和双变体 contract 全绿；其余结构含 pointer、array、float/double 与 padding，扩展当前仅支持 `uint32/uint64` 的生成器会成为独立高风险契约阶段 |
+
+其余不少于 500 行的生产源文件均已复核，未发现需要立即物理拆分的第二
+生命周期：
+
+| 对象（当前行数） | 判定 | 保留理由 |
+| --- | --- | --- |
+| `cycles_engine.cpp` (1,720) | `KEEP` | E 阶段后只保留渲染协调生命周期 |
+| `cycles_bridge.cpp` (1,024) | `KEEP` | 稳定 C ABI 边界与 payload validation |
+| `cycles_bridge.h` (871) | `KEEP` | 单一稳定 C ABI 声明 |
+| `NativeBridge.java` (867) | `KEEP` | 稳定 Java facade、公开 DTO 与错误边界 |
+| `frame_store.h` (701) | `KEEP` | frame store 与薄 display adapter 共用同一 frame publication/lease 生命周期 |
+| `SectionSceneManager.java` (664) | `KEEP` | resource reset 与 delta streaming 受同一 scene origin/full reset 约束 |
+| `CyclesDebugOverlay.java` (655) | `KEEP` | 单一诊断展示职责；较长 `extract()` 属于后续函数级整理，不是架构拆分理由 |
+| `CyclesRenderSettings.java` (652) | `KEEP` | 稳定 settings record/enums 契约 |
+| `VulkanCapabilityProbe.java` (611) | `KEEP` | 单一 Vulkan capability/bootstrap 职责 |
+| `color_management.cpp` (597) | `KEEP` | 单一 OCIO/color-management runtime |
+| `CyclesClientConfig.java` (564) | `KEEP` | C 阶段后的 persistence/runtime snapshot 门面 |
+| `CyclesFramePresenter.java` (545) | `KEEP` | 单一 presentation 生命周期；AE/DoF 已分离 |
+| `cycles_session_config.h` (500) | `KEEP` | 单一 session configuration 职责 |
+
+`NativeBridgeContractTest.java`（683 行）虽覆盖多个 bridge 主题，但它的上位职责是
+单一 bridge characterization；`cycles_bridge_smoke_support.cpp`（577 行）只提供 smoke
+helper。两者当前均保留。
+
+### R0A：拆分 Native smoke 的 scene-lifecycle 源文件
+
+将 `run_scene_lifecycle_scenarios` 移入新文件
+`native/tests/cycles_bridge_smoke_scene_lifecycle.cpp`，原文件只保留 render suite，
+并更新 `native/CMakeLists.txt`。不改 suite 名称、执行顺序、skip 77、公共 helper、
+场景数据、ABI 或生产行为。
+
+验证：默认与 DLSS 完整 `verifyProject`，确认 render 与 scene-lifecycle CTest
+均实际执行且无 Skipped。
+
+建议提交：`refactor(test): isolate scene lifecycle smoke scenarios`
+
+### R0B：收口 native Vulkan display binding API
+
+保留 `VulkanInteropBinding` 对 mutex、condition variable、slot/state 和 camera revision 的
+唯一所有权，但将 engine 构造 display driver 时传递的 7 个可变引用收口为
+单一 binding/shared-state 边界。不改 mutex 域、唤醒时机、slot 所有权、HANDLE、timeline、
+configured/produced camera revision 或关闭顺序，也不拆分
+`vulkan_interop_display.h`。
+
+验证：默认与 DLSS 完整 `verifyProject`；Minecraft DLSS 执行 F8 启用、
+首帧、关闭、再启用和退出，核对 interop generation/timeline 持续推进。
+
+建议提交：`refactor(interop): encapsulate native display binding state`
 
 ### R1：抽离客户端渲染控制器
 
 新增 package-private `CyclesRendererController`，迁移 renderer 运行状态、启用/关闭、
 settings apply/rebuild、scene/camera/frame 调度、性能计数和 shutdown。`CyclesRendererMod`
 只保留 MOD/资源 ID、key 注册、config screen/reload 和 NeoForge 事件到 controller 的
-薄转发；现有 `shouldReplaceVanillaWorld()` 静态门面继续兼容 mixin 调用方。
+薄转发。保持现有公开静态门面 `ensureNativeBridgeReady()`、
+`isExperimentalRendererEnabled()` 和 `shouldReplaceVanillaWorld()` 的签名与语义；即使前两者
+当前没有模块外的已知调用方，也不借重构删除公开 API。
 
-稳定契约：F8/F9/F10、事件 priority、FrameGraph 接管条件、日志文本、config revision、
-interop rebuild、fallback 和关闭顺序全部不变。
+稳定契约：`MOD_ID`、Logger category、资源/翻译/key ID、F8/F9/F10 映射、
+NeoForge 事件 priority 与顺序、config/reload 语义、FrameGraph 接管条件、日志文本、
+config revision、interop rebuild、fallback 和关闭顺序全部不变。
 
 验证：`compileJava test jar`、默认与 DLSS 完整 `verifyProject`；随后执行一次 Minecraft
 DLSS F8 启用、首帧、关闭、再启用和退出。
@@ -329,8 +386,14 @@ VkDeviceMemory、ready/release timeline semaphore、Win32 HANDLE 导出、capabi
 native bind/unbind 和 allocation close。原门面继续独占逐帧 frame acquire、copy command、
 fence、TextureTarget、generation 与 copy telemetry，并负责两个组件的调用顺序。
 
-稳定契约：12 B/px slot、3 slots、RGBA16F/R32F、HANDLE 转移、timeline value、frame
-release、capacity rebuild 与 close 顺序全部不变。本阶段不再继续拆 copy path。
+原门面的所有公开方法（initialize/telemetry、buffer/allocation/capacity、poll/frame/depth/
+generation/copy telemetry、drain/close）以及公开 `Telemetry`/`CopyTelemetry` 字段与语义
+保持兼容。
+
+稳定契约：native 仍接受最小 8 B/px 的 color-only slot，Java 仍以 12 B/px
+分配 color+depth slot；Java 策略和 native 上限都是 3 slots；RGBA16F/R32F、
+HANDLE 所有权转移、timeline value、frame release、capacity rebuild、drain-before-unbind
+与 close 顺序全部不变。本阶段不再继续拆 copy path。
 
 验证：`compileJava test jar`、默认与 DLSS 完整 `verifyProject`；Minecraft DLSS 执行
 F8 启用/关闭/再启用、输出分辨率扩大触发 capacity rebuild、窗口 resize 和退出。
@@ -350,7 +413,7 @@ pointer、array、float/double、padding 和 alignment 的 schema 语义，再�
 
 ### R5：最终基线收口
 
-R1/R2 完成自动化与实机里程碑后，重新核对所有超过 500 行的生产源码、依赖方向、
+R0A/R0B/R1/R2 完成自动化与实机里程碑后，重新核对所有超过 500 行的生产源码、依赖方向、
 剩余红项和明确未测矩阵。若没有新的多职责证据，更新工程基线并结束本轮架构冻结。
 
 ## 9. 每阶段提交与验证纪律
