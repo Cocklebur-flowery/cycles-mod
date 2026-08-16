@@ -4,16 +4,13 @@ import net.neoforged.neoforge.common.ModConfigSpec;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Objects;
-import java.util.function.Consumer;
-import java.util.function.Supplier;
 import java.util.function.UnaryOperator;
 import java.util.concurrent.atomic.AtomicLong;
 
 public final class CyclesClientConfig {
     public static final int SCHEMA_VERSION = 1;
     public static final ModConfigSpec SPEC;
-    private static final List<ConfigOption<?>> OPTIONS;
+    private static final List<SettingsOption<?>> OPTIONS;
 
     private static final AtomicLong REVISION = new AtomicLong(1L);
 
@@ -520,7 +517,7 @@ public final class CyclesClientConfig {
         changedAndSave();
     }
 
-    public static List<ConfigOption<?>> options() {
+    public static List<SettingsOption<?>> options() {
         return OPTIONS;
     }
 
@@ -541,8 +538,8 @@ public final class CyclesClientConfig {
         return true;
     }
 
-    private static List<ConfigOption<?>> buildOptions() {
-        List<ConfigOption<?>> options = new ArrayList<>();
+    private static List<SettingsOption<?>> buildOptions() {
+        List<SettingsOption<?>> options = new ArrayList<>();
         options.add(enumOption("device.policy", Category.DEVICE,
                 "config.cyclesrenderer.device.policy", DEVICE_POLICY,
                 CyclesRenderSettings.DevicePolicy.values()));
@@ -804,16 +801,16 @@ public final class CyclesClientConfig {
         return List.copyOf(options);
     }
 
-    static ConfigOption<Boolean> booleanOption(
+    static SettingsOption<Boolean> booleanOption(
             String id,
             Category category,
             String translationKey,
             ModConfigSpec.BooleanValue value) {
-        return new ConfigOption<>(id, category, translationKey, ValueKind.BOOLEAN,
+        return new SettingsOption<>(id, category, translationKey, ValueKind.BOOLEAN,
                 value::get, value::set, UnaryOperator.identity(), 0.0D, 1.0D, 1.0D, List.of());
     }
 
-    static ConfigOption<Integer> intOption(
+    static SettingsOption<Integer> intOption(
             String id,
             Category category,
             String translationKey,
@@ -821,13 +818,13 @@ public final class CyclesClientConfig {
             int minimum,
             int maximum,
             int step) {
-        return new ConfigOption<>(id, category, translationKey, ValueKind.INTEGER,
+        return new SettingsOption<>(id, category, translationKey, ValueKind.INTEGER,
                 value::get, value::set,
                 candidate -> Math.clamp(candidate, minimum, maximum),
                 minimum, maximum, step, List.of());
     }
 
-    static ConfigOption<Double> doubleOption(
+    static SettingsOption<Double> doubleOption(
             String id,
             Category category,
             String translationKey,
@@ -835,20 +832,20 @@ public final class CyclesClientConfig {
             double minimum,
             double maximum,
             double step) {
-        return new ConfigOption<>(id, category, translationKey, ValueKind.DOUBLE,
+        return new SettingsOption<>(id, category, translationKey, ValueKind.DOUBLE,
                 value::get, value::set,
                 candidate -> Math.clamp(candidate, minimum, maximum),
                 minimum, maximum, step, List.of());
     }
 
-    static <E extends Enum<E>> ConfigOption<E> enumOption(
+    static <E extends Enum<E>> SettingsOption<E> enumOption(
             String id,
             Category category,
             String translationKey,
             ModConfigSpec.EnumValue<E> value,
             E[] choices) {
         List<E> allowed = List.of(choices);
-        return new ConfigOption<>(id, category, translationKey, ValueKind.ENUM,
+        return new SettingsOption<>(id, category, translationKey, ValueKind.ENUM,
                 value::get, value::set,
                 candidate -> allowed.contains(candidate) ? candidate : value.get(),
                 0.0D, Math.max(0, choices.length - 1), 1.0D, allowed);
@@ -873,90 +870,6 @@ public final class CyclesClientConfig {
         INTEGER,
         DOUBLE,
         ENUM
-    }
-
-    public static final class ConfigOption<T> {
-        private final String id;
-        private final Category category;
-        private final String translationKey;
-        private final ValueKind kind;
-        private final Supplier<T> reader;
-        private final Consumer<T> writer;
-        private final UnaryOperator<T> normalizer;
-        private final double minimum;
-        private final double maximum;
-        private final double step;
-        private final List<T> choices;
-
-        ConfigOption(
-                String id,
-                Category category,
-                String translationKey,
-                ValueKind kind,
-                Supplier<T> reader,
-                Consumer<T> writer,
-                UnaryOperator<T> normalizer,
-                double minimum,
-                double maximum,
-                double step,
-                List<T> choices) {
-            this.id = id;
-            this.category = category;
-            this.translationKey = translationKey;
-            this.kind = kind;
-            this.reader = reader;
-            this.writer = writer;
-            this.normalizer = normalizer;
-            this.minimum = minimum;
-            this.maximum = maximum;
-            this.step = step;
-            this.choices = List.copyOf(choices);
-        }
-
-        public String id() {
-            return id;
-        }
-
-        public Category category() {
-            return category;
-        }
-
-        public String translationKey() {
-            return translationKey;
-        }
-
-        public ValueKind kind() {
-            return kind;
-        }
-
-        public double minimum() {
-            return minimum;
-        }
-
-        public double maximum() {
-            return maximum;
-        }
-
-        public double step() {
-            return step;
-        }
-
-        public List<T> choices() {
-            return choices;
-        }
-
-        T read() {
-            return reader.get();
-        }
-
-        T normalize(T candidate) {
-            return normalizer.apply(Objects.requireNonNull(candidate));
-        }
-
-        @SuppressWarnings("unchecked")
-        void writeUnchecked(Object candidate) {
-            writer.accept(normalize((T) candidate));
-        }
     }
 
     private static void changedAndSave() {

@@ -131,7 +131,7 @@ final class CameraAutomationConfig {
                         f(focusDeadbandRatio), f(maximumStopsPerSecond), missBehavior.get()));
     }
 
-    void appendOptions(List<CyclesClientConfig.ConfigOption<?>> options) {
+    void appendOptions(List<SettingsOption<?>> options) {
         options.add(CyclesClientConfig.booleanOption("color.autoExposure", CyclesClientConfig.Category.COLOR,
                 "config.cyclesrenderer.color.autoExposure", exposureEnabled));
         options.add(CyclesClientConfig.booleanOption("color.autoExposure.locked", CyclesClientConfig.Category.COLOR,
@@ -156,7 +156,7 @@ final class CameraAutomationConfig {
                 CameraAutomationSettings.FocusMissBehavior.values()));
     }
 
-    private void addExposureNumbers(List<CyclesClientConfig.ConfigOption<?>> options) {
+    private void addExposureNumbers(List<SettingsOption<?>> options) {
         add(options, "centerWeight", centerWeight, 0.0D, 8.0D, 0.1D);
         add(options, "lowPercentile", lowPercentile, 0.0D, 0.49D, 0.01D);
         add(options, "highPercentile", highPercentile, 0.51D, 0.999D, 0.01D);
@@ -171,7 +171,7 @@ final class CameraAutomationConfig {
         add(options, "maximumEvPerSecond", maximumEvPerSecond, 0.1D, 40.0D, 0.1D);
     }
 
-    private void addFocusNumbers(List<CyclesClientConfig.ConfigOption<?>> options) {
+    private void addFocusNumbers(List<SettingsOption<?>> options) {
         addFocus(options, "maximumDistance", maximumFocusDistance, 1.0D, 1024.0D, 1.0D);
         addFocus(options, "areaRadius", focusAreaRadius, 0.0D, 0.25D, 0.005D);
         addFocus(options, "clusterGapStops", clusterGapStops, 0.05D, 4.0D, 0.05D);
@@ -182,7 +182,7 @@ final class CameraAutomationConfig {
     }
 
     private static void add(
-            List<CyclesClientConfig.ConfigOption<?>> options,
+            List<SettingsOption<?>> options,
             String name,
             ModConfigSpec.DoubleValue value,
             double minimum,
@@ -195,7 +195,7 @@ final class CameraAutomationConfig {
     }
 
     private static void addFocus(
-            List<CyclesClientConfig.ConfigOption<?>> options,
+            List<SettingsOption<?>> options,
             String name,
             ModConfigSpec.DoubleValue value,
             double minimum,

@@ -9,24 +9,24 @@ import java.util.Set;
 
 /** Temporary editor values that remain separate from persisted NeoForge configuration. */
 public final class SettingsDraft {
-    private final List<CyclesClientConfig.ConfigOption<?>> options;
-    private final Map<CyclesClientConfig.ConfigOption<?>, Object> baseline =
+    private final List<SettingsOption<?>> options;
+    private final Map<SettingsOption<?>, Object> baseline =
             new IdentityHashMap<>();
-    private final Map<CyclesClientConfig.ConfigOption<?>, Object> values =
+    private final Map<SettingsOption<?>, Object> values =
             new IdentityHashMap<>();
-    private final Set<CyclesClientConfig.ConfigOption<?>> dirty = new LinkedHashSet<>();
+    private final Set<SettingsOption<?>> dirty = new LinkedHashSet<>();
 
-    SettingsDraft(List<CyclesClientConfig.ConfigOption<?>> options) {
+    SettingsDraft(List<SettingsOption<?>> options) {
         this.options = List.copyOf(options);
         reload();
     }
 
     @SuppressWarnings("unchecked")
-    public <T> T get(CyclesClientConfig.ConfigOption<T> option) {
+    public <T> T get(SettingsOption<T> option) {
         return (T) values.get(option);
     }
 
-    public <T> void set(CyclesClientConfig.ConfigOption<T> option, T value) {
+    public <T> void set(SettingsOption<T> option, T value) {
         T normalized = option.normalize(value);
         values.put(option, normalized);
         if (Objects.equals(baseline.get(option), normalized)) {
@@ -40,7 +40,7 @@ public final class SettingsDraft {
         return !dirty.isEmpty();
     }
 
-    public boolean isDirty(CyclesClientConfig.ConfigOption<?> option) {
+    public boolean isDirty(SettingsOption<?> option) {
         return dirty.contains(option);
     }
 
@@ -65,13 +65,13 @@ public final class SettingsDraft {
         baseline.clear();
         values.clear();
         dirty.clear();
-        for (CyclesClientConfig.ConfigOption<?> option : options) {
+        for (SettingsOption<?> option : options) {
             Object value = option.read();
             baseline.put(option, value);
             values.put(option, value);
         }
     }
 
-    record Change(CyclesClientConfig.ConfigOption<?> option, Object value) {
+    record Change(SettingsOption<?> option, Object value) {
     }
 }

@@ -23,11 +23,11 @@ class CyclesClientConfigTest {
 
     @Test
     void optionCatalogKeepsStableOrderAndMetadata() {
-        List<CyclesClientConfig.ConfigOption<?>> options = CyclesClientConfig.options();
+        List<SettingsOption<?>> options = CyclesClientConfig.options();
         Set<String> ids = new HashSet<>();
 
         assertFalse(options.isEmpty());
-        for (CyclesClientConfig.ConfigOption<?> option : options) {
+        for (SettingsOption<?> option : options) {
             assertFalse(option.id().isBlank());
             assertTrue(ids.add(option.id()), () -> "duplicate option id: " + option.id());
             assertTrue(option.translationKey().startsWith("config.cyclesrenderer."),
@@ -53,7 +53,7 @@ class CyclesClientConfigTest {
     @Test
     void draftNormalizesTracksDiscardsAndAcceptsEdits() {
         AtomicInteger stored = new AtomicInteger(480);
-        CyclesClientConfig.ConfigOption<Integer> width = new CyclesClientConfig.ConfigOption<>(
+        SettingsOption<Integer> width = new SettingsOption<>(
                 "output.width",
                 CyclesClientConfig.Category.OUTPUT,
                 "config.cyclesrenderer.output.width",
@@ -93,7 +93,7 @@ class CyclesClientConfigTest {
         assertFalse(draft.isDirty());
     }
 
-    private static String catalogFingerprint(List<CyclesClientConfig.ConfigOption<?>> options) {
+    private static String catalogFingerprint(List<SettingsOption<?>> options) {
         String canonical = options.stream()
                 .map(option -> String.join("|",
                         option.id(),

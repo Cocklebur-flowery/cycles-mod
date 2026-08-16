@@ -82,7 +82,7 @@ final class LabPbrConfig {
         return parallaxSteps.get();
     }
 
-    void appendOptions(List<CyclesClientConfig.ConfigOption<?>> options) {
+    void appendOptions(List<SettingsOption<?>> options) {
         options.add(CyclesClientConfig.doubleOption(
                 "materials.wetness", CyclesClientConfig.Category.MATERIALS,
                 "config.cyclesrenderer.materials.wetness", wetness,

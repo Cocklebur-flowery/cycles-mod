@@ -4,6 +4,7 @@ import dev.cyclesrenderer.config.CyclesClientConfig;
 import dev.cyclesrenderer.config.CyclesRenderSettings;
 import dev.cyclesrenderer.config.CameraAutomationSettings;
 import dev.cyclesrenderer.config.SettingsDraft;
+import dev.cyclesrenderer.config.SettingsOption;
 import dev.cyclesrenderer.nativebridge.NativeBridge;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
@@ -64,7 +65,7 @@ final class CyclesSettingsList
         double oldScroll = scrollAmount();
         clearEntries();
         String needle = query.strip().toLowerCase(Locale.ROOT);
-        for (CyclesClientConfig.ConfigOption<?> option : CyclesClientConfig.options()) {
+        for (SettingsOption<?> option : CyclesClientConfig.options()) {
             String translated = Component.translatable(option.translationKey()).getString();
             boolean matchesSearch = needle.isEmpty()
                     || option.id().toLowerCase(Locale.ROOT).contains(needle)
@@ -88,7 +89,7 @@ final class CyclesSettingsList
         return Math.max(120, getWidth() - 18);
     }
 
-    private boolean isEnabled(CyclesClientConfig.ConfigOption<?> option) {
+    private boolean isEnabled(SettingsOption<?> option) {
         String id = option.id();
         if (id.startsWith("color.autoExposure.") && !booleanValue("color.autoExposure")) {
             return false;
@@ -212,7 +213,7 @@ final class CyclesSettingsList
                 };
     }
 
-    private List<?> effectiveChoices(CyclesClientConfig.ConfigOption<?> option) {
+    private List<?> effectiveChoices(SettingsOption<?> option) {
         List<?> choices = option.choices();
         if (option.id().equals("color.viewTransform")) {
             CyclesRenderSettings.DisplayDevice display = enumValue("color.display");
@@ -269,7 +270,7 @@ final class CyclesSettingsList
     }
 
     private Object value(String id) {
-        for (CyclesClientConfig.ConfigOption<?> candidate : CyclesClientConfig.options()) {
+        for (SettingsOption<?> candidate : CyclesClientConfig.options()) {
             if (candidate.id().equals(id)) {
                 return getUnchecked(candidate);
             }
@@ -278,19 +279,19 @@ final class CyclesSettingsList
     }
 
     @SuppressWarnings({"rawtypes", "unchecked"})
-    private Object getUnchecked(CyclesClientConfig.ConfigOption<?> option) {
-        return draft.get((CyclesClientConfig.ConfigOption) option);
+    private Object getUnchecked(SettingsOption<?> option) {
+        return draft.get((SettingsOption) option);
     }
 
     @SuppressWarnings({"rawtypes", "unchecked"})
-    private void setUnchecked(CyclesClientConfig.ConfigOption<?> option, Object value) {
-        draft.set((CyclesClientConfig.ConfigOption) option, value);
+    private void setUnchecked(SettingsOption<?> option, Object value) {
+        draft.set((SettingsOption) option, value);
         if (DEPENDENCY_OPTIONS.contains(option.id())) {
             refreshRequested = true;
         }
     }
 
-    private List<Object> choicesWithCurrent(CyclesClientConfig.ConfigOption<?> option) {
+    private List<Object> choicesWithCurrent(SettingsOption<?> option) {
         List<Object> choices = new ArrayList<>(effectiveChoices(option));
         Object current = getUnchecked(option);
         if (!choices.contains(current)) {
@@ -310,11 +311,11 @@ final class CyclesSettingsList
     }
 
     final class SettingEntry extends ContainerObjectSelectionList.Entry<SettingEntry> {
-        private final CyclesClientConfig.ConfigOption<?> option;
+        private final SettingsOption<?> option;
         private final StringWidget label;
         private final List<AbstractWidget> controls;
 
-        SettingEntry(CyclesClientConfig.ConfigOption<?> option, boolean enabled) {
+        SettingEntry(SettingsOption<?> option, boolean enabled) {
             this.option = option;
             this.label = new StringWidget(
                     Component.translatable(option.translationKey()), Minecraft.getInstance().font);
@@ -379,7 +380,7 @@ final class CyclesSettingsList
             return entries;
         }
 
-        private List<AbstractWidget> createControls(CyclesClientConfig.ConfigOption<?> option) {
+        private List<AbstractWidget> createControls(SettingsOption<?> option) {
             return switch (option.kind()) {
                 case BOOLEAN, ENUM -> List.of(createCycleButton(option));
                 case INTEGER, DOUBLE -> createNumericControls(option);
@@ -387,7 +388,7 @@ final class CyclesSettingsList
         }
 
         @SuppressWarnings({"rawtypes", "unchecked"})
-        private AbstractWidget createCycleButton(CyclesClientConfig.ConfigOption<?> option) {
+        private AbstractWidget createCycleButton(SettingsOption<?> option) {
             Object current = getUnchecked(option);
             List values = option.kind() == CyclesClientConfig.ValueKind.BOOLEAN
                     ? List.of(Boolean.TRUE, Boolean.FALSE)
@@ -400,7 +401,7 @@ final class CyclesSettingsList
         }
 
         private List<AbstractWidget> createNumericControls(
-                CyclesClientConfig.ConfigOption<?> option) {
+                SettingsOption<?> option) {
             Number current = (Number) getUnchecked(option);
             EditBox editBox = new EditBox(
                     Minecraft.getInstance().font, 0, 0, 72, 20,
@@ -428,12 +429,12 @@ final class CyclesSettingsList
     }
 
     final class NumericSlider extends AbstractSliderButton {
-        private final CyclesClientConfig.ConfigOption<?> option;
+        private final SettingsOption<?> option;
         private final EditBox editBox;
         private boolean externalSync;
 
         NumericSlider(
-                CyclesClientConfig.ConfigOption<?> option,
+                SettingsOption<?> option,
                 EditBox editBox,
                 double current) {
             super(0, 0, 100, 20, Component.empty(), normalize(option, current));
@@ -476,7 +477,7 @@ final class CyclesSettingsList
         }
     }
 
-    private static double normalize(CyclesClientConfig.ConfigOption<?> option, double value) {
+    private static double normalize(SettingsOption<?> option, double value) {
         double range = option.maximum() - option.minimum();
         if (range <= 0.0D) {
             return 0.0D;
@@ -488,7 +489,7 @@ final class CyclesSettingsList
         return (clamped - option.minimum()) / range;
     }
 
-    private static double denormalize(CyclesClientConfig.ConfigOption<?> option, double value) {
+    private static double denormalize(SettingsOption<?> option, double value) {
         double range = option.maximum() - option.minimum();
         if (useLogScale(option)) {
             return option.minimum() + Math.expm1(value * Math.log1p(range));
@@ -496,12 +497,12 @@ final class CyclesSettingsList
         return option.minimum() + value * range;
     }
 
-    private static boolean useLogScale(CyclesClientConfig.ConfigOption<?> option) {
+    private static boolean useLogScale(SettingsOption<?> option) {
         return option.minimum() >= 0.0D && option.maximum() - option.minimum() > 1000.0D;
     }
 
     private static String formatNumber(
-            CyclesClientConfig.ConfigOption<?> option,
+            SettingsOption<?> option,
             double value) {
         if (option.kind() == CyclesClientConfig.ValueKind.INTEGER) {
             return Integer.toString((int) Math.round(value));
