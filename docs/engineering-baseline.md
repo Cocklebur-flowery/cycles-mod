@@ -2,11 +2,11 @@
 
 状态：当前事实清单
 
-检查日期：2026-08-16（Asia/Shanghai）
+检查日期：2026-08-17（Asia/Shanghai）
 
 检查对象：C/B/E 职责治理、E6 Minecraft 生命周期验收、R0 独立热点复核
 与 R0A/R0B/R1/R2/R5 收口（R5 基于 `214852e` 的最终 HEAD；E6 实机证据对应
-父提交 `976f15c` 的最终工作树）
+父提交 `976f15c` 的最终工作树），以及 `019d7ec` 的诊断 overlay 函数级整理
 
 本文件只描述上述提交附近的当前事实、验证证据和已知红项。它不是历史阶段
 记录，也不替代源码、构建配置、ABI 断言或测试。ABI、稳定契约、验证入口或
@@ -207,6 +207,27 @@ engine 协调器中分离。完整提交序列和职责边界见
 两套入口各有 13 个 task 实际执行。仍存在 `SectionSceneManager` deprecated API 与
 Gradle 10 compatibility 警告；它们未在 R5 扩大为无关清理。
 
+### 4.7 Post-R5 诊断 overlay 函数级整理
+
+`019d7ec` 只在 `CyclesDebugOverlay` 内把较长 `extract()` 收口为状态采集和八个具名
+分区 writer；固定字段、字符串、颜色、分区顺序、writer 调用次数和 F10 行为保持。
+它是函数级内部整理，不改变诊断职责、公开 API、ABI、配置、资源或 renderer 生命周期。
+
+执行结果：
+
+| 领域 | 状态 | 结果 |
+| --- | --- | --- |
+| `compileJava test jar` | `PASS` | `--rerun-tasks` 重新编译、执行 Java 测试并打包成功 |
+| 默认完整 `verifyProject` | `PASS` | Java build 与 6 个 native CTest 域全部通过 |
+| DLSS 首次完整 `verifyProject` | `KNOWN RED` | scene-lifecycle 报 `missing scene timing telemetry: commits=3;deltas=1;starts=66`；此前域已通过 |
+| DLSS focused scene-lifecycle | `PASS` | 紧接首次失败后独立执行目标域通过 |
+| DLSS 完整复跑 | `PASS` | Java build 与 6 个 native CTest 域全部通过，无 Skipped |
+| Minecraft F10 overlay | `PASS` | 用户确认重构后的分区内容与运行显示正常 |
+
+首次 DLSS scene-lifecycle 失败尚未形成可重复根因，因此不改写为“从未失败”；它与
+现存编译 warning 一并进入代码质量路线 Q5。当前证据没有指向 overlay 格式化变更造成
+renderer、scene 或 native 行为变化。
+
 ## 5. 分域测试结果
 
 无参数 smoke 继续保留原有完整顺序：
@@ -308,8 +329,9 @@ smoke ready frame 推断。
 `VulkanCapabilityProbe.java`、`color_management.cpp`、`CyclesClientConfig.java`、
 `VulkanFrameInterop.java`、`CyclesFramePresenter.java`、`CyclesRendererController.java`、
 `CyclesSettingsList.java` 和 `cycles_session_config.h` 均保留；
-它们的长度不构成第二生命周期的证据。`CyclesDebugOverlay.extract()` 可在未来
-做函数级整理，但不属于本轮架构拆分。
+它们的长度不构成第二生命周期的证据。`CyclesDebugOverlay.extract()` 已在
+`019d7ec` 完成同文件函数级整理；八个分区 writer 仍属于单一诊断展示职责，因此
+该变化没有重新打开架构拆分路线。
 
 R5 全局标记复核没有发现残留的 `Prototype` 类型或文件名。唯一命中是
 `gradle.properties` 的 `mod_name=Cycles Renderer Prototype`；它与 README 的实验性
