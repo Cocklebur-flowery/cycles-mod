@@ -3,19 +3,10 @@ package dev.cyclesrenderer.nativebridge;
 import dev.cyclesrenderer.config.CyclesRenderSettings;
 import dev.cyclesrenderer.scene.SectionGeometrySnapshot;
 
-import java.lang.foreign.Arena;
-import java.lang.foreign.MemorySegment;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-
-import static dev.cyclesrenderer.nativebridge.NativeLayouts.*;
-import static java.lang.foreign.ValueLayout.ADDRESS;
-import static java.lang.foreign.ValueLayout.JAVA_FLOAT;
-import static java.lang.foreign.ValueLayout.JAVA_INT;
-import static java.lang.foreign.ValueLayout.JAVA_LONG;
 
 public final class NativeBridge {
     public static final int ABI_VERSION = 43;
@@ -25,17 +16,9 @@ public final class NativeBridge {
     public static final int CAMERA_FOCUS_DISTANCE_VALID = 1;
 
     private static final String LIBRARY_PATH_PROPERTY = "cyclesrenderer.nativeLibrary";
-    private static final int STRUCT_VERSION = 1;
-    private static final int STATUS_OK = 0;
-    private static final int FRAME_READY = 1;
-    private static final int FRAME_UPDATED = 2;
     private static final int TEST_WIDTH = 16;
     private static final int TEST_HEIGHT = 16;
     private static final long TEST_FRAME_ID = 7L;
-    private static final int BUILD_INFO_BYTES = 128;
-    private static final int RENDERER_INFO_BYTES = 512;
-    private static final int COLOR_INFO_BYTES = 2048;
-    private static final int MAX_NATIVE_FRAME_BYTES = 3840 * 2160 * 4;
     public static final long CAPABILITY_SETTINGS = 1L << 0;
     public static final long CAPABILITY_PASS_VIEWER = 1L << 1;
     public static final long CAPABILITY_DENOISE = 1L << 2;
@@ -45,7 +28,7 @@ public final class NativeBridge {
     public static final long CAPABILITY_OCIO_COMPILED = 1L << 6;
     public static final long CAPABILITY_DLSS_EXPERIMENTAL_COMPILED = 1L << 7;
 
-    private static BridgeState bridgeState;
+    private static NativeBridgeSession bridgeState;
 
     static {
         NativeLayouts.validate();
@@ -65,9 +48,9 @@ public final class NativeBridge {
             return ProbeResult.failure("native library not found at " + libraryPath);
         }
 
-        BridgeState loadedState = null;
+        NativeBridgeSession loadedState = null;
         try {
-            loadedState = BridgeState.open(libraryPath);
+            loadedState = NativeBridgeSession.open(libraryPath);
             long checksum = verifyTestFrame(
                     loadedState.fillTestFrame(TEST_WIDTH, TEST_HEIGHT, TEST_FRAME_ID));
             bridgeState = loadedState;
@@ -97,7 +80,7 @@ public final class NativeBridge {
     }
 
     public static void commitScene() {
-        invoke("native scene commit", BridgeState::commitScene);
+        invoke("native scene commit", NativeBridgeSession::commitScene);
     }
 
     public static RenderedFrame renderFrame(
@@ -105,7 +88,7 @@ public final class NativeBridge {
             int height,
             long frameId,
             CameraInput cameraInput) {
-        BridgeState state = requireState();
+        NativeBridgeSession state = requireState();
         try {
             return state.renderFrame(width, height, frameId, cameraInput);
         } catch (Throwable error) {
@@ -119,7 +102,7 @@ public final class NativeBridge {
             int height,
             long frameId,
             CameraInput cameraInput) {
-        BridgeState state = requireState();
+        NativeBridgeSession state = requireState();
         try {
             state.updateCamera(width, height, frameId, cameraInput);
         } catch (Throwable error) {
@@ -129,7 +112,7 @@ public final class NativeBridge {
     }
 
     public static AcquiredFrame acquireFrame(long previousGeneration) {
-        BridgeState state = requireState();
+        NativeBridgeSession state = requireState();
         try {
             return state.acquireFrame(previousGeneration);
         } catch (Throwable error) {
@@ -139,7 +122,7 @@ public final class NativeBridge {
     }
 
     public static String rendererInfo() {
-        BridgeState state = requireState();
+        NativeBridgeSession state = requireState();
         try {
             return state.rendererInfo();
         } catch (Throwable error) {
@@ -157,7 +140,7 @@ public final class NativeBridge {
     }
 
     public static Capabilities capabilities() {
-        BridgeState state = requireState();
+        NativeBridgeSession state = requireState();
         try {
             return state.capabilities();
         } catch (Throwable error) {
@@ -175,7 +158,7 @@ public final class NativeBridge {
             CyclesRenderSettings.ViewTransform viewTransform,
             CyclesRenderSettings.ColorLook colorLook,
             CyclesRenderSettings.WorkingSpace workingSpace) {
-        BridgeState state = requireState();
+        NativeBridgeSession state = requireState();
         try {
             return state.colorLut(displayDevice, viewTransform, colorLook, workingSpace);
         } catch (Throwable error) {
@@ -186,7 +169,7 @@ public final class NativeBridge {
     }
 
     public static Diagnostics diagnostics() {
-        BridgeState state = requireState();
+        NativeBridgeSession state = requireState();
         try {
             return state.diagnostics();
         } catch (Throwable error) {
@@ -205,7 +188,7 @@ public final class NativeBridge {
             String deviceUuid,
             int slotCount,
             int slotStrideBytes) {
-        BridgeState state = requireState();
+        NativeBridgeSession state = requireState();
         try {
             state.bindVulkanInteropBuffer(
                     width, height, allocationBytes, memoryHandle,
@@ -219,16 +202,16 @@ public final class NativeBridge {
     }
 
     public static void unbindVulkanInteropBuffer() {
-        invoke("native Vulkan interop unbind", BridgeState::unbindVulkanInteropBuffer);
+        invoke("native Vulkan interop unbind", NativeBridgeSession::unbindVulkanInteropBuffer);
     }
 
     public static void closeWin32Handle(long handle) {
         if (handle == 0L) {
             return;
         }
-        BridgeState state = requireState();
+        NativeBridgeSession state = requireState();
         try {
-            state.library.closeWin32Handle.invokeExact(handle);
+            state.closeWin32Handle(handle);
         } catch (Throwable error) {
             rethrowFatalError(error);
             throw new IllegalStateException(
@@ -237,7 +220,7 @@ public final class NativeBridge {
     }
 
     public static VulkanInteropState vulkanInteropState() {
-        BridgeState state = requireState();
+        NativeBridgeSession state = requireState();
         try {
             return state.vulkanInteropState();
         } catch (Throwable error) {
@@ -249,7 +232,7 @@ public final class NativeBridge {
 
     public static VulkanInteropState acquireVulkanInteropFrame(
             long previousGeneration) {
-        BridgeState state = requireState();
+        NativeBridgeSession state = requireState();
         try {
             return state.acquireVulkanInteropFrame(previousGeneration);
         } catch (Throwable error) {
@@ -261,7 +244,7 @@ public final class NativeBridge {
     }
 
     public static void releaseVulkanInteropFrame(long generation) {
-        BridgeState state = requireState();
+        NativeBridgeSession state = requireState();
         try {
             state.releaseVulkanInteropFrame(generation);
         } catch (Throwable error) {
@@ -273,7 +256,7 @@ public final class NativeBridge {
     }
 
     public static PassDescriptor passDescriptor(int passId) {
-        BridgeState state = requireState();
+        NativeBridgeSession state = requireState();
         try {
             return state.passDescriptor(passId);
         } catch (Throwable error) {
@@ -284,7 +267,7 @@ public final class NativeBridge {
     }
 
     public static void close() {
-        BridgeState state = bridgeState;
+        NativeBridgeSession state = bridgeState;
         bridgeState = null;
         if (state != null) {
             state.close();
@@ -292,7 +275,7 @@ public final class NativeBridge {
     }
 
     private static void invoke(String operation, BridgeCall call) {
-        BridgeState state = requireState();
+        NativeBridgeSession state = requireState();
         try {
             call.run(state);
         } catch (Throwable error) {
@@ -301,8 +284,8 @@ public final class NativeBridge {
         }
     }
 
-    private static BridgeState requireState() {
-        BridgeState state = bridgeState;
+    private static NativeBridgeSession requireState() {
+        NativeBridgeSession state = bridgeState;
         if (state == null) {
             throw new IllegalStateException("native bridge is not initialized");
         }
@@ -333,489 +316,20 @@ public final class NativeBridge {
         return checksum;
     }
 
-    private static void checkStatus(int status, String operation) {
-        if (status != STATUS_OK) {
-            throw new IllegalStateException(operation + " returned status " + status);
-        }
-    }
-
-    private static void rethrowFatalError(Throwable error) {
+    static void rethrowFatalError(Throwable error) {
         if (error instanceof Error fatalError && !(fatalError instanceof LinkageError)) {
             throw fatalError;
         }
     }
 
-    private static String describe(Throwable error) {
+    static String describe(Throwable error) {
         String detail = error.getMessage();
         return error.getClass().getSimpleName() + (detail == null ? "" : ": " + detail);
     }
 
     @FunctionalInterface
     private interface BridgeCall {
-        void run(BridgeState state) throws Throwable;
-    }
-
-    private static final class BridgeState implements AutoCloseable {
-        private final NativeLibrary library;
-        private final MemorySegment renderer;
-        private final MemorySegment cameraSegment;
-        private final MemorySegment frameInfoSegment;
-        private final MemorySegment frameViewSegment;
-        private final MemorySegment settingsSegment;
-        private final MemorySegment passDescriptorSegment;
-        private final MemorySegment capabilitiesSegment;
-        private final MemorySegment diagnosticsSegment;
-        private final MemorySegment vulkanInteropStateSegment;
-        private final MemorySegment framePixelsSegment;
-        private final ByteBuffer framePixels;
-        private final String buildInfo;
-        private final String colorManagementInfo;
-
-        private long generation;
-        private Capabilities cachedCapabilities;
-        private boolean closed;
-
-        private BridgeState(
-                NativeLibrary library,
-                MemorySegment renderer,
-                String buildInfo,
-                String colorManagementInfo) {
-            this.library = library;
-            this.renderer = renderer;
-            this.cameraSegment = library.arena.allocate(CAMERA_LAYOUT);
-            this.frameInfoSegment = library.arena.allocate(FRAME_LAYOUT);
-            this.frameViewSegment = library.arena.allocate(FRAME_VIEW_LAYOUT);
-            this.settingsSegment = library.arena.allocate(SETTINGS_LAYOUT);
-            this.passDescriptorSegment = library.arena.allocate(PASS_DESCRIPTOR_LAYOUT);
-            this.capabilitiesSegment = library.arena.allocate(CAPABILITIES_LAYOUT);
-            this.diagnosticsSegment = library.arena.allocate(DIAGNOSTICS_LAYOUT);
-            this.vulkanInteropStateSegment = library.arena.allocate(
-                    VulkanInteropStateAbi.LAYOUT);
-            this.framePixelsSegment = library.arena.allocate(MAX_NATIVE_FRAME_BYTES, 16);
-            this.framePixels = framePixelsSegment.asByteBuffer();
-            this.buildInfo = buildInfo;
-            this.colorManagementInfo = colorManagementInfo;
-        }
-
-        private static BridgeState open(Path libraryPath) throws Throwable {
-            NativeLibrary library = NativeLibrary.open(libraryPath);
-            MemorySegment renderer = MemorySegment.NULL;
-            try {
-                int actualAbiVersion = (int) library.abiVersion.invokeExact();
-                if (actualAbiVersion != ABI_VERSION) {
-                    throw new IllegalStateException(
-                            "ABI mismatch: Java=" + ABI_VERSION + ", native=" + actualAbiVersion);
-                }
-
-                String buildInfo;
-                try (Arena arena = Arena.ofConfined()) {
-                    MemorySegment buffer = arena.allocate(BUILD_INFO_BYTES);
-                    checkStatus((int) library.writeBuildInfo.invokeExact(buffer, BUILD_INFO_BYTES),
-                            "build info call");
-                    buildInfo = buffer.getString(0, StandardCharsets.UTF_8);
-                }
-
-                MemorySegment rendererOutput = library.arena.allocate(ADDRESS);
-                checkStatus((int) library.createRenderer.invokeExact(rendererOutput),
-                        "renderer creation");
-                renderer = rendererOutput.get(ADDRESS, 0L);
-                if (renderer.address() == 0L) {
-                    throw new IllegalStateException("renderer creation returned a null handle");
-                }
-                String colorManagementInfo;
-                try (Arena arena = Arena.ofConfined()) {
-                    MemorySegment buffer = arena.allocate(COLOR_INFO_BYTES);
-                    checkStatus((int) library.writeColorManagementInfo.invokeExact(
-                            renderer, buffer, COLOR_INFO_BYTES), "color management info call");
-                    colorManagementInfo = buffer.getString(0, StandardCharsets.UTF_8);
-                }
-                return new BridgeState(
-                        library,
-                        renderer,
-                        buildInfo,
-                        colorManagementInfo);
-            } catch (Throwable error) {
-                if (renderer.address() != 0L) {
-                    try {
-                        library.destroyRenderer.invokeExact(renderer);
-                    } catch (Throwable closeError) {
-                        error.addSuppressed(closeError);
-                    }
-                }
-                library.close();
-                throw error;
-            }
-        }
-
-        private void resetScene(SectionGeometrySnapshot.SceneResources resources) throws Throwable {
-            try (Arena arena = Arena.ofConfined()) {
-                NativeSceneMarshaller.SceneResourcesSegments arguments =
-                        NativeSceneMarshaller.writeResources(
-                                arena, STRUCT_VERSION, resources);
-                int status = (int) library.resetScene.invokeExact(
-                        renderer,
-                        arguments.resources(),
-                        arguments.materials(),
-                        arguments.textureDescriptors(),
-                        arguments.texturePixels());
-                checkRendererStatus(status, "scene reset");
-                generation = 0L;
-            }
-        }
-
-        private void bindVulkanInteropBuffer(
-                int width,
-                int height,
-                long allocationBytes,
-                long memoryHandle,
-                long readySemaphoreHandle,
-                long releaseSemaphoreHandle,
-                String deviceUuid,
-                int slotCount,
-                int slotStrideBytes) throws Throwable {
-            boolean nativeCalled = false;
-            try (Arena arena = Arena.ofConfined()) {
-                MemorySegment descriptor =
-                        NativeVulkanInteropMarshaller.writeBufferDescriptor(
-                                arena,
-                                STRUCT_VERSION,
-                                PIXEL_FORMAT_RGBA16_FLOAT,
-                                width,
-                                height,
-                                allocationBytes,
-                                memoryHandle,
-                                readySemaphoreHandle,
-                                releaseSemaphoreHandle,
-                                deviceUuid,
-                                slotCount,
-                                slotStrideBytes);
-                nativeCalled = true;
-                int status = (int) library.bindVulkanInteropBuffer.invokeExact(
-                        renderer, descriptor);
-                checkRendererStatus(status, "Vulkan interop buffer bind");
-            } catch (Throwable error) {
-                if (!nativeCalled) {
-                    library.closeWin32Handle.invokeExact(memoryHandle);
-                    library.closeWin32Handle.invokeExact(readySemaphoreHandle);
-                    library.closeWin32Handle.invokeExact(releaseSemaphoreHandle);
-                }
-                throw error;
-            }
-        }
-
-        private void unbindVulkanInteropBuffer() throws Throwable {
-            checkRendererStatus(
-                    (int) library.unbindVulkanInteropBuffer.invokeExact(renderer),
-                    "Vulkan interop buffer unbind");
-        }
-
-        private VulkanInteropState vulkanInteropState() throws Throwable {
-            return queryVulkanInteropState((renderer, state) ->
-                    (int) library.queryVulkanInteropState.invokeExact(renderer, state));
-        }
-
-        private VulkanInteropState acquireVulkanInteropFrame(
-                long previousGeneration) throws Throwable {
-            return queryVulkanInteropState((renderer, state) ->
-                    (int) library.acquireVulkanInteropFrame.invokeExact(
-                            renderer, previousGeneration, state));
-        }
-
-        private void releaseVulkanInteropFrame(long frameGeneration)
-                throws Throwable {
-            checkRendererStatus(
-                    (int) library.releaseVulkanInteropFrame.invokeExact(
-                            renderer, frameGeneration),
-                    "Vulkan interop frame release");
-        }
-
-        private VulkanInteropState queryVulkanInteropState(
-                VulkanInteropStateCall call) throws Throwable {
-            NativeVulkanInteropMarshaller.prepareState(
-                    vulkanInteropStateSegment, STRUCT_VERSION);
-            checkRendererStatus(
-                    call.invoke(renderer, vulkanInteropStateSegment),
-                    "Vulkan interop state query");
-            return NativeVulkanInteropMarshaller.decodeState(vulkanInteropStateSegment);
-        }
-
-        @FunctionalInterface
-        private interface VulkanInteropStateCall {
-            int invoke(MemorySegment renderer, MemorySegment state) throws Throwable;
-        }
-
-        private void upsertSection(SectionGeometrySnapshot snapshot) throws Throwable {
-            if (snapshot.empty()) {
-                removeSection(snapshot.sectionNode());
-                return;
-            }
-            try (Arena arena = Arena.ofConfined()) {
-                NativeSceneMarshaller.SectionSegments arguments =
-                        NativeSceneMarshaller.writeSection(
-                                arena, STRUCT_VERSION, snapshot);
-                int status = (int) library.upsertSection.invokeExact(
-                        renderer,
-                        arguments.section(),
-                        arguments.vertices(),
-                        arguments.triangles());
-                checkRendererStatus(status, "section upsert");
-            }
-        }
-
-        private void removeSection(long sectionId) throws Throwable {
-            checkRendererStatus(
-                    (int) library.removeSection.invokeExact(renderer, sectionId),
-                    "section removal");
-        }
-
-        private void commitScene() throws Throwable {
-            checkRendererStatus(
-                    (int) library.commitScene.invokeExact(renderer), "scene commit");
-        }
-
-        private void applySettings(CyclesRenderSettings settings) throws Throwable {
-            NativeSettingsMarshaller.write(settingsSegment, STRUCT_VERSION, settings);
-            checkRendererStatus(
-                    (int) library.applySettings.invokeExact(renderer, settingsSegment),
-                    "settings update");
-        }
-
-        private Capabilities capabilities() throws Throwable {
-            if (cachedCapabilities != null) {
-                return cachedCapabilities;
-            }
-            NativeCapabilitiesDecoder.prepare(capabilitiesSegment, STRUCT_VERSION);
-            checkRendererStatus(
-                    (int) library.queryCapabilities.invokeExact(renderer, capabilitiesSegment),
-                    "capability query");
-            cachedCapabilities = NativeCapabilitiesDecoder.decode(capabilitiesSegment);
-            return cachedCapabilities;
-        }
-
-        private String colorManagementInfo() {
-            return colorManagementInfo;
-        }
-
-        private ColorLut colorLut(
-                CyclesRenderSettings.DisplayDevice displayDevice,
-                CyclesRenderSettings.ViewTransform viewTransform,
-                CyclesRenderSettings.ColorLook colorLook,
-                CyclesRenderSettings.WorkingSpace workingSpace)
-                throws Throwable {
-            CyclesRenderSettings.ViewTransform effectiveView =
-                    viewTransform.effectiveFor(displayDevice);
-            if (effectiveView == CyclesRenderSettings.ViewTransform.RAW) {
-                throw new IllegalArgumentException(
-                        effectiveView + " does not require an OCIO LUT");
-            }
-            int effectiveLook = colorLook.effectiveNativeId(effectiveView);
-            try (Arena arena = Arena.ofConfined()) {
-                MemorySegment descriptor = arena.allocate(COLOR_LUT_DESCRIPTOR_LAYOUT);
-                NativeColorLutDecoder.prepare(descriptor, STRUCT_VERSION);
-                checkRendererStatus(
-                        (int) library.queryColorLut.invokeExact(
-                                renderer,
-                                displayDevice.nativeId(),
-                                effectiveView.nativeId(),
-                                effectiveLook,
-                                workingSpace.nativeId(),
-                                descriptor,
-                                MemorySegment.NULL,
-                                0L),
-                        "color LUT descriptor query");
-                long byteCount = NativeColorLutDecoder.byteCount(descriptor);
-                ByteBuffer pixels = ByteBuffer.allocateDirect(Math.toIntExact(byteCount))
-                        .order(ByteOrder.nativeOrder());
-                checkRendererStatus(
-                        (int) library.queryColorLut.invokeExact(
-                                renderer,
-                                displayDevice.nativeId(),
-                                effectiveView.nativeId(),
-                                effectiveLook,
-                                workingSpace.nativeId(),
-                                descriptor,
-                                MemorySegment.ofBuffer(pixels),
-                                byteCount),
-                        "color LUT pixel query");
-                return NativeColorLutDecoder.decode(descriptor, pixels);
-            }
-        }
-
-        private PassDescriptor passDescriptor(int passId) throws Throwable {
-            if (passId < 0 || passId >= CyclesRenderSettings.PassView.values().length) {
-                throw new IllegalArgumentException("unknown pass id " + passId);
-            }
-            NativePassDescriptorDecoder.prepare(passDescriptorSegment, STRUCT_VERSION);
-            checkStatus(
-                    (int) library.queryPassDescriptor.invokeExact(
-                            passId, passDescriptorSegment),
-                    "pass descriptor query");
-            return NativePassDescriptorDecoder.decode(passDescriptorSegment);
-        }
-
-        private Diagnostics diagnostics() throws Throwable {
-            NativeDiagnosticsDecoder.prepare(diagnosticsSegment, STRUCT_VERSION);
-            checkRendererStatus(
-                    (int) library.queryDiagnostics.invokeExact(renderer, diagnosticsSegment),
-                    "diagnostics query");
-            return NativeDiagnosticsDecoder.decode(
-                    diagnosticsSegment, DEVICE_UPDATE_PHASE_COUNT);
-        }
-
-        private RenderedFrame renderFrame(
-                int width,
-                int height,
-                long frameId,
-                CameraInput input) throws Throwable {
-            NativeFrameMarshaller.writeCamera(
-                    cameraSegment, STRUCT_VERSION, width, height, frameId, input);
-            NativeFrameMarshaller.prepareFrameInfo(
-                    frameInfoSegment, STRUCT_VERSION, generation);
-            int status = (int) library.renderFrame.invokeExact(
-                    renderer,
-                    cameraSegment,
-                    frameInfoSegment,
-                    framePixelsSegment,
-                    (long) MAX_NATIVE_FRAME_BYTES);
-            checkRendererStatus(status, "renderer frame call");
-
-            int frameWidth = frameInfoSegment.get(JAVA_INT, 8L);
-            int frameHeight = frameInfoSegment.get(JAVA_INT, 12L);
-            generation = frameInfoSegment.get(JAVA_LONG, 16L);
-            int pixelBytes = frameInfoSegment.get(JAVA_INT, 24L);
-            int flags = frameInfoSegment.get(JAVA_INT, 28L);
-            int sampleCount = frameInfoSegment.get(JAVA_INT, 32L);
-            ByteBuffer pixels = null;
-            if ((flags & FRAME_UPDATED) != 0) {
-                int expected = Math.multiplyExact(Math.multiplyExact(frameWidth, frameHeight), 4);
-                if (pixelBytes != expected || pixelBytes < 0 || pixelBytes > MAX_NATIVE_FRAME_BYTES) {
-                    throw new IllegalStateException("native frame byte count mismatch: " + pixelBytes);
-                }
-                pixels = framePixels.duplicate();
-                pixels.clear();
-                pixels.limit(pixelBytes);
-            }
-            return new RenderedFrame(
-                    (flags & FRAME_READY) != 0,
-                    (flags & FRAME_UPDATED) != 0,
-                    frameWidth,
-                    frameHeight,
-                    generation,
-                    sampleCount,
-                    pixels);
-        }
-
-        private void updateCamera(
-                int width,
-                int height,
-                long frameId,
-                CameraInput input) throws Throwable {
-            NativeFrameMarshaller.writeCamera(
-                    cameraSegment, STRUCT_VERSION, width, height, frameId, input);
-            int status = (int) library.updateCamera.invokeExact(renderer, cameraSegment);
-            checkRendererStatus(status, "renderer camera update");
-        }
-
-        private AcquiredFrame acquireFrame(long previousGeneration) throws Throwable {
-            NativeFrameMarshaller.prepareFrameView(frameViewSegment, STRUCT_VERSION);
-            checkRendererStatus(
-                    (int) library.acquireFrame.invokeExact(
-                            renderer, previousGeneration, frameViewSegment),
-                    "renderer frame acquire");
-            int width = frameViewSegment.get(JAVA_INT, 8L);
-            int height = frameViewSegment.get(JAVA_INT, 12L);
-            long generation = frameViewSegment.get(JAVA_LONG, 16L);
-            int sampleCount = frameViewSegment.get(JAVA_INT, 24L);
-            int pixelFormat = frameViewSegment.get(JAVA_INT, 28L);
-            long pixelBytes = frameViewSegment.get(JAVA_LONG, 32L);
-            long token = frameViewSegment.get(JAVA_LONG, 40L);
-            MemorySegment pointer = frameViewSegment.get(ADDRESS, 48L);
-            int flags = frameViewSegment.get(JAVA_INT, 56L);
-            if ((flags & FRAME_UPDATED) == 0) {
-                return new AcquiredFrame(
-                        null, readyFlag(flags), false, width, height,
-                        generation, sampleCount, pixelFormat, null);
-            }
-            long expectedBytes = Math.multiplyExact(Math.multiplyExact((long) width, height), 8L);
-            if (width <= 0 || height <= 0 || pixelFormat != 2
-                    || pixelBytes != expectedBytes || token == 0L || pointer.address() == 0L) {
-                if (token != 0L) {
-                    releaseFrameLease(token);
-                }
-                throw new IllegalStateException("invalid native RGBA16F frame lease");
-            }
-            NativeFrameMarshaller.FrameLease lease =
-                    NativeFrameMarshaller.FrameLease.open(
-                            pointer, pixelBytes, token, this::releaseFrameLease);
-            return new AcquiredFrame(
-                    lease, true, true, width, height,
-                    generation, sampleCount, pixelFormat, lease.pixels());
-        }
-
-        private static boolean readyFlag(int flags) {
-            return (flags & FRAME_READY) != 0;
-        }
-
-        private void releaseFrameLease(long token) {
-            try {
-                checkRendererStatus(
-                        (int) library.releaseFrame.invokeExact(renderer, token),
-                        "renderer frame release");
-            } catch (Throwable error) {
-                rethrowFatalError(error);
-                throw new IllegalStateException(
-                        "native frame release failed: " + describe(error), error);
-            }
-        }
-
-        private ByteBuffer fillTestFrame(int width, int height, long frameId) throws Throwable {
-            int bytes = Math.multiplyExact(Math.multiplyExact(width, height), 4);
-            try (Arena arena = Arena.ofConfined()) {
-                MemorySegment output = arena.allocate(bytes, 16);
-                checkStatus((int) library.fillTestFrame.invokeExact(
-                                output, width, height, frameId),
-                        "test frame call");
-                ByteBuffer copied = ByteBuffer.allocate(bytes);
-                copied.put(output.asByteBuffer()).flip();
-                return copied;
-            }
-        }
-
-        private String buildInfo() {
-            return buildInfo;
-        }
-
-        private String rendererInfo() throws Throwable {
-            try (Arena arena = Arena.ofConfined()) {
-                MemorySegment buffer = arena.allocate(RENDERER_INFO_BYTES);
-                checkStatus((int) library.writeRendererInfo.invokeExact(
-                        renderer, buffer, RENDERER_INFO_BYTES), "renderer info call");
-                return buffer.getString(0, StandardCharsets.UTF_8);
-            }
-        }
-
-        private void checkRendererStatus(int status, String operation) throws Throwable {
-            if (status != STATUS_OK) {
-                throw new IllegalStateException(
-                        operation + " returned status " + status + "; " + rendererInfo());
-            }
-        }
-
-        @Override
-        public void close() {
-            if (closed) {
-                return;
-            }
-            closed = true;
-            try {
-                library.destroyRenderer.invokeExact(renderer);
-            } catch (Throwable error) {
-                rethrowFatalError(error);
-            } finally {
-                library.close();
-            }
-        }
-
+        void run(NativeBridgeSession state) throws Throwable;
     }
 
     public record CameraInput(
@@ -854,7 +368,7 @@ public final class NativeBridge {
         private final ByteBuffer pixels;
         private boolean closed;
 
-        private AcquiredFrame(
+        AcquiredFrame(
                 NativeFrameMarshaller.FrameLease lease,
                 boolean ready,
                 boolean updated,
