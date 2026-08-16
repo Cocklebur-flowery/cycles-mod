@@ -645,21 +645,12 @@ public final class NativeBridge {
             if (passId < 0 || passId >= CyclesRenderSettings.PassView.values().length) {
                 throw new IllegalArgumentException("unknown pass id " + passId);
             }
-            passDescriptorSegment.fill((byte) 0);
-            passDescriptorSegment.set(
-                    JAVA_INT, 0L, Math.toIntExact(PASS_DESCRIPTOR_LAYOUT.byteSize()));
-            passDescriptorSegment.set(JAVA_INT, 4L, STRUCT_VERSION);
+            NativePassDescriptorDecoder.prepare(passDescriptorSegment, STRUCT_VERSION);
             checkStatus(
                     (int) library.queryPassDescriptor.invokeExact(
                             passId, passDescriptorSegment),
                     "pass descriptor query");
-            return new PassDescriptor(
-                    passDescriptorSegment.get(JAVA_INT, 8L),
-                    passDescriptorSegment.get(JAVA_INT, 12L),
-                    passDescriptorSegment.get(JAVA_INT, 16L),
-                    passDescriptorSegment.get(JAVA_INT, 20L),
-                    passDescriptorSegment.get(JAVA_INT, 24L),
-                    passDescriptorSegment.get(JAVA_INT, 28L));
+            return NativePassDescriptorDecoder.decode(passDescriptorSegment);
         }
 
         private Diagnostics diagnostics() throws Throwable {

@@ -404,6 +404,25 @@ class NativeBridgeContractTest {
     }
 
     @Test
+    void nativePassDescriptorDecoderPreservesHeaderAndFields() {
+        try (Arena arena = Arena.ofConfined()) {
+            MemorySegment source = arena.allocate(NativeLayouts.PASS_DESCRIPTOR_LAYOUT);
+            source.fill((byte) 0x5a);
+            NativePassDescriptorDecoder.prepare(source, 1);
+            assertEquals(64, source.get(JAVA_INT, 0L));
+            assertEquals(1, source.get(JAVA_INT, 4L));
+            assertEquals(0, source.get(JAVA_INT, 8L));
+
+            for (int index = 0; index < 6; index++) {
+                source.set(JAVA_INT, 8L + index * Integer.BYTES, 101 + index);
+            }
+            assertEquals(
+                    new NativeBridge.PassDescriptor(101, 102, 103, 104, 105, 106),
+                    NativePassDescriptorDecoder.decode(source));
+        }
+    }
+
+    @Test
     void nativeDiagnosticsDecoderPreservesHeaderAndAllFields()
             throws ReflectiveOperationException {
         try (Arena arena = Arena.ofConfined()) {
