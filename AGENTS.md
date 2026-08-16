@@ -319,6 +319,9 @@ When commits are authorized:
   partial backend exists.
 - Follow [the commit message conventions](docs/commit-conventions.md) and use
   the root `.gitmessage` as the semantic template.
+- Every new commit must include the machine-readable `Commit-Level: S/M/H`
+  trailer; the local `commit-msg` hook and CI use
+  `scripts/validate-commit-message.py` to reject missing or invalid messages.
 - Use `<type>(<scope>): <imperative summary>` subjects. Level S is limited to
   small, non-semantic documentation, comment, spelling, link, or formatting
   changes. All other normal commits are Level M and must record `Why`,
@@ -328,6 +331,11 @@ When commits are authorized:
   contracts, variants/backends, risks, runtime evidence, and known limits.
 - Validation entries must use `PASS`, `FAIL`, `KNOWN RED`, `BLOCKED`, or
   `NOT RUN`, name the actual command or workflow, and state what it proved.
+- Fix a rejected message and retry; never use `git commit --no-verify` to evade
+  the format check because CI will reject the bypassed commit.
+- A long-running task, automatic continuation, or context switch is not commit
+  authorization; only an explicit current-user request or work-package grant
+  authorizes `git commit`.
 - Keep commands repository-relative and reproducible. Never record secrets,
   credentials, private home paths, host-specific identifiers, or raw logs in a
   commit message.

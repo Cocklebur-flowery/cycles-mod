@@ -5,6 +5,10 @@
 # - Use an allowed type and the narrowest stable Cycles scope.
 # - Avoid file lists, vague status words, and trailing punctuation.
 #
+# Commit-Level: S/M/H
+# - Required machine-readable trailer. S is title-only; M/H require the body
+#   sections below. The commit hook and CI reject missing or invalid levels.
+#
 # Standard body:
 #
 # Why:

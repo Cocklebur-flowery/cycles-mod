@@ -1,6 +1,6 @@
 # Cycles Renderer Git 提交信息规范
 
-> 规范版本：0.2
+> 规范版本：0.3
 >
 > 状态：仓库级提交规范
 >
@@ -67,6 +67,8 @@ Known limitations:
 Stage:
 - <authoritative stage document or stage ID>
 
+Commit-Level: M
+
 Refs: <issue, contract, upstream revision, or authoritative document>
 BREAKING CHANGE: <consumer impact and migration>
 ```
@@ -77,7 +79,7 @@ BREAKING CHANGE: <consumer impact and migration>
 
 ### 3.1 Level S：简短提交
 
-只写标题。仅在以下条件全部成立时使用：
+只写标题和机器可读的 `Commit-Level: S` trailer。仅在以下条件全部成立时使用：
 
 - 改动小且含义显然。
 - 不改变运行行为、画面、性能、配置、资源、ABI 或生命周期。
@@ -88,6 +90,8 @@ BREAKING CHANGE: <consumer impact and migration>
 
 ```text
 docs(readme): fix the native build link
+
+Commit-Level: S
 ```
 
 ### 3.2 Level M：标准提交
@@ -124,6 +128,8 @@ Validation:
 
 Compatibility / Risks:
 - Production ABI and renderer behavior are unchanged.
+
+Commit-Level: M
 ```
 
 ### 3.3 Level H：高风险提交
@@ -164,7 +170,7 @@ Compatibility / Risks:
 
 - 使用英文祈使语气，描述提交完成后的一个结果。
 - 使用最窄、稳定、长期可搜索的 scope。
-- 建议不超过 72 个字符，不以句号结尾。
+- 自动检查要求标题不超过 72 个字符，不以句号结尾。
 - 不写文件名清单、日期、测试状态或设备详情。
 - 不用 `misc`、`stuff`、`changes`、`updates`、`final` 等模糊词。
 - 不把 Spike、基线、接口占位或部分 Backend 路径声明成完整功能。
@@ -466,6 +472,8 @@ Validation:
 
 Compatibility / Risks:
 - No ABI or settings changes; atlas revision changes still force a rebuild.
+
+Commit-Level: M
 ```
 
 不要在 commit message 中保留没有对应基线的“快 30%”。
@@ -500,6 +508,8 @@ Validation:
 - PASS `<focused PBR smoke>` — restored the previous texture-content baseline.
 
 Reverts: <full commit hash>
+
+Commit-Level: M
 ```
 
 除非用户明确要求，不用 amend、rebase 或历史重写隐藏已经共享或具有调查价值的失败实验。
@@ -575,7 +585,30 @@ git config --local commit.template .gitmessage
 
 该命令修改仓库本地 Git 配置，不应由无关任务自动执行。使用 `git commit -F` 或多个 `-m` 的自动化提交仍必须遵守同一语义。
 
-## 16. 最终标准
+## 16. 自动检查与安装
+
+仓库提供无项目依赖的 Python 3 validator，作为本地 Hook 和 CI 的唯一语义实现。新 clone 或新开发环境执行：
+
+```text
+python scripts/install-git-policy.py
+```
+
+该命令只设置当前 clone 的 `core.hooksPath=.githooks` 和 `commit.template=.gitmessage`，不修改全局 Git 配置。之后每次 `git commit` 都会经过 `commit-msg` Hook；CI 使用相同脚本检查 push/PR 新增的非 merge 提交。
+
+手动检查单条消息或提交范围：
+
+```text
+python scripts/validate-commit-message.py --message-file <message-file>
+python scripts/validate-commit-message.py --range <base>..<head> --boundary 5ff245e
+```
+
+`--boundary` 之前的历史提交不会被追溯整改。`--no-verify` 只能绕过本地 Hook，不能绕过 CI；禁止为了通过检查而使用它。Hook 拒绝时应修正消息后重试，不得把失败提交改写成虚假的 PASS。
+
+## 17. 未授权提交纪律
+
+长时间任务、自动续跑或上下文切换都不等于提交授权。AI 只有在当前用户明确要求提交、或当前用户明确授权的工作包范围内才能执行 `git commit`。提交 Hook 只检查格式，不替代这条授权规则。
+
+## 18. 最终标准
 
 “详细”意味着未来调查者能从提交正文判断原因、责任、契约、验证矩阵和开放风险。
 
