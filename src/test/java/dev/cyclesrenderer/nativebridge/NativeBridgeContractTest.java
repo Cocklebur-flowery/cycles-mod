@@ -18,6 +18,9 @@ import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.lang.reflect.Modifier;
 import java.lang.reflect.RecordComponent;
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
+import java.nio.ReadOnlyBufferException;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
@@ -354,6 +357,49 @@ class NativeBridgeContractTest {
                             101L, 202L, 303, 304, 305, 306,
                             307, 308, 309, 310, 311),
                     NativeCapabilitiesDecoder.decode(source));
+        }
+    }
+
+    @Test
+    void nativeColorLutDecoderPreservesValidationAndFields() {
+        try (Arena arena = Arena.ofConfined()) {
+            MemorySegment source = arena.allocate(NativeLayouts.COLOR_LUT_DESCRIPTOR_LAYOUT);
+            source.fill((byte) 0x5a);
+            NativeColorLutDecoder.prepare(source, 1);
+            assertEquals(72, source.get(JAVA_INT, 0L));
+            assertEquals(1, source.get(JAVA_INT, 4L));
+            assertEquals(0, source.get(JAVA_INT, 8L));
+
+            for (int index = 0; index < 6; index++) {
+                source.set(JAVA_INT, 8L + index * Integer.BYTES, 101 + index);
+            }
+            source.set(JAVA_LONG, 32L, 64L);
+            source.set(JAVA_FLOAT, 40L, 1.25f);
+            source.set(JAVA_FLOAT, 44L, 2.25f);
+            source.set(JAVA_FLOAT, 48L, 3.25f);
+            for (int index = 0; index < 4; index++) {
+                source.set(JAVA_INT, 52L + index * Integer.BYTES, 201 + index);
+            }
+
+            assertEquals(64L, NativeColorLutDecoder.byteCount(source));
+            ByteBuffer pixels = ByteBuffer.allocateDirect(64).order(ByteOrder.nativeOrder());
+            pixels.position(16);
+            NativeBridge.ColorLut lut = NativeColorLutDecoder.decode(source, pixels);
+            assertEquals(
+                    new NativeBridge.ColorLutDescriptor(
+                            101, 102, 103, 104, 105, 106, 64L,
+                            1.25f, 2.25f, 3.25f, 201, 202, 203, 204),
+                    lut.descriptor());
+            assertEquals(0, lut.pixels().position());
+            assertEquals(64, lut.pixels().remaining());
+            assertEquals(ByteOrder.nativeOrder(), lut.pixels().order());
+            assertThrows(ReadOnlyBufferException.class, () -> lut.pixels().put(0, (byte) 1));
+
+            source.set(JAVA_LONG, 32L, 18L);
+            IllegalStateException invalidByteCount = assertThrows(
+                    IllegalStateException.class,
+                    () -> NativeColorLutDecoder.byteCount(source));
+            assertEquals("invalid native color LUT byte count 18", invalidByteCount.getMessage());
         }
     }
 

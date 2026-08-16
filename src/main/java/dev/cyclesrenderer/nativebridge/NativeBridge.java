@@ -611,9 +611,7 @@ public final class NativeBridge {
             int effectiveLook = colorLook.effectiveNativeId(effectiveView);
             try (Arena arena = Arena.ofConfined()) {
                 MemorySegment descriptor = arena.allocate(COLOR_LUT_DESCRIPTOR_LAYOUT);
-                descriptor.set(
-                        JAVA_INT, 0L, Math.toIntExact(COLOR_LUT_DESCRIPTOR_LAYOUT.byteSize()));
-                descriptor.set(JAVA_INT, 4L, STRUCT_VERSION);
+                NativeColorLutDecoder.prepare(descriptor, STRUCT_VERSION);
                 checkRendererStatus(
                         (int) library.queryColorLut.invokeExact(
                                 renderer,
@@ -625,12 +623,7 @@ public final class NativeBridge {
                                 MemorySegment.NULL,
                                 0L),
                         "color LUT descriptor query");
-                long byteCount = descriptor.get(JAVA_LONG, 32L);
-                if (byteCount <= 0L || byteCount > Integer.MAX_VALUE
-                        || (byteCount & 15L) != 0L) {
-                    throw new IllegalStateException(
-                            "invalid native color LUT byte count " + byteCount);
-                }
+                long byteCount = NativeColorLutDecoder.byteCount(descriptor);
                 ByteBuffer pixels = ByteBuffer.allocateDirect(Math.toIntExact(byteCount))
                         .order(ByteOrder.nativeOrder());
                 checkRendererStatus(
@@ -644,24 +637,7 @@ public final class NativeBridge {
                                 MemorySegment.ofBuffer(pixels),
                                 byteCount),
                         "color LUT pixel query");
-                pixels.clear();
-                return new ColorLut(
-                        new ColorLutDescriptor(
-                                descriptor.get(JAVA_INT, 8L),
-                                descriptor.get(JAVA_INT, 12L),
-                                descriptor.get(JAVA_INT, 16L),
-                                descriptor.get(JAVA_INT, 20L),
-                                descriptor.get(JAVA_INT, 24L),
-                                descriptor.get(JAVA_INT, 28L),
-                                descriptor.get(JAVA_LONG, 32L),
-                                descriptor.get(JAVA_FLOAT, 40L),
-                                descriptor.get(JAVA_FLOAT, 44L),
-                                descriptor.get(JAVA_FLOAT, 48L),
-                                descriptor.get(JAVA_INT, 52L),
-                                descriptor.get(JAVA_INT, 56L),
-                                descriptor.get(JAVA_INT, 60L),
-                                descriptor.get(JAVA_INT, 64L)),
-                        pixels.asReadOnlyBuffer().order(ByteOrder.nativeOrder()));
+                return NativeColorLutDecoder.decode(descriptor, pixels);
             }
         }
 
