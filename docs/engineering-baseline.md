@@ -4,8 +4,9 @@
 
 检查日期：2026-08-16（Asia/Shanghai）
 
-检查对象：C/B/E 职责治理、E6 Minecraft 生命周期验收与 R0 独立热点复核
-（复核 HEAD `1c12163`；实机证据对应父提交 `976f15c` 的最终 E6 工作树）
+检查对象：C/B/E 职责治理、E6 Minecraft 生命周期验收、R0 独立热点复核
+与 R0A smoke 文件收口（R0A 基于 `90538a9` 的最终工作树；实机证据对应
+父提交 `976f15c` 的最终 E6 工作树）
 
 本文件只描述上述提交附近的当前事实、验证证据和已知红项。它不是历史阶段
 记录，也不替代源码、构建配置、ABI 断言或测试。ABI、稳定契约、验证入口或
@@ -43,7 +44,7 @@
 | Java 测试 | camera 自动曝光/对焦/射线/直方图与 LabPBR 资源测试 | `src/test/java` |
 | 项目验证入口 | Gradle `verifyProject` 先执行 Java `build`，再运行所选 native 变体的全部 CTest | `build.gradle` |
 | Native 测试入口 | CTest 注册 5 个独立 smoke 能力域与 `cyclesrenderer_scene_update` | `native/CMakeLists.txt` |
-| Native smoke 结构 | 无参数入口保留完整顺序；CTest 通过 `--suite` 独立报告 contract、color、render、denoiser 与 scene-lifecycle；render 与 scene-lifecycle 仍共用一个物理源文件，待 R0A 收口 | `native/tests/cycles_bridge_smoke*.cpp` |
+| Native smoke 结构 | 无参数入口保留完整顺序；CTest 通过 `--suite` 独立报告 contract、color、render、denoiser 与 scene-lifecycle；render 与 scene-lifecycle 已有各自的物理源文件 | `native/tests/cycles_bridge_smoke*.cpp` |
 
 S5 仅将 `CyclesBridgeVulkanInteropState` 作为最小原型：单一 JSON schema 生成
 Java `MemoryLayout`/offset 常量和 C++ 全字段 size/offset 断言。公开 C 头中的结构
@@ -260,8 +261,9 @@ smoke ready frame 推断。
   R2 抽离 allocation；frame copy 继续由原门面协调。公开方法、telemetry 字段、
   native 8 B/px color-only 兼容、Java 12 B/px color+depth 分配、3-slot 策略/上限、
   HANDLE/timeline/release 与 drain-before-unbind/close 顺序均为稳定契约。
-- `cycles_bridge_smoke_render_scene.cpp` 同时定义 render 与 scene-lifecycle suite；
-  独立 CTest 报告已经完成，R0A 只拆物理源文件，不改测试语义。
+- R0A 已将 scene-lifecycle suite 移入
+  `cycles_bridge_smoke_scene_lifecycle.cpp`；`cycles_bridge_smoke_render_scene.cpp` 现只定义
+  render suite。独立 CTest 报告、skip 77、场景与 ABI 语义未变。
 - `VulkanInteropBinding` 仍向 engine 暴露 7 个可变引用 getter；R0B 将其收口
   为单一 binding/shared-state 边界，不改线程、mutex、HANDLE、timeline 或关闭语义。
 - `CyclesSettingsList` 保持单一 F9 列表职责，不因 512 行拆分。
@@ -330,11 +332,11 @@ smoke ready frame 推断。
 15. `R0 INDEPENDENT REVIEW DONE`：已复核全部不少于 500 行的生产
     源文件、测试大文件、入口 public API、interop 字节/slot/所有权和 ABI schema
     能力；修正了首次 R0 的遗漏与阶段顺序。
-16. `R0A NEXT`：将 scene-lifecycle suite 从
-    `cycles_bridge_smoke_render_scene.cpp` 移入独立源文件，保持 CTest/skip/场景语义。
-17. `R0B QUEUED`：将 native display driver 所需的 7 个可变引用收口为单一
+16. `R0A DONE`：scene-lifecycle suite 已移入独立源文件；函数体机械移动，
+    默认与 DLSS 完整门禁均通过，render/scene-lifecycle 无 Skipped。
+17. `R0B NEXT`：将 native display driver 所需的 7 个可变引用收口为单一
     binding/shared-state 边界，并完成双变体与 Minecraft interop 生命周期验收。
-18. `R1/R2 QUEUED`：R0A/R0B 结束后，先抽离客户端 renderer controller，
+18. `R1/R2 QUEUED`：R0B 结束后，先抽离客户端 renderer controller，
     再单独抽离 Vulkan allocation；每阶段执行双变体门禁和对应 Minecraft 里程碑。
 
-新功能开发继续冻结；当前只允许按路线图 R0A、R0B、R1、R2、R5 串行收口。
+新功能开发继续冻结；当前只允许按路线图 R0B、R1、R2、R5 串行收口。

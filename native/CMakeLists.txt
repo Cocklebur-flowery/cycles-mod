@@ -224,6 +224,7 @@ add_executable(cyclesrenderer_smoke
     tests/cycles_bridge_smoke_contract.cpp
     tests/cycles_bridge_smoke_denoiser.cpp
     tests/cycles_bridge_smoke_render_scene.cpp
+    tests/cycles_bridge_smoke_scene_lifecycle.cpp
     tests/cycles_bridge_smoke_support.cpp
 )
 target_compile_features(cyclesrenderer_smoke PRIVATE cxx_std_20)

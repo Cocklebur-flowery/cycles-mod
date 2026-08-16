@@ -6,8 +6,8 @@
 
 建立基线：`6e42ee7`
 
-执行进度：C、B、E 已完成；R0 二次独立复核完成。下一阶段先完成
-R0A smoke 物理职责拆分和 R0B native binding API 收口，再进入 R1。
+执行进度：C、B、E、R0 和 R0A 已完成。下一阶段为 R0B native
+binding API 收口，完成后再进入 R1。
 
 本文件规定稳定化门禁关闭后的生产代码职责拆分顺序。它描述治理边界、依赖、
 验证和提交纪律，不替代当前源码、ABI schema、测试或
@@ -44,9 +44,8 @@ R0A smoke 物理职责拆分和 R0B native binding API 收口，再进入 R1。
 | `src/main/java/dev/cyclesrenderer/CyclesRendererMod.java` | 624 | 入口接线，随下游组件形成逐步减负 |
 
 Native smoke 已按 contract、color、render、denoiser、scene lifecycle 与独立
-scene-update 域建立独立 CTest 报告。但 `cycles_bridge_smoke_render_scene.cpp`
-仍同时定义 render 与 scene-lifecycle 两个 suite 入口；这是测试源文件的物理
-职责尾项，不是生产代码热点，由 R0A 单独收口。
+scene-update 域建立独立 CTest 报告。R0A 又将 render 与 scene-lifecycle
+的 suite 实现分别放入独立源文件；该测试物理职责尾项已收口。
 
 ## 3. 全程保持的稳定契约
 
@@ -78,7 +77,7 @@ C  配置职责拆分
 | C | `DONE` | 配置持久化/runtime snapshot、Draft、option model 与 catalog 已分离 |
 | B | `DONE` | NativeBridge 公共门面稳定，layouts、symbols、marshalling、decoding 与 session ownership 已分离 |
 | E | `DONE` | Engine 已收口为渲染协调器；默认/DLSS 自动门禁和 E6 Minecraft 生命周期验收通过 |
-| R | `IN PROGRESS` | R0 二次独立复核完成；R0A/R0B 为进入 R1 前的小型收口，R1/R2 有职责证据，R3/R4 明确不机械扩张 |
+| R | `IN PROGRESS` | R0 二次独立复核和 R0A 测试文件收口已完成；R0B 为进入 R1 前的最后小型收口，R1/R2 有职责证据，R3/R4 明确不机械扩张 |
 
 配置阶段是低风险的拆分纪律验证，不替代两个主要核心文件。配置阶段完成后必须
 立即进入 `NativeBridge`，不得无限扩张 UI 或配置功能。
@@ -309,7 +308,7 @@ Scene/Camera revision 协调、状态、首个错误和 reset/close。
 | `CyclesRendererMod` | `SPLIT` | 624 行同时拥有 NeoForge 注册/按键接线和 renderer 启用、设置应用、scene/camera/frame 调度、fallback、关闭、telemetry 状态机；入口保护边界尚未满足 |
 | `VulkanFrameInterop` | `SPLIT` | 917 行同时拥有长寿命 Vulkan allocation/Win32 HANDLE/native bind 和逐帧 acquire/copy/fence/TextureTarget 两套生命周期 |
 | `vulkan_interop_display.h` | `TIGHTEN` | `VulkanInteropBinding` 已拥有 native interop 状态，但仍向 engine 暴露 7 个可变引用 getter；R0B 收口为单一 binding/shared-state 边界，不拆文件 |
-| `cycles_bridge_smoke_render_scene.cpp` | `SPLIT` | 637 行内同时定义 `run_render_scenarios` 和 `run_scene_lifecycle_scenarios`；CTest 报告已独立，R0A 只补齐物理文件边界 |
+| `cycles_bridge_smoke_render_scene.cpp` | `DONE` | R0A 已将 115 行 scene-lifecycle 函数体机械移入独立源文件；原文件现为 522 行且只定义 render suite |
 | `CyclesSettingsList` | `KEEP` | 512 行均服务 F9 列表筛选、依赖可见性、控件构造、输入归一化与 narration；没有第二资源生命周期或反向依赖 |
 | ABI schema | `DEFER` | 现有单结构原型和双变体 contract 全绿；其余结构含 pointer、array、float/double 与 padding，扩展当前仅支持 `uint32/uint64` 的生成器会成为独立高风险契约阶段 |
 
@@ -337,6 +336,11 @@ Scene/Camera revision 协调、状态、首个错误和 reset/close。
 helper。两者当前均保留。
 
 ### R0A：拆分 Native smoke 的 scene-lifecycle 源文件
+
+状态：`DONE`。`run_scene_lifecycle_scenarios` 已移入独立的
+`native/tests/cycles_bridge_smoke_scene_lifecycle.cpp`；移动前后函数体哈希一致。
+默认与 DLSS 完整 `verifyProject` 均通过，render 与 scene-lifecycle CTest
+都实际执行且无 Skipped。
 
 将 `run_scene_lifecycle_scenarios` 移入新文件
 `native/tests/cycles_bridge_smoke_scene_lifecycle.cpp`，原文件只保留 render suite，
