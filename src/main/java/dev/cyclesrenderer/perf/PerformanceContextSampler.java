@@ -2,7 +2,7 @@ package dev.cyclesrenderer.perf;
 
 import dev.cyclesrenderer.nativebridge.NativeBridge;
 import dev.cyclesrenderer.render.CyclesFramePresenter;
-import dev.cyclesrenderer.render.VulkanExternalBufferPrototype;
+import dev.cyclesrenderer.render.VulkanFrameInterop;
 import dev.cyclesrenderer.scene.SectionGeometryCollector;
 import dev.cyclesrenderer.scene.SectionSceneManager;
 import org.slf4j.Logger;
@@ -13,12 +13,12 @@ final class PerformanceContextSampler {
     private static final Logger LOGGER = LoggerFactory.getLogger(PerformanceContextSampler.class);
 
     private final CyclesFramePresenter presenter;
-    private final VulkanExternalBufferPrototype interop;
+    private final VulkanFrameInterop interop;
     private final SectionSceneManager sceneManager;
 
     PerformanceContextSampler(
             CyclesFramePresenter presenter,
-            VulkanExternalBufferPrototype interop,
+            VulkanFrameInterop interop,
             SectionSceneManager sceneManager) {
         this.presenter = presenter;
         this.interop = interop;
@@ -29,7 +29,7 @@ final class PerformanceContextSampler {
         SectionGeometryCollector.Telemetry capture = SectionGeometryCollector.telemetry();
         SectionSceneManager.Telemetry scene = sceneManager.telemetry();
         CyclesFramePresenter.Telemetry presentation = presenter.telemetry();
-        VulkanExternalBufferPrototype.CopyTelemetry copy = interop.copyTelemetry();
+        VulkanFrameInterop.CopyTelemetry copy = interop.copyTelemetry();
         NativeBridge.Diagnostics diagnostics = null;
         if (NativeBridge.isReady()) {
             try {

@@ -9,7 +9,7 @@ import dev.cyclesrenderer.render.CyclesFramePresenter;
 import dev.cyclesrenderer.render.HdrOutputStage;
 import dev.cyclesrenderer.render.VulkanPipelineFormatVariants;
 import dev.cyclesrenderer.render.VulkanCapabilityProbe;
-import dev.cyclesrenderer.render.VulkanExternalBufferPrototype;
+import dev.cyclesrenderer.render.VulkanFrameInterop;
 import dev.cyclesrenderer.scene.SectionGeometryCollector;
 import dev.cyclesrenderer.scene.SectionSceneManager;
 import dev.cyclesrenderer.scene.LabPbrAtlasBuilder;
@@ -40,7 +40,7 @@ final class CyclesDebugOverlay {
             Minecraft minecraft,
             CyclesFramePresenter presenter,
             AutofocusStage.State autofocus,
-            VulkanExternalBufferPrototype interopBuffer,
+            VulkanFrameInterop interopBuffer,
             SectionSceneManager sceneManager,
             CyclesRenderSettings requestedSettings,
             CyclesRenderSettings acceptedSettings,
@@ -59,8 +59,8 @@ final class CyclesDebugOverlay {
             NativeBridge.Diagnostics diagnostics = NativeBridge.diagnostics();
             NativeBridge.Capabilities capabilities = NativeBridge.capabilities();
             NativeBridge.VulkanInteropState interop = NativeBridge.vulkanInteropState();
-            VulkanExternalBufferPrototype.Telemetry buffer = interopBuffer.telemetry();
-            VulkanExternalBufferPrototype.CopyTelemetry copy = interopBuffer.copyTelemetry();
+            VulkanFrameInterop.Telemetry buffer = interopBuffer.telemetry();
+            VulkanFrameInterop.CopyTelemetry copy = interopBuffer.copyTelemetry();
             CyclesFramePresenter.Telemetry presentation = presenter.telemetry();
             AutomaticExposureStage.Telemetry exposure =
                     presenter.automaticExposureTelemetry();

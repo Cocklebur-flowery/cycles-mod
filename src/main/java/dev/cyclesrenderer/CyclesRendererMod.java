@@ -11,7 +11,7 @@ import dev.cyclesrenderer.perf.FramePerformanceMonitor;
 import dev.cyclesrenderer.perf.PerformanceSample;
 import dev.cyclesrenderer.render.CyclesFramePresenter;
 import dev.cyclesrenderer.render.CyclesRenderPipelines;
-import dev.cyclesrenderer.render.VulkanExternalBufferPrototype;
+import dev.cyclesrenderer.render.VulkanFrameInterop;
 import dev.cyclesrenderer.scene.SectionGeometryCollector;
 import dev.cyclesrenderer.scene.SectionSceneManager;
 import net.minecraft.client.KeyMapping;
@@ -90,8 +90,8 @@ public final class CyclesRendererMod {
     private static final SectionSceneManager SCENE_MANAGER = new SectionSceneManager();
     private static final CyclesFramePresenter FRAME_PRESENTER = new CyclesFramePresenter();
     private static final AutofocusStage AUTOFOCUS = new AutofocusStage();
-    private static final VulkanExternalBufferPrototype INTEROP_BUFFER =
-            new VulkanExternalBufferPrototype();
+    private static final VulkanFrameInterop INTEROP_BUFFER =
+            new VulkanFrameInterop();
     private static final FramePerformanceMonitor PERFORMANCE_MONITOR =
             new FramePerformanceMonitor(FRAME_PRESENTER, INTEROP_BUFFER, SCENE_MANAGER);
 
@@ -245,7 +245,7 @@ public final class CyclesRendererMod {
     }
 
     private static void rebuildInteropForSettings(CyclesRenderSettings settings) {
-        VulkanExternalBufferPrototype.Telemetry previous = INTEROP_BUFFER.telemetry();
+        VulkanFrameInterop.Telemetry previous = INTEROP_BUFFER.telemetry();
         LOGGER.info(
                 "Rebuilding Vulkan interop capacity from {}x{} for output {}x{}@{}%",
                 previous.capacityWidth(),

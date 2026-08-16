@@ -1,7 +1,7 @@
 package dev.cyclesrenderer.perf;
 
 import dev.cyclesrenderer.render.CyclesFramePresenter;
-import dev.cyclesrenderer.render.VulkanExternalBufferPrototype;
+import dev.cyclesrenderer.render.VulkanFrameInterop;
 import dev.cyclesrenderer.scene.SectionSceneManager;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -59,7 +59,7 @@ public final class FramePerformanceMonitor implements DisplayPerformanceProbe {
 
     public FramePerformanceMonitor(
             CyclesFramePresenter presenter,
-            VulkanExternalBufferPrototype interop,
+            VulkanFrameInterop interop,
             SectionSceneManager sceneManager) {
         contextSampler = new PerformanceContextSampler(presenter, interop, sceneManager);
         gpuQueriesProperty = System.getProperty("cyclesrenderer.performance.gpuQueries");

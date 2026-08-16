@@ -48,7 +48,7 @@ import org.lwjgl.vulkan.VkPhysicalDeviceMemoryProperties;
 
 import java.nio.LongBuffer;
 
-public final class VulkanExternalBufferPrototype implements AutoCloseable {
+public final class VulkanFrameInterop implements AutoCloseable {
     public static final int BYTES_PER_PIXEL = 8;
     private static final int DEPTH_BYTES_PER_PIXEL = 4;
     private static final int SLOT_BYTES_PER_PIXEL =
