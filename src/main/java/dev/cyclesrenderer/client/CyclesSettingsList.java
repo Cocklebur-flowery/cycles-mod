@@ -3,6 +3,7 @@ package dev.cyclesrenderer.client;
 import dev.cyclesrenderer.config.CyclesClientConfig;
 import dev.cyclesrenderer.config.CyclesRenderSettings;
 import dev.cyclesrenderer.config.CameraAutomationSettings;
+import dev.cyclesrenderer.config.SettingsDraft;
 import dev.cyclesrenderer.nativebridge.NativeBridge;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
@@ -43,7 +44,7 @@ final class CyclesSettingsList
             "color.viewTransform",
             "color.whiteBalance",
             "color.autoExposure");
-    private final CyclesClientConfig.Draft draft;
+    private final SettingsDraft draft;
     private boolean refreshRequested;
 
     CyclesSettingsList(
@@ -52,7 +53,7 @@ final class CyclesSettingsList
             int height,
             int x,
             int y,
-            CyclesClientConfig.Draft draft) {
+            SettingsDraft draft) {
         super(minecraft, width, height, y, 24);
         this.draft = draft;
         this.centerListVertically = false;

@@ -1,6 +1,7 @@
 package dev.cyclesrenderer.client;
 
 import dev.cyclesrenderer.config.CyclesClientConfig;
+import dev.cyclesrenderer.config.SettingsDraft;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.EditBox;
@@ -16,7 +17,7 @@ public final class CyclesSettingsScreen extends Screen {
     private static final int HEADER_HEIGHT = 48;
     private static final int FOOTER_HEIGHT = 34;
     private final Screen parent;
-    private final CyclesClientConfig.Draft draft = CyclesClientConfig.draft();
+    private final SettingsDraft draft = CyclesClientConfig.draft();
     private final Map<CyclesClientConfig.Category, Button> categoryButtons =
             new EnumMap<>(CyclesClientConfig.Category.class);
     private CyclesClientConfig.Category selectedCategory = CyclesClientConfig.Category.OUTPUT;
@@ -108,7 +109,7 @@ public final class CyclesSettingsScreen extends Screen {
 
     @Override
     public void onClose() {
-        draft.apply();
+        CyclesClientConfig.apply(draft);
         minecraft.gui.setScreen(parent);
     }
 
@@ -136,7 +137,7 @@ public final class CyclesSettingsScreen extends Screen {
     }
 
     private void applyDraft() {
-        draft.apply();
+        CyclesClientConfig.apply(draft);
         rebuildSettingsList();
     }
 

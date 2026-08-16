@@ -3,12 +3,8 @@ package dev.cyclesrenderer.config;
 import net.neoforged.neoforge.common.ModConfigSpec;
 
 import java.util.ArrayList;
-import java.util.IdentityHashMap;
-import java.util.LinkedHashSet;
 import java.util.List;
-import java.util.Map;
 import java.util.Objects;
-import java.util.Set;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
 import java.util.function.UnaryOperator;
@@ -528,8 +524,21 @@ public final class CyclesClientConfig {
         return OPTIONS;
     }
 
-    public static Draft draft() {
-        return new Draft();
+    public static SettingsDraft draft() {
+        return new SettingsDraft(OPTIONS);
+    }
+
+    public static boolean apply(SettingsDraft draft) {
+        List<SettingsDraft.Change> changes = draft.changes();
+        if (changes.isEmpty()) {
+            return false;
+        }
+        for (SettingsDraft.Change change : changes) {
+            change.option().writeUnchecked(change.value());
+        }
+        draft.accept(changes);
+        changedAndSave();
+        return true;
     }
 
     private static List<ConfigOption<?>> buildOptions() {
@@ -879,7 +888,7 @@ public final class CyclesClientConfig {
         private final double step;
         private final List<T> choices;
 
-        private ConfigOption(
+        ConfigOption(
                 String id,
                 Category category,
                 String translationKey,
@@ -936,78 +945,17 @@ public final class CyclesClientConfig {
             return choices;
         }
 
-        private T read() {
+        T read() {
             return reader.get();
         }
 
-        private T normalize(T candidate) {
+        T normalize(T candidate) {
             return normalizer.apply(Objects.requireNonNull(candidate));
         }
 
         @SuppressWarnings("unchecked")
-        private void writeUnchecked(Object candidate) {
+        void writeUnchecked(Object candidate) {
             writer.accept(normalize((T) candidate));
-        }
-    }
-
-    public static final class Draft {
-        private final Map<ConfigOption<?>, Object> baseline = new IdentityHashMap<>();
-        private final Map<ConfigOption<?>, Object> values = new IdentityHashMap<>();
-        private final Set<ConfigOption<?>> dirty = new LinkedHashSet<>();
-
-        private Draft() {
-            for (ConfigOption<?> option : OPTIONS) {
-                Object value = option.read();
-                baseline.put(option, value);
-                values.put(option, value);
-            }
-        }
-
-        @SuppressWarnings("unchecked")
-        public <T> T get(ConfigOption<T> option) {
-            return (T) values.get(option);
-        }
-
-        public <T> void set(ConfigOption<T> option, T value) {
-            T normalized = option.normalize(value);
-            values.put(option, normalized);
-            if (Objects.equals(baseline.get(option), normalized)) {
-                dirty.remove(option);
-            } else {
-                dirty.add(option);
-            }
-        }
-
-        public boolean isDirty() {
-            return !dirty.isEmpty();
-        }
-
-        public boolean isDirty(ConfigOption<?> option) {
-            return dirty.contains(option);
-        }
-
-        public void discard() {
-            baseline.clear();
-            values.clear();
-            dirty.clear();
-            for (ConfigOption<?> option : OPTIONS) {
-                Object value = option.read();
-                baseline.put(option, value);
-                values.put(option, value);
-            }
-        }
-
-        public boolean apply() {
-            if (dirty.isEmpty()) {
-                return false;
-            }
-            for (ConfigOption<?> option : dirty) {
-                option.writeUnchecked(values.get(option));
-                baseline.put(option, values.get(option));
-            }
-            dirty.clear();
-            changedAndSave();
-            return true;
         }
     }
 

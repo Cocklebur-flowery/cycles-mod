@@ -9,6 +9,7 @@ import java.util.HashSet;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -47,6 +48,49 @@ class CyclesClientConfigTest {
         assertEquals(EXPECTED_CATALOG_SHA256, actualFingerprint,
                 "configuration option catalog changed: " + actualFingerprint);
         assertThrows(UnsupportedOperationException.class, options::clear);
+    }
+
+    @Test
+    void draftNormalizesTracksDiscardsAndAcceptsEdits() {
+        AtomicInteger stored = new AtomicInteger(480);
+        CyclesClientConfig.ConfigOption<Integer> width = new CyclesClientConfig.ConfigOption<>(
+                "output.width",
+                CyclesClientConfig.Category.OUTPUT,
+                "config.cyclesrenderer.output.width",
+                CyclesClientConfig.ValueKind.INTEGER,
+                stored::get,
+                stored::set,
+                value -> Math.clamp(value, 160, 3840),
+                160.0D,
+                3840.0D,
+                1.0D,
+                List.of());
+        SettingsDraft draft = new SettingsDraft(List.of(width));
+
+        assertFalse(draft.isDirty());
+        draft.set(width, Integer.MAX_VALUE);
+        assertEquals(3840, draft.get(width));
+        assertTrue(draft.isDirty());
+        assertTrue(draft.isDirty(width));
+
+        draft.set(width, stored.get());
+        assertFalse(draft.isDirty());
+
+        draft.set(width, Integer.MIN_VALUE);
+        assertEquals(160, draft.get(width));
+        List<SettingsDraft.Change> changes = draft.changes();
+        assertEquals(1, changes.size());
+        assertEquals(width, changes.getFirst().option());
+        assertEquals(160, changes.getFirst().value());
+
+        draft.accept(changes);
+        assertFalse(draft.isDirty());
+        assertEquals(160, draft.get(width));
+
+        stored.set(720);
+        draft.discard();
+        assertEquals(720, draft.get(width));
+        assertFalse(draft.isDirty());
     }
 
     private static String catalogFingerprint(List<CyclesClientConfig.ConfigOption<?>> options) {
