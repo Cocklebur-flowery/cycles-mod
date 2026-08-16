@@ -250,9 +250,16 @@ smoke ready frame 推断。
   NeoForge SPEC/persistence、revision 与 runtime snapshot。`SettingsDraft`、
   `SettingsOption` 和 `SettingsCatalog` 分别拥有编辑生命周期、选项模型与目录。
 
-这些文件仍受热点保护：不得重新吸收已经抽离的职责。后置 R 阶段只读复核
-`CyclesRendererMod`、`VulkanFrameInterop`、`CyclesSettingsList` 和 ABI schema 扩展
-必要性；没有可分生命周期或漂移证据时不做机械拆分。
+这些文件仍受热点保护：不得重新吸收已经抽离的职责。R0 后置复核确认：
+
+- `CyclesRendererMod` 仍混合 NeoForge 入口接线与 renderer 运行状态机，下一阶段抽离
+  package-private controller，同时保持 mixin 静态门面和事件 priority。
+- `VulkanFrameInterop` 存在 allocation/native bind 与逐帧 copy/fence/target 两套生命周期，
+  在入口收口后抽离 allocation；frame copy 继续由原门面协调。
+- `CyclesSettingsList` 保持单一 F9 列表职责，不因 512 行拆分。
+- ABI schema 扩展延后到下一次真实 ABI 变更前的独立契约阶段，不在纯重构中批量迁移。
+
+完整处置顺序和稳定契约见路线图 R0-R5。
 
 `native/include/cycles_bridge.h` 虽然较大，但当前职责是单一稳定 C ABI；禁止
 为了行数机械拆分或改变布局。
@@ -304,7 +311,9 @@ smoke ready frame 推断。
     marshalling、decoding 与 native session ownership 已分离并通过双变体门禁。
 14. `ENGINE RESPONSIBILITY DONE`：frame、interop、scene、camera、session config 和
     Vulkan binding 已分离；E6 双变体自动化与 Minecraft DLSS 生命周期验收通过。
-15. `R REVIEW NEXT`：只读复核剩余热点与 ABI schema 漂移风险，更新最终基线；
-    未观察到独立职责或生命周期证据时不再拆文件。
+15. `R0 REVIEW DONE`：确认入口 runtime controller 与 Vulkan allocation 两个真实
+    职责边界；F9 列表保持整体，ABI generator 扩展延后。
+16. `R1 NEXT`：先抽离客户端 renderer controller，再单独处理 Vulkan allocation；
+    每阶段执行双变体门禁和对应 Minecraft 生命周期验收。
 
-新功能开发继续冻结；当前只允许完成 R 后置热点复核与基线收口。
+新功能开发继续冻结；当前只允许按路线图 R1、R2、R5 串行收口。

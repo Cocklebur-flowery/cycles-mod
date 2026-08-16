@@ -6,7 +6,8 @@
 
 建立基线：`6e42ee7`
 
-执行进度：C、B、E 已完成；当前进入 R 后置热点复核与基线收口。
+执行进度：C、B、E 已完成；R0 后置热点复核完成，下一阶段为 R1 入口控制器
+拆分。
 
 本文件规定稳定化门禁关闭后的生产代码职责拆分顺序。它描述治理边界、依赖、
 验证和提交纪律，不替代当前源码、ABI schema、测试或
@@ -74,7 +75,7 @@ C  配置职责拆分
 | C | `DONE` | 配置持久化/runtime snapshot、Draft、option model 与 catalog 已分离 |
 | B | `DONE` | NativeBridge 公共门面稳定，layouts、symbols、marshalling、decoding 与 session ownership 已分离 |
 | E | `DONE` | Engine 已收口为渲染协调器；默认/DLSS 自动门禁和 E6 Minecraft 生命周期验收通过 |
-| R | `NEXT` | 只读复核剩余热点和 ABI schema 漂移风险，按证据决定是否继续拆分 |
+| R | `IN PROGRESS` | R0 只读复核完成；R1/R2 有职责证据，R3/R4 明确不机械扩张 |
 
 配置阶段是低风险的拆分纪律验证，不替代两个主要核心文件。配置阶段完成后必须
 立即进入 `NativeBridge`，不得无限扩张 UI 或配置功能。
@@ -293,6 +294,64 @@ Scene/Camera revision 协调、状态、首个错误和 reset/close。
 - 是否需要把 ABI schema 从单结构原型扩展到更多机械布局。
 
 未观察到职责或生命周期分离证据时，不做机械拆分。
+
+### R0：热点复核结果
+
+状态：`DONE`。在 `198bca0` 上完成只读结构、调用方、状态所有权和 ABI 生成链
+复核，结论如下：
+
+| 对象 | 判定 | 证据与处置 |
+| --- | --- | --- |
+| `CyclesRendererMod` | `SPLIT` | 624 行同时拥有 NeoForge 注册/按键接线和 renderer 启用、设置应用、scene/camera/frame 调度、fallback、关闭、telemetry 状态机；入口保护边界尚未满足 |
+| `VulkanFrameInterop` | `SPLIT` | 917 行同时拥有长寿命 Vulkan allocation/Win32 HANDLE/native bind 和逐帧 acquire/copy/fence/TextureTarget 两套生命周期 |
+| `CyclesSettingsList` | `KEEP` | 512 行均服务 F9 列表筛选、依赖可见性、控件构造、输入归一化与 narration；没有第二资源生命周期或反向依赖 |
+| ABI schema | `DEFER` | 现有单结构原型和双变体 contract 全绿；其余结构含 pointer、array、float/double 与 padding，扩展当前仅支持 `uint32/uint64` 的生成器会成为独立高风险契约阶段 |
+
+### R1：抽离客户端渲染控制器
+
+新增 package-private `CyclesRendererController`，迁移 renderer 运行状态、启用/关闭、
+settings apply/rebuild、scene/camera/frame 调度、性能计数和 shutdown。`CyclesRendererMod`
+只保留 MOD/资源 ID、key 注册、config screen/reload 和 NeoForge 事件到 controller 的
+薄转发；现有 `shouldReplaceVanillaWorld()` 静态门面继续兼容 mixin 调用方。
+
+稳定契约：F8/F9/F10、事件 priority、FrameGraph 接管条件、日志文本、config revision、
+interop rebuild、fallback 和关闭顺序全部不变。
+
+验证：`compileJava test jar`、默认与 DLSS 完整 `verifyProject`；随后执行一次 Minecraft
+DLSS F8 启用、首帧、关闭、再启用和退出。
+
+建议提交：`refactor(runtime): isolate the client renderer controller`
+
+### R2：抽离 Vulkan interop allocation
+
+从 `VulkanFrameInterop` 抽出单一 package-private allocation 组件，独占 VkBuffer、
+VkDeviceMemory、ready/release timeline semaphore、Win32 HANDLE 导出、capability validation、
+native bind/unbind 和 allocation close。原门面继续独占逐帧 frame acquire、copy command、
+fence、TextureTarget、generation 与 copy telemetry，并负责两个组件的调用顺序。
+
+稳定契约：12 B/px slot、3 slots、RGBA16F/R32F、HANDLE 转移、timeline value、frame
+release、capacity rebuild 与 close 顺序全部不变。本阶段不再继续拆 copy path。
+
+验证：`compileJava test jar`、默认与 DLSS 完整 `verifyProject`；Minecraft DLSS 执行
+F8 启用/关闭/再启用、输出分辨率扩大触发 capacity rebuild、窗口 resize 和退出。
+
+建议提交：`refactor(interop): isolate Vulkan shared allocation`
+
+### R3：保留 F9 列表整体
+
+`CyclesSettingsList` 维持现状。未来只有在 visibility/choice policy 被第二个 UI 消费，
+或需要不启动 Minecraft UI 的独立策略测试时，才考虑抽离；行数本身不是理由。
+
+### R4：延后 ABI schema 扩展
+
+不在纯架构收口中扩大 generator。下一次 ABI 新增或字段迁移前，先为目标结构定义
+pointer、array、float/double、padding 和 alignment 的 schema 语义，再以单结构阶段
+证明 Java layout、C++ assert、C header 和 contract smoke 同步；不得直接批量迁移。
+
+### R5：最终基线收口
+
+R1/R2 完成自动化与实机里程碑后，重新核对所有超过 500 行的生产源码、依赖方向、
+剩余红项和明确未测矩阵。若没有新的多职责证据，更新工程基线并结束本轮架构冻结。
 
 ## 9. 每阶段提交与验证纪律
 
