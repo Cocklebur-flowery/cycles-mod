@@ -164,6 +164,8 @@ void refresh_vulkan_interop_slot_flags(
     }
 }
 
+class VulkanInteropDisplayDriver;
+
 class VulkanInteropBinding final {
  public:
     void stop() {
@@ -383,19 +385,9 @@ class VulkanInteropBinding final {
         state_.sample_count = sample_count;
     }
 
-    CyclesBridgeVulkanInteropState& display_state() { return state_; }
-    VulkanInteropSlots& display_slots() { return slots_; }
-    std::mutex& display_mutex() { return mutex_; }
-    std::condition_variable& display_changed() { return changed_; }
-    bool& display_stopping() { return stopping_; }
-    std::uint64_t& display_configured_camera_revision() {
-        return configured_camera_revision_;
-    }
-    std::uint64_t& display_produced_camera_revision() {
-        return produced_camera_revision_;
-    }
-
  private:
+    friend class VulkanInteropDisplayDriver;
+
     mutable std::mutex mutex_;
     std::condition_variable changed_;
     bool stopping_ = false;
@@ -414,26 +406,20 @@ class VulkanInteropDisplayDriver final : public ccl::DisplayDriver {
     VulkanInteropDisplayDriver(
         VulkanInteropSnapshot&& snapshot,
         FrameStore& frames,
-        CyclesBridgeVulkanInteropState& state,
-        VulkanInteropSlots& slots,
-        std::mutex& state_mutex,
-        std::condition_variable& state_changed,
+        VulkanInteropBinding& binding,
         std::condition_variable& worker_changed,
-        bool& stopping,
-        std::uint64_t& configured_camera_revision,
-        std::uint64_t& produced_camera_revision,
         bool export_depth,
         float depth_resolution_divider)
         : snapshot_(std::move(snapshot)),
           frames_(frames),
-          state_(state),
-          slots_(slots),
-          state_mutex_(state_mutex),
-          state_changed_(state_changed),
+          state_(binding.state_),
+          slots_(binding.slots_),
+          state_mutex_(binding.mutex_),
+          state_changed_(binding.changed_),
           worker_changed_(worker_changed),
-          stopping_(stopping),
-          configured_camera_revision_(configured_camera_revision),
-          produced_camera_revision_(produced_camera_revision),
+          stopping_(binding.stopping_),
+          configured_camera_revision_(binding.configured_camera_revision_),
+          produced_camera_revision_(binding.produced_camera_revision_),
           export_depth_(export_depth),
           depth_resolution_divider_(depth_resolution_divider) {}
 

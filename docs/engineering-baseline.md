@@ -5,8 +5,8 @@
 检查日期：2026-08-16（Asia/Shanghai）
 
 检查对象：C/B/E 职责治理、E6 Minecraft 生命周期验收、R0 独立热点复核
-与 R0A smoke 文件收口（R0A 基于 `90538a9` 的最终工作树；实机证据对应
-父提交 `976f15c` 的最终 E6 工作树）
+与 R0A/R0B 收口（R0B 基于 `69a78b6` 的最终工作树；E6 实机证据对应
+父提交 `976f15c` 的最终工作树）
 
 本文件只描述上述提交附近的当前事实、验证证据和已知红项。它不是历史阶段
 记录，也不替代源码、构建配置、ABI 断言或测试。ABI、稳定契约、验证入口或
@@ -231,6 +231,7 @@ Raw，再显式请求零延迟 Still，并继续要求真实 Denoised 新帧。�
 | SDR / HDR / screenshot fallback | `NOT RUN` | 本基线未执行完整矩阵 |
 | 默认持续移动稳定性 | `NOT RUN` | 本次实机使用 experimental DLSS 变体，不能外推默认 artifact |
 | DLSS 持续移动稳定性 | `PASS` | revision 与 interop generation 持续发布；未出现 renderer fallback/failed，最终正常退出 |
+| R0B binding 边界生命周期 | `PASS` | 用户确认 F8 启用首帧、持续更新、关闭、再启用与退出正常；2026-08-16 14:37–14:38 日志记录两次 ABI 43/OptiX 自检、两次 FrameGraph 接管、两次恢复原版与 FML 正常关闭 |
 
 这些项目必须通过实际客户端验证关闭，不能由 Java、Native 编译或 320x180
 smoke ready frame 推断。
@@ -264,8 +265,9 @@ smoke ready frame 推断。
 - R0A 已将 scene-lifecycle suite 移入
   `cycles_bridge_smoke_scene_lifecycle.cpp`；`cycles_bridge_smoke_render_scene.cpp` 现只定义
   render suite。独立 CTest 报告、skip 77、场景与 ABI 语义未变。
-- `VulkanInteropBinding` 仍向 engine 暴露 7 个可变引用 getter；R0B 将其收口
-  为单一 binding/shared-state 边界，不改线程、mutex、HANDLE、timeline 或关闭语义。
+- R0B 已删除 `VulkanInteropBinding` 向 engine 暴露的 7 个可变引用 getter；
+  display driver 现只接收单一 `VulkanInteropBinding&` friend 边界。原有线程、
+  mutex、condition variable、HANDLE、timeline、slot/revision 引用和关闭语义未变。
 - `CyclesSettingsList` 保持单一 F9 列表职责，不因 512 行拆分。
 - ABI schema 扩展延后到下一次真实 ABI 变更前的独立契约阶段，不在纯重构中批量迁移。
 
@@ -334,9 +336,9 @@ smoke ready frame 推断。
     能力；修正了首次 R0 的遗漏与阶段顺序。
 16. `R0A DONE`：scene-lifecycle suite 已移入独立源文件；函数体机械移动，
     默认与 DLSS 完整门禁均通过，render/scene-lifecycle 无 Skipped。
-17. `R0B NEXT`：将 native display driver 所需的 7 个可变引用收口为单一
-    binding/shared-state 边界，并完成双变体与 Minecraft interop 生命周期验收。
-18. `R1/R2 QUEUED`：R0B 结束后，先抽离客户端 renderer controller，
-    再单独抽离 Vulkan allocation；每阶段执行双变体门禁和对应 Minecraft 里程碑。
+17. `R0B DONE`：engine 到 display driver 已收口为单一 binding 边界；
+    默认/DLSS 完整门禁与 Minecraft DLSS 启用、关闭、再启用、退出验收通过。
+18. `R1 NEXT / R2 QUEUED`：先抽离客户端 renderer controller，再单独抽离
+    Vulkan allocation；每阶段执行双变体门禁和对应 Minecraft 里程碑。
 
-新功能开发继续冻结；当前只允许按路线图 R0B、R1、R2、R5 串行收口。
+新功能开发继续冻结；当前只允许按路线图 R1、R2、R5 串行收口。

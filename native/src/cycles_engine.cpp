@@ -909,14 +909,8 @@ class CyclesEngine::Impl final {
                 ccl::make_unique<VulkanInteropDisplayDriver>(
                     std::move(interop_snapshot),
                     frames_,
-                    interop_.display_state(),
-                    interop_.display_slots(),
-                    interop_.display_mutex(),
-                    interop_.display_changed(),
+                    interop_,
                     request_changed_,
-                    interop_.display_stopping(),
-                    interop_.display_configured_camera_revision(),
-                    interop_.display_produced_camera_revision(),
                     export_depth,
                     depth_resolution_divider));
             interop_.mark_session_attached();

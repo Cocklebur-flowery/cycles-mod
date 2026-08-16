@@ -6,8 +6,8 @@
 
 建立基线：`6e42ee7`
 
-执行进度：C、B、E、R0 和 R0A 已完成。下一阶段为 R0B native
-binding API 收口，完成后再进入 R1。
+执行进度：C、B、E、R0、R0A 和 R0B 已完成。下一阶段为 R1
+客户端渲染控制器拆分。
 
 本文件规定稳定化门禁关闭后的生产代码职责拆分顺序。它描述治理边界、依赖、
 验证和提交纪律，不替代当前源码、ABI schema、测试或
@@ -77,7 +77,7 @@ C  配置职责拆分
 | C | `DONE` | 配置持久化/runtime snapshot、Draft、option model 与 catalog 已分离 |
 | B | `DONE` | NativeBridge 公共门面稳定，layouts、symbols、marshalling、decoding 与 session ownership 已分离 |
 | E | `DONE` | Engine 已收口为渲染协调器；默认/DLSS 自动门禁和 E6 Minecraft 生命周期验收通过 |
-| R | `IN PROGRESS` | R0 二次独立复核和 R0A 测试文件收口已完成；R0B 为进入 R1 前的最后小型收口，R1/R2 有职责证据，R3/R4 明确不机械扩张 |
+| R | `IN PROGRESS` | R0 二次独立复核与 R0A/R0B 收口已完成；R1 为当前阶段，R2 有职责证据，R3/R4 明确不机械扩张 |
 
 配置阶段是低风险的拆分纪律验证，不替代两个主要核心文件。配置阶段完成后必须
 立即进入 `NativeBridge`，不得无限扩张 UI 或配置功能。
@@ -307,7 +307,7 @@ Scene/Camera revision 协调、状态、首个错误和 reset/close。
 | --- | --- | --- |
 | `CyclesRendererMod` | `SPLIT` | 624 行同时拥有 NeoForge 注册/按键接线和 renderer 启用、设置应用、scene/camera/frame 调度、fallback、关闭、telemetry 状态机；入口保护边界尚未满足 |
 | `VulkanFrameInterop` | `SPLIT` | 917 行同时拥有长寿命 Vulkan allocation/Win32 HANDLE/native bind 和逐帧 acquire/copy/fence/TextureTarget 两套生命周期 |
-| `vulkan_interop_display.h` | `TIGHTEN` | `VulkanInteropBinding` 已拥有 native interop 状态，但仍向 engine 暴露 7 个可变引用 getter；R0B 收口为单一 binding/shared-state 边界，不拆文件 |
+| `vulkan_interop_display.h` | `DONE` | R0B 已删除向 engine 暴露的 7 个可变引用 getter；display driver 现只接收单一 `VulkanInteropBinding&` 边界，文件与状态所有权不变 |
 | `cycles_bridge_smoke_render_scene.cpp` | `DONE` | R0A 已将 115 行 scene-lifecycle 函数体机械移入独立源文件；原文件现为 522 行且只定义 render suite |
 | `CyclesSettingsList` | `KEEP` | 512 行均服务 F9 列表筛选、依赖可见性、控件构造、输入归一化与 narration；没有第二资源生命周期或反向依赖 |
 | ABI schema | `DEFER` | 现有单结构原型和双变体 contract 全绿；其余结构含 pointer、array、float/double 与 padding，扩展当前仅支持 `uint32/uint64` 的生成器会成为独立高风险契约阶段 |
@@ -353,6 +353,13 @@ helper。两者当前均保留。
 建议提交：`refactor(test): isolate scene lifecycle smoke scenarios`
 
 ### R0B：收口 native Vulkan display binding API
+
+状态：`DONE`。Engine 构造 display driver 时现只传入一个
+`VulkanInteropBinding&`；driver 通过明确 friend 边界绑定原有 state、slots、mutex、
+condition variable、stopping 和 camera revision，不重组任何同步状态。默认与
+DLSS 完整 `verifyProject` 均通过。用户完成 Minecraft DLSS F8 启用、首帧、
+持续更新、关闭、再启用和退出验收；日志记录两次 FrameGraph 接管、两次
+恢复原版与正常关闭，没有 renderer fallback/failed。
 
 保留 `VulkanInteropBinding` 对 mutex、condition variable、slot/state 和 camera revision 的
 唯一所有权，但将 engine 构造 display driver 时传递的 7 个可变引用收口为
