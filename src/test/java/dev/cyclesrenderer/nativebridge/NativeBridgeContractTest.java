@@ -23,6 +23,7 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HexFormat;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static java.lang.foreign.ValueLayout.JAVA_BYTE;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -42,6 +43,8 @@ class NativeBridgeContractTest {
             "628596f41db25d96af6ed23724770cf710433ee98b90e7c0a2aad69a086ad9c8";
     private static final String EXPECTED_SECTION_BYTES_SHA256 =
             "529c0c70873dfad6f97f474c7ec510e769e3c232b9e1a063d1e49623ce0f3128";
+    private static final String EXPECTED_FRAME_REQUEST_BYTES_SHA256 =
+            "2e9b6a719c40ab8f25855bb56f29639504d6d3283d89c5428aaddebe01d8b2fe";
 
     @Test
     void publicFacadeRemainsStable() throws IllegalAccessException {
@@ -161,6 +164,77 @@ class NativeBridgeContractTest {
                     "section geometry array length mismatch",
                     invalidGeometry.getMessage());
         }
+    }
+
+    @Test
+    void nativeFrameMarshallerPreservesRequestBytesAndViewportError() {
+        try (Arena arena = Arena.ofConfined()) {
+            MemorySegment camera = arena.allocate(NativeLayouts.CAMERA_LAYOUT);
+            MemorySegment frameInfo = arena.allocate(NativeLayouts.FRAME_LAYOUT);
+            MemorySegment frameView = arena.allocate(NativeLayouts.FRAME_VIEW_LAYOUT);
+            frameInfo.fill((byte) 0x5a);
+            frameView.fill((byte) 0x5a);
+
+            NativeFrameMarshaller.writeCamera(
+                    camera,
+                    1,
+                    1920,
+                    1080,
+                    0x0102030405060708L,
+                    new NativeBridge.CameraInput(
+                            1.25,
+                            -2.5,
+                            3.75,
+                            0.1f,
+                            0.2f,
+                            0.3f,
+                            0.4f,
+                            1.5f,
+                            4096.0f,
+                            12.5f,
+                            NativeBridge.CAMERA_FOCUS_DISTANCE_VALID));
+            NativeFrameMarshaller.prepareFrameInfo(
+                    frameInfo, 1, 0x1112131415161718L);
+            NativeFrameMarshaller.prepareFrameView(frameView, 1);
+
+            String fingerprint = sha256(concatenate(camera, frameInfo, frameView));
+            assertEquals(EXPECTED_FRAME_REQUEST_BYTES_SHA256, fingerprint,
+                    "Native camera/frame request bytes changed: " + fingerprint);
+
+            IllegalArgumentException invalidViewport = assertThrows(
+                    IllegalArgumentException.class,
+                    () -> NativeFrameMarshaller.writeCamera(
+                            camera, 1, 0, 1080, 1L,
+                            new NativeBridge.CameraInput(
+                                    0.0, 0.0, 0.0,
+                                    0.0f, 0.0f, 0.0f, 1.0f,
+                                    1.0f, 1.0f, 1.0f, 0)));
+            assertEquals("invalid viewport 0x1080", invalidViewport.getMessage());
+        }
+    }
+
+    @Test
+    void nativeFrameLeaseReleasesOnceAndInvalidatesPixels() {
+        AtomicInteger releaseCount = new AtomicInteger();
+        Arena leaseArena = Arena.ofConfined();
+        NativeFrameMarshaller.FrameLease lease =
+                new NativeFrameMarshaller.FrameLease(
+                        leaseArena,
+                        token -> {
+                            assertEquals(77L, token);
+                            releaseCount.incrementAndGet();
+                        },
+                        77L,
+                        leaseArena.allocate(16, 8).asByteBuffer());
+        try {
+            lease.pixels().putLong(0, 0x0102030405060708L);
+            lease.close();
+            lease.close();
+            assertThrows(IllegalStateException.class, () -> lease.pixels().get(0));
+        } finally {
+            lease.close();
+        }
+        assertEquals(1, releaseCount.get());
     }
 
     private static List<String> publicSurfaceLines() throws IllegalAccessException {

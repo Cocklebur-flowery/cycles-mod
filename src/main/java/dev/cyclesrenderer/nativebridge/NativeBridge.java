@@ -14,7 +14,6 @@ import java.nio.file.Path;
 import static dev.cyclesrenderer.nativebridge.NativeLayouts.*;
 import static java.lang.foreign.ValueLayout.ADDRESS;
 import static java.lang.foreign.ValueLayout.JAVA_BYTE;
-import static java.lang.foreign.ValueLayout.JAVA_DOUBLE;
 import static java.lang.foreign.ValueLayout.JAVA_FLOAT;
 import static java.lang.foreign.ValueLayout.JAVA_INT;
 import static java.lang.foreign.ValueLayout.JAVA_LONG;
@@ -922,13 +921,10 @@ public final class NativeBridge {
                 int height,
                 long frameId,
                 CameraInput input) throws Throwable {
-            if (width <= 0 || height <= 0) {
-                throw new IllegalArgumentException("invalid viewport " + width + "x" + height);
-            }
-            writeCamera(cameraSegment, width, height, frameId, input);
-            frameInfoSegment.set(JAVA_INT, 0L, Math.toIntExact(FRAME_LAYOUT.byteSize()));
-            frameInfoSegment.set(JAVA_INT, 4L, STRUCT_VERSION);
-            frameInfoSegment.set(JAVA_LONG, 16L, generation);
+            NativeFrameMarshaller.writeCamera(
+                    cameraSegment, STRUCT_VERSION, width, height, frameId, input);
+            NativeFrameMarshaller.prepareFrameInfo(
+                    frameInfoSegment, STRUCT_VERSION, generation);
             int status = (int) library.renderFrame.invokeExact(
                     renderer,
                     cameraSegment,
@@ -968,19 +964,14 @@ public final class NativeBridge {
                 int height,
                 long frameId,
                 CameraInput input) throws Throwable {
-            if (width <= 0 || height <= 0) {
-                throw new IllegalArgumentException("invalid viewport " + width + "x" + height);
-            }
-            writeCamera(cameraSegment, width, height, frameId, input);
+            NativeFrameMarshaller.writeCamera(
+                    cameraSegment, STRUCT_VERSION, width, height, frameId, input);
             int status = (int) library.updateCamera.invokeExact(renderer, cameraSegment);
             checkRendererStatus(status, "renderer camera update");
         }
 
         private AcquiredFrame acquireFrame(long previousGeneration) throws Throwable {
-            frameViewSegment.fill((byte) 0);
-            frameViewSegment.set(
-                    JAVA_INT, 0L, Math.toIntExact(FRAME_VIEW_LAYOUT.byteSize()));
-            frameViewSegment.set(JAVA_INT, 4L, STRUCT_VERSION);
+            NativeFrameMarshaller.prepareFrameView(frameViewSegment, STRUCT_VERSION);
             checkRendererStatus(
                     (int) library.acquireFrame.invokeExact(
                             renderer, previousGeneration, frameViewSegment),
@@ -996,8 +987,8 @@ public final class NativeBridge {
             int flags = frameViewSegment.get(JAVA_INT, 56L);
             if ((flags & FRAME_UPDATED) == 0) {
                 return new AcquiredFrame(
-                        null, null, readyFlag(flags), false, width, height,
-                        generation, sampleCount, pixelFormat, 0L, null);
+                        null, readyFlag(flags), false, width, height,
+                        generation, sampleCount, pixelFormat, null);
             }
             long expectedBytes = Math.multiplyExact(Math.multiplyExact((long) width, height), 8L);
             if (width <= 0 || height <= 0 || pixelFormat != 2
@@ -1007,20 +998,12 @@ public final class NativeBridge {
                 }
                 throw new IllegalStateException("invalid native RGBA16F frame lease");
             }
-            Arena leaseArena = Arena.ofConfined();
-            ByteBuffer pixels;
-            try {
-                pixels = pointer.reinterpret(pixelBytes, leaseArena, ignored -> {})
-                        .asByteBuffer()
-                        .order(ByteOrder.nativeOrder());
-            } catch (Throwable error) {
-                leaseArena.close();
-                releaseFrameLease(token);
-                throw error;
-            }
+            NativeFrameMarshaller.FrameLease lease =
+                    NativeFrameMarshaller.FrameLease.open(
+                            pointer, pixelBytes, token, this::releaseFrameLease);
             return new AcquiredFrame(
-                    this, leaseArena, true, true, width, height,
-                    generation, sampleCount, pixelFormat, token, pixels);
+                    lease, true, true, width, height,
+                    generation, sampleCount, pixelFormat, lease.pixels());
         }
 
         private static boolean readyFlag(int flags) {
@@ -1050,30 +1033,6 @@ public final class NativeBridge {
                 copied.put(output.asByteBuffer()).flip();
                 return copied;
             }
-        }
-
-        private static void writeCamera(
-                MemorySegment camera,
-                int width,
-                int height,
-                long frameId,
-                CameraInput input) {
-            camera.set(JAVA_INT, 0L, Math.toIntExact(CAMERA_LAYOUT.byteSize()));
-            camera.set(JAVA_INT, 4L, STRUCT_VERSION);
-            camera.set(JAVA_LONG, 8L, frameId);
-            camera.set(JAVA_INT, 16L, width);
-            camera.set(JAVA_INT, 20L, height);
-            camera.set(JAVA_DOUBLE, 24L, input.positionX());
-            camera.set(JAVA_DOUBLE, 32L, input.positionY());
-            camera.set(JAVA_DOUBLE, 40L, input.positionZ());
-            camera.set(JAVA_FLOAT, 48L, input.rotationX());
-            camera.set(JAVA_FLOAT, 52L, input.rotationY());
-            camera.set(JAVA_FLOAT, 56L, input.rotationZ());
-            camera.set(JAVA_FLOAT, 60L, input.rotationW());
-            camera.set(JAVA_FLOAT, 64L, input.verticalFovRadians());
-            camera.set(JAVA_FLOAT, 68L, input.depthFar());
-            camera.set(JAVA_FLOAT, 72L, input.focusDistance());
-            camera.set(JAVA_INT, 76L, input.flags());
         }
 
         private String buildInfo() {
@@ -1138,8 +1097,7 @@ public final class NativeBridge {
     }
 
     public static final class AcquiredFrame implements AutoCloseable {
-        private BridgeState owner;
-        private Arena arena;
+        private NativeFrameMarshaller.FrameLease lease;
         private final boolean ready;
         private final boolean updated;
         private final int width;
@@ -1147,13 +1105,11 @@ public final class NativeBridge {
         private final long generation;
         private final int sampleCount;
         private final int pixelFormat;
-        private final long token;
         private final ByteBuffer pixels;
         private boolean closed;
 
         private AcquiredFrame(
-                BridgeState owner,
-                Arena arena,
+                NativeFrameMarshaller.FrameLease lease,
                 boolean ready,
                 boolean updated,
                 int width,
@@ -1161,10 +1117,8 @@ public final class NativeBridge {
                 long generation,
                 int sampleCount,
                 int pixelFormat,
-                long token,
                 ByteBuffer pixels) {
-            this.owner = owner;
-            this.arena = arena;
+            this.lease = lease;
             this.ready = ready;
             this.updated = updated;
             this.width = width;
@@ -1172,7 +1126,6 @@ public final class NativeBridge {
             this.generation = generation;
             this.sampleCount = sampleCount;
             this.pixelFormat = pixelFormat;
-            this.token = token;
             this.pixels = pixels;
         }
 
@@ -1217,18 +1170,10 @@ public final class NativeBridge {
                 return;
             }
             closed = true;
-            BridgeState currentOwner = owner;
-            Arena currentArena = arena;
-            owner = null;
-            arena = null;
-            try {
-                if (currentArena != null) {
-                    currentArena.close();
-                }
-            } finally {
-                if (currentOwner != null) {
-                    currentOwner.releaseFrameLease(token);
-                }
+            NativeFrameMarshaller.FrameLease currentLease = lease;
+            lease = null;
+            if (currentLease != null) {
+                currentLease.close();
             }
         }
     }
