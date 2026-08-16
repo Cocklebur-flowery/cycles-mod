@@ -42,7 +42,7 @@ class NativeBridgeContractTest {
     @Test
     void nativeLayoutsKeepNamesOffsetsAndSizes() throws ReflectiveOperationException {
         List<String> layouts = new ArrayList<>();
-        for (Field field : NativeBridge.class.getDeclaredFields()) {
+        for (Field field : NativeLayouts.class.getDeclaredFields()) {
             if (field.getType() != MemoryLayout.class) {
                 continue;
             }
