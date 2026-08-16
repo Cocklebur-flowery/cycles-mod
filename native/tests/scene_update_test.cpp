@@ -178,7 +178,7 @@ bool wait_for_changed_frame(
     std::vector<std::uint8_t>& pixels,
     std::uint64_t previous_checksum,
     std::uint32_t expected_section_count,
-    std::uint64_t minimum_commit_count) {
+    std::uint64_t minimum_scene_revision) {
     for (int attempt = 0; attempt < 400; ++attempt) {
         camera.frame_id++;
         if (!require_ok(
@@ -199,7 +199,7 @@ bool wait_for_changed_frame(
             && checksum(pixels) != previous_checksum
             && (expected_section_count == 0U || has_rgb_variation(pixels))
             && diagnostics.section_count == expected_section_count
-            && diagnostics.scene_commit_count >= minimum_commit_count) {
+            && diagnostics.scene_timing_revision >= minimum_scene_revision) {
             return true;
         }
         Sleep(10);

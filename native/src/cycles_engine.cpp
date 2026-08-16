@@ -3664,10 +3664,11 @@ class CyclesEngine::Impl final {
                     if (initially_incremental) {
                         scene_lock = ccl::thread_scoped_lock(
                             session->scene->mutex, std::defer_lock);
-                        if (!scene_lock.try_lock()) {
-                            set_state("scene-queued", {});
-                            continue;
-                        }
+                        set_state("scene-queued", {});
+                        // The Cycles render thread releases this mutex between scene-update
+                        // iterations. Waiting here gives a queued revision a guaranteed handoff;
+                        // polling with try_lock can repeatedly miss that narrow window.
+                        scene_lock.lock();
                     }
                     if (initially_incremental) {
                         std::lock_guard request_lock(request_mutex_);
