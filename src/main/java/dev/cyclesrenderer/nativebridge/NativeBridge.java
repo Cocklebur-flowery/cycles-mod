@@ -585,25 +585,11 @@ public final class NativeBridge {
             if (cachedCapabilities != null) {
                 return cachedCapabilities;
             }
-            capabilitiesSegment.fill((byte) 0);
-            capabilitiesSegment.set(
-                    JAVA_INT, 0L, Math.toIntExact(CAPABILITIES_LAYOUT.byteSize()));
-            capabilitiesSegment.set(JAVA_INT, 4L, STRUCT_VERSION);
+            NativeCapabilitiesDecoder.prepare(capabilitiesSegment, STRUCT_VERSION);
             checkRendererStatus(
                     (int) library.queryCapabilities.invokeExact(renderer, capabilitiesSegment),
                     "capability query");
-            cachedCapabilities = new Capabilities(
-                    capabilitiesSegment.get(JAVA_LONG, 8L),
-                    capabilitiesSegment.get(JAVA_LONG, 16L),
-                    capabilitiesSegment.get(JAVA_INT, 24L),
-                    capabilitiesSegment.get(JAVA_INT, 28L),
-                    capabilitiesSegment.get(JAVA_INT, 32L),
-                    capabilitiesSegment.get(JAVA_INT, 36L),
-                    capabilitiesSegment.get(JAVA_INT, 40L),
-                    capabilitiesSegment.get(JAVA_INT, 44L),
-                    capabilitiesSegment.get(JAVA_INT, 48L),
-                    capabilitiesSegment.get(JAVA_INT, 52L),
-                    capabilitiesSegment.get(JAVA_INT, 56L));
+            cachedCapabilities = NativeCapabilitiesDecoder.decode(capabilitiesSegment);
             return cachedCapabilities;
         }
 

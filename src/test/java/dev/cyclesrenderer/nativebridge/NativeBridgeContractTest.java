@@ -328,6 +328,29 @@ class NativeBridgeContractTest {
         }
     }
 
+    @Test
+    void nativeCapabilitiesDecoderPreservesHeaderAndFields() {
+        try (Arena arena = Arena.ofConfined()) {
+            MemorySegment source = arena.allocate(NativeLayouts.CAPABILITIES_LAYOUT);
+            source.fill((byte) 0x5a);
+            NativeCapabilitiesDecoder.prepare(source, 1);
+            assertEquals(64, source.get(JAVA_INT, 0L));
+            assertEquals(1, source.get(JAVA_INT, 4L));
+            assertEquals(0L, source.get(JAVA_LONG, 8L));
+
+            source.set(JAVA_LONG, 8L, 101L);
+            source.set(JAVA_LONG, 16L, 202L);
+            for (int index = 0; index < 9; index++) {
+                source.set(JAVA_INT, 24L + index * Integer.BYTES, 303 + index);
+            }
+            assertEquals(
+                    new NativeBridge.Capabilities(
+                            101L, 202L, 303, 304, 305, 306,
+                            307, 308, 309, 310, 311),
+                    NativeCapabilitiesDecoder.decode(source));
+        }
+    }
+
     private static List<String> publicSurfaceLines() throws IllegalAccessException {
         List<String> lines = new ArrayList<>();
         for (Field field : NativeBridge.class.getDeclaredFields()) {
