@@ -1,13 +1,13 @@
 # Cycles Renderer 职责拆分路线图
 
-状态：当前架构治理执行路线
+状态：`DONE`（2026-08-16）
 
 建立日期：2026-08-16（Asia/Shanghai）
 
 建立基线：`6e42ee7`
 
-执行进度：C、B、E、R0、R0A、R0B、R1 和 R2 已完成。下一阶段为 R5
-最终基线收口。
+执行进度：C、B、E、R0、R0A、R0B、R1、R2 和 R5 已完成。本轮职责治理
+与架构冻结已收口。
 
 本文件规定稳定化门禁关闭后的生产代码职责拆分顺序。它描述治理边界、依赖、
 验证和提交纪律，不替代当前源码、ABI schema、测试或
@@ -77,7 +77,7 @@ C  配置职责拆分
 | C | `DONE` | 配置持久化/runtime snapshot、Draft、option model 与 catalog 已分离 |
 | B | `DONE` | NativeBridge 公共门面稳定，layouts、symbols、marshalling、decoding 与 session ownership 已分离 |
 | E | `DONE` | Engine 已收口为渲染协调器；默认/DLSS 自动门禁和 E6 Minecraft 生命周期验收通过 |
-| R | `IN PROGRESS` | R0 二次独立复核与 R0A/R0B/R1/R2 收口已完成；R5 为当前阶段，R3/R4 明确不机械扩张 |
+| R | `DONE` | R0 二次独立复核、R0A/R0B/R1/R2 与 R5 最终基线均已收口；R3 保留、R4 延后，没有机械扩张 |
 
 配置阶段是低风险的拆分纪律验证，不替代两个主要核心文件。配置阶段完成后必须
 立即进入 `NativeBridge`，不得无限扩张 UI 或配置功能。
@@ -317,7 +317,7 @@ Scene/Camera revision 协调、状态、首个错误和 reset/close。
 
 | 对象（当前行数） | 判定 | 保留理由 |
 | --- | --- | --- |
-| `cycles_engine.cpp` (1,720) | `KEEP` | E 阶段后只保留渲染协调生命周期 |
+| `cycles_engine.cpp` (1,714) | `KEEP` | E 阶段后只保留渲染协调生命周期 |
 | `cycles_bridge.cpp` (1,024) | `KEEP` | 稳定 C ABI 边界与 payload validation |
 | `cycles_bridge.h` (871) | `KEEP` | 单一稳定 C ABI 声明 |
 | `NativeBridge.java` (867) | `KEEP` | 稳定 Java facade、公开 DTO 与错误边界 |
@@ -437,6 +437,22 @@ pointer、array、float/double、padding 和 alignment 的 schema 语义，再�
 证明 Java layout、C++ assert、C header 和 contract smoke 同步；不得直接批量迁移。
 
 ### R5：最终基线收口
+
+状态：`DONE`。在 R2 提交 `214852e` 上重新枚举了全部生产源码、测试大文件、
+package 依赖、构建入口、ABI 生成边界、残留标记和工作区。当前共有 17 个不少于
+500 行的生产源文件；除已经完成的 R0A/R0B/R1/R2 边界外，其余文件仍只拥有单一职责、
+单一生命周期或稳定 ABI/facade 边界，没有新的拆分证据。`CyclesRendererController`
+与 `VulkanSharedAllocation` 均为 package-private 且各只有一个生产调用方。
+
+最终 HEAD 上默认和 DLSS 两套 `verifyProject --rerun-tasks` 均完整执行 Java build 与
+6 个 native CTest 域，全部通过且没有 Skipped/Known Red。Minecraft DLSS 已覆盖核心
+生命周期与 R2 capacity rebuild/异形窗口 resize。默认 Minecraft、CPU fallback、
+dynamic resolution、Physical/Post-process DoF 和 SDR/HDR/screenshot 完整矩阵仍明确为
+`NOT RUN`；D3 两项继续为 `EXCLUDED WIP`，不因路线完成转为产品基线。
+
+源码中已没有残留的 `Prototype` 类型或文件名；`gradle.properties` 的
+`mod_name=Cycles Renderer Prototype` 是当前实验性发布身份并与 README 描述一致，
+不是职责拆分红项。未来若修改该名称，必须作为独立 packaging metadata 契约阶段处理。
 
 R0A/R0B/R1/R2 完成自动化与实机里程碑后，重新核对所有超过 500 行的生产源码、依赖方向、
 剩余红项和明确未测矩阵。若没有新的多职责证据，更新工程基线并结束本轮架构冻结。

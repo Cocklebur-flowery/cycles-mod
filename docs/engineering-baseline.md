@@ -5,7 +5,7 @@
 检查日期：2026-08-16（Asia/Shanghai）
 
 检查对象：C/B/E 职责治理、E6 Minecraft 生命周期验收、R0 独立热点复核
-与 R0A/R0B/R1/R2 收口（R2 基于 `45d0a75` 的最终工作树；E6 实机证据对应
+与 R0A/R0B/R1/R2/R5 收口（R5 基于 `214852e` 的最终 HEAD；E6 实机证据对应
 父提交 `976f15c` 的最终工作树）
 
 本文件只描述上述提交附近的当前事实、验证证据和已知红项。它不是历史阶段
@@ -184,6 +184,29 @@ scene construction、camera conversion、session configuration 与 Vulkan bindin
 engine 协调器中分离。完整提交序列和职责边界见
 [`architecture-refactoring-roadmap.md`](architecture-refactoring-roadmap.md)。
 
+### 4.6 R5 最终 HEAD 门禁
+
+在 R2 提交 `214852e` 后强制重新执行，不复用增量测试结论：
+
+```text
+./gradlew verifyProject --rerun-tasks --no-daemon
+./gradlew -PexperimentalDlss=true verifyProject --rerun-tasks --no-daemon
+```
+
+| 领域 | 默认 | DLSS |
+| --- | --- | --- |
+| Java build/tests/jar | `PASS` | `PASS` |
+| contract | `PASS`（4.58 秒） | `PASS`（5.07 秒） |
+| color | `PASS`（4.55 秒） | `PASS`（5.21 秒） |
+| render | `PASS`（17.28 秒） | `PASS`（18.01 秒） |
+| denoiser | `PASS`（20.88 秒） | `PASS`（23.77 秒） |
+| scene lifecycle | `PASS`（21.19 秒） | `PASS`（24.05 秒） |
+| scene update | `PASS`（5.27 秒） | `PASS`（5.74 秒） |
+| Skipped / Known Red | 无 | 无 |
+
+两套入口各有 13 个 task 实际执行。仍存在 `SectionSceneManager` deprecated API 与
+Gradle 10 compatibility 警告；它们未在 R5 扩大为无关清理。
+
 ## 5. 分域测试结果
 
 无参数 smoke 继续保留原有完整顺序：
@@ -226,7 +249,8 @@ Raw，再显式请求零延迟 Still，并继续要求真实 Denoised 新帧。�
 | F8 再次启用 | `PASS` | 第二次 ABI 自检、scene build 与 active FrameGraph 接管成功，无 renderer failure |
 | 持续移动与新区块更新 | `PASS` | 用户实机确认；两段 telemetry 分别推进到 interop generation 1487 与 1069，并持续提交 scene revision |
 | 世界退出并重进 | `PASS` | 用户确认完整矩阵正常；日志同时证明最终 suspend、世界保存、客户端与 FML 正常关闭 |
-| resize / 动态分辨率实机 | `NOT RUN` | 默认与 DLSS native lifecycle suite 已通过，但本次未单独记录 Minecraft 窗口 resize |
+| 窗口 resize / interop capacity rebuild | `PASS` | R2 使用 DLSS 实机完成 `480x270`→`960x540` 重建与多个异形窗口尺寸，generation/timeline 持续推进 |
+| 动态分辨率实机 | `NOT RUN` | native scene-lifecycle 覆盖对应契约，但本轮没有单独执行 Minecraft dynamic-resolution 交互矩阵 |
 | Physical / Post-process DoF | `NOT RUN` | 本基线未执行 |
 | SDR / HDR / screenshot fallback | `NOT RUN` | 本基线未执行完整矩阵 |
 | 默认持续移动稳定性 | `NOT RUN` | 本次实机使用 experimental DLSS 变体，不能外推默认 artifact |
@@ -238,11 +262,14 @@ Raw，再显式请求零延迟 Still，并继续要求真实 Denoised 新帧。�
 这些项目必须通过实际客户端验证关闭，不能由 Java、Native 编译或 320x180
 smoke ready frame 推断。
 
+本机 Vulkan loader 仍在客户端启动时报告两条失效的 WeGame layer JSON 路径；这是
+外部系统配置，interop 随后正常初始化并通过 R2 全部里程碑。R5 只记录，不修改系统配置。
+
 ## 7. 当前架构热点与保护边界
 
 三个原始多职责热点已经完成职责治理：
 
-- `native/src/cycles_engine.cpp` 当前约 1,720 行，只保留请求队列、worker、session
+- `native/src/cycles_engine.cpp` 当前 1,714 行，只保留请求队列、worker、session
   create/rebuild/start、revision 协调、状态、首个错误和 reset/close。`FrameStore`、
   display transport/binding、scene builder、camera adapter 与 session configuration 已有
   独立私有组件。它仍然较长，但剩余代码属于同一渲染协调生命周期，不按数字继续拆。
@@ -277,11 +304,16 @@ smoke ready frame 推断。
 
 当前所有不少于 500 行的生产源文件都已复核。除上述实证边界外，
 `cycles_engine.cpp`、`cycles_bridge.cpp/.h`、`NativeBridge.java`、`frame_store.h`、
-`SectionSceneManager.java`、`CyclesDebugOverlay.java`、`CyclesRenderSettings.java`、
+`vulkan_interop_display.h`、`SectionSceneManager.java`、`CyclesDebugOverlay.java`、`CyclesRenderSettings.java`、
 `VulkanCapabilityProbe.java`、`color_management.cpp`、`CyclesClientConfig.java`、
-`CyclesFramePresenter.java`、`CyclesSettingsList.java` 和 `cycles_session_config.h` 均保留；
+`VulkanFrameInterop.java`、`CyclesFramePresenter.java`、`CyclesRendererController.java`、
+`CyclesSettingsList.java` 和 `cycles_session_config.h` 均保留；
 它们的长度不构成第二生命周期的证据。`CyclesDebugOverlay.extract()` 可在未来
 做函数级整理，但不属于本轮架构拆分。
+
+R5 全局标记复核没有发现残留的 `Prototype` 类型或文件名。唯一命中是
+`gradle.properties` 的 `mod_name=Cycles Renderer Prototype`；它与 README 的实验性
+定位一致，属于稳定 packaging metadata，不作为架构红项顺手修改。
 
 完整处置顺序和稳定契约见路线图 R0-R5。
 
@@ -298,7 +330,7 @@ smoke ready frame 推断。
 `.deps/` 下的第三方/安装/构建树也不是产品源码。正式行为必须能从固定上游、
 受控 patch 和 `scripts/setup-cycles.ps1` 重建。
 
-## 9. 下一阶段门禁
+## 9. 治理结论与后续门禁
 
 按串行顺序执行：
 
@@ -321,8 +353,8 @@ smoke ready frame 推断。
    已在前置域全绿后实际执行通过，不再显示 Skipped。
 9. `MINECRAFT CORE LIFECYCLE DONE`：与 `e3c8f1a` 内容相同的 DLSS 工作树已完成
    F8 启用首帧、持续移动、关闭、再启用、世界重进与退出验收；revision 153 最终
-   发布且没有 fallback/failed。窗口 resize、DoF 与 HDR 仍按第 6 节保持独立
-   `NOT RUN`，不得被本结论覆盖。
+   发布且没有 fallback/failed。该阶段当时未运行窗口 resize；窗口与 capacity 已由
+   后续 R2 补验，DoF 与 HDR 仍按第 6 节保持独立 `NOT RUN`。
 10. `FINAL HEAD AUTOMATION DONE`：提交后默认与 DLSS 两套完整 `verifyProject`
     均重新执行，Java build 和 6 个 native 域全部通过，没有 Skipped 或已知红项。
 11. `ARCHITECTURE REFACTOR UNBLOCKED`：可以开始低风险、串行的责任治理。第一步
@@ -342,8 +374,11 @@ smoke ready frame 推断。
     默认与 DLSS 完整门禁均通过，render/scene-lifecycle 无 Skipped。
 17. `R0B DONE`：engine 到 display driver 已收口为单一 binding 边界；
     默认/DLSS 完整门禁与 Minecraft DLSS 启用、关闭、再启用、退出验收通过。
-18. `R1 DONE / R2 DONE / R5 NEXT`：客户端 renderer controller 与 Vulkan allocation
+18. `R1 DONE / R2 DONE`：客户端 renderer controller 与 Vulkan allocation
     已分别完成抽离并通过双变体门禁；Minecraft 的 capacity rebuild、异形窗口 resize、
-    关闭/再启用和退出里程碑也已通过。下一阶段只做最终热点与工程基线收口。
+    关闭/再启用和退出里程碑也已通过。
+19. `R5 DONE`：全部不少于 500 行的生产源码、测试大文件、依赖方向、构建/ABI
+    入口、红项和未测矩阵已重新核对；最终 HEAD 双变体门禁全绿且没有新的拆分证据。
 
-新功能开发继续冻结；当前只允许按路线图 R5 收口。
+本轮架构冻结已经收口。路线完成不自动授权任何具体新功能；后续阶段必须从当前
+基线重新声明目标、稳定契约、文件预算和验证矩阵，且不得重新吸收已抽离职责。
