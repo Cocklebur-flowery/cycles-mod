@@ -11,6 +11,8 @@ import java.lang.foreign.GroupLayout;
 import java.lang.foreign.MemoryLayout;
 import java.lang.foreign.MemoryLayout.PathElement;
 import java.lang.foreign.MemorySegment;
+import java.lang.foreign.SequenceLayout;
+import java.lang.foreign.ValueLayout;
 import java.lang.reflect.Constructor;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
@@ -20,12 +22,14 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Comparator;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static java.lang.foreign.ValueLayout.JAVA_BYTE;
+import static java.lang.foreign.ValueLayout.JAVA_FLOAT;
 import static java.lang.foreign.ValueLayout.JAVA_INT;
 import static java.lang.foreign.ValueLayout.JAVA_LONG;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -49,6 +53,8 @@ class NativeBridgeContractTest {
             "2e9b6a719c40ab8f25855bb56f29639504d6d3283d89c5428aaddebe01d8b2fe";
     private static final String EXPECTED_VULKAN_REQUEST_BYTES_SHA256 =
             "3b965ce4bfa01deb727a33b90c356149eb18907bd29518ef22a2687d430abb4b";
+    private static final String EXPECTED_DIAGNOSTICS_DECODE_SHA256 =
+            "e0f584096999300d4d30c7efdac48aa26a5ad11ea9132aa7d99e7dd92068dc01";
 
     @Test
     void publicFacadeRemainsStable() throws IllegalAccessException {
@@ -351,6 +357,26 @@ class NativeBridgeContractTest {
         }
     }
 
+    @Test
+    void nativeDiagnosticsDecoderPreservesHeaderAndAllFields()
+            throws ReflectiveOperationException {
+        try (Arena arena = Arena.ofConfined()) {
+            MemorySegment source = arena.allocate(NativeLayouts.DIAGNOSTICS_LAYOUT);
+            source.fill((byte) 0x5a);
+            NativeDiagnosticsDecoder.prepare(source, 1);
+            assertEquals(672, source.get(JAVA_INT, 0L));
+            assertEquals(1, source.get(JAVA_INT, 4L));
+            assertEquals(0L, source.get(JAVA_LONG, 8L));
+
+            populateLayout(source, (GroupLayout) NativeLayouts.DIAGNOSTICS_LAYOUT);
+            NativeBridge.Diagnostics diagnostics = NativeDiagnosticsDecoder.decode(
+                    source, NativeBridge.DEVICE_UPDATE_PHASE_COUNT);
+            String fingerprint = fingerprint(recordComponentLines(diagnostics));
+            assertEquals(EXPECTED_DIAGNOSTICS_DECODE_SHA256, fingerprint,
+                    "Native diagnostics mapping changed: " + fingerprint);
+        }
+    }
+
     private static List<String> publicSurfaceLines() throws IllegalAccessException {
         List<String> lines = new ArrayList<>();
         for (Field field : NativeBridge.class.getDeclaredFields()) {
@@ -524,6 +550,55 @@ class NativeBridgeContractTest {
             offset += bytes.length;
         }
         return result;
+    }
+
+    private static void populateLayout(MemorySegment target, GroupLayout layout) {
+        int ordinal = 1;
+        for (MemoryLayout member : layout.memberLayouts()) {
+            String name = member.name().orElseThrow();
+            long offset = layout.byteOffset(PathElement.groupElement(name));
+            if (member instanceof ValueLayout value) {
+                if (value.carrier() == int.class) {
+                    target.set(JAVA_INT, offset, 1000 + ordinal);
+                } else if (value.carrier() == long.class) {
+                    target.set(JAVA_LONG, offset, 100_000L + ordinal);
+                } else if (value.carrier() == float.class) {
+                    target.set(JAVA_FLOAT, offset, ordinal + 0.25f);
+                } else {
+                    throw new AssertionError("unsupported layout carrier " + value.carrier());
+                }
+            } else if (member instanceof SequenceLayout sequence) {
+                ValueLayout element = (ValueLayout) sequence.elementLayout();
+                for (long index = 0; index < sequence.elementCount(); index++) {
+                    long elementOffset = offset + index * element.byteSize();
+                    if (element.carrier() == byte.class) {
+                        target.set(JAVA_BYTE, elementOffset, (byte) (ordinal + index));
+                    } else if (element.carrier() == int.class) {
+                        target.set(JAVA_INT, elementOffset,
+                                2000 + ordinal * 10 + Math.toIntExact(index));
+                    } else {
+                        throw new AssertionError(
+                                "unsupported sequence carrier " + element.carrier());
+                    }
+                }
+            } else {
+                throw new AssertionError("unsupported member layout " + member);
+            }
+            ordinal++;
+        }
+    }
+
+    private static List<String> recordComponentLines(Object record)
+            throws ReflectiveOperationException {
+        List<String> lines = new ArrayList<>();
+        for (RecordComponent component : record.getClass().getRecordComponents()) {
+            Object value = component.getAccessor().invoke(record);
+            if (value instanceof int[] integers) {
+                value = Arrays.toString(integers);
+            }
+            lines.add(component.getName() + "=" + value);
+        }
+        return lines;
     }
 
     private static String fingerprint(List<String> lines) {

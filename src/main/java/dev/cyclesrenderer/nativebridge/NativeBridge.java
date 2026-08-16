@@ -13,7 +13,6 @@ import java.nio.file.Path;
 
 import static dev.cyclesrenderer.nativebridge.NativeLayouts.*;
 import static java.lang.foreign.ValueLayout.ADDRESS;
-import static java.lang.foreign.ValueLayout.JAVA_BYTE;
 import static java.lang.foreign.ValueLayout.JAVA_FLOAT;
 import static java.lang.foreign.ValueLayout.JAVA_INT;
 import static java.lang.foreign.ValueLayout.JAVA_LONG;
@@ -688,153 +687,12 @@ public final class NativeBridge {
         }
 
         private Diagnostics diagnostics() throws Throwable {
-            diagnosticsSegment.fill((byte) 0);
-            diagnosticsSegment.set(
-                    JAVA_INT, 0L, Math.toIntExact(DIAGNOSTICS_LAYOUT.byteSize()));
-            diagnosticsSegment.set(JAVA_INT, 4L, STRUCT_VERSION);
+            NativeDiagnosticsDecoder.prepare(diagnosticsSegment, STRUCT_VERSION);
             checkRendererStatus(
                     (int) library.queryDiagnostics.invokeExact(renderer, diagnosticsSegment),
                     "diagnostics query");
-            return new Diagnostics(
-                    diagnosticsSegment.get(JAVA_LONG, 8L),
-                    diagnosticsSegment.get(JAVA_LONG, 16L),
-                    diagnosticsSegment.get(JAVA_LONG, 24L),
-                    diagnosticsSegment.get(JAVA_LONG, 32L),
-                    diagnosticsSegment.get(JAVA_INT, 40L),
-                    diagnosticsSegment.get(JAVA_INT, 44L),
-                    diagnosticsSegment.get(JAVA_INT, 48L),
-                    diagnosticsSegment.get(JAVA_INT, 52L),
-                    diagnosticsSegment.get(JAVA_INT, 56L),
-                    diagnosticsSegment.get(JAVA_INT, 60L),
-                    diagnosticsSegment.get(JAVA_INT, 64L),
-                    diagnosticsSegment.get(JAVA_INT, 68L),
-                    diagnosticsSegment.get(JAVA_INT, 72L),
-                    diagnosticsSegment.get(JAVA_INT, 76L) != 0,
-                    diagnosticsSegment.get(JAVA_INT, 80L),
-                    diagnosticsSegment.get(JAVA_INT, 84L),
-                    diagnosticsSegment.get(JAVA_INT, 88L),
-                    diagnosticsSegment.get(JAVA_INT, 92L),
-                    diagnosticsSegment.get(JAVA_INT, 96L),
-                    diagnosticsSegment.get(JAVA_INT, 100L),
-                    diagnosticsSegment.get(JAVA_FLOAT, 104L),
-                    diagnosticsSegment.get(JAVA_INT, 108L),
-                    diagnosticsSegment.get(JAVA_LONG, 112L),
-                    diagnosticsSegment.get(JAVA_LONG, 120L),
-                    diagnosticsSegment.get(JAVA_LONG, 128L),
-                    diagnosticsSegment.get(JAVA_LONG, 136L),
-                    diagnosticsSegment.get(JAVA_INT, 144L),
-                    diagnosticsSegment.get(JAVA_INT, 148L),
-                    diagnosticsSegment.get(JAVA_INT, 152L),
-                    diagnosticsSegment.get(JAVA_INT, 156L),
-                    diagnosticsSegment.get(JAVA_INT, 160L),
-                    diagnosticsSegment.get(JAVA_INT, 164L),
-                    diagnosticsSegment.get(JAVA_INT, 168L),
-                    diagnosticsSegment.get(JAVA_INT, 172L),
-                    diagnosticsSegment.get(JAVA_LONG, 176L),
-                    diagnosticsSegment.get(JAVA_LONG, 184L),
-                    diagnosticsSegment.get(JAVA_LONG, 192L),
-                    diagnosticsSegment.get(JAVA_INT, 200L),
-                    diagnosticsSegment.get(JAVA_INT, 204L),
-                    diagnosticsSegment.get(JAVA_INT, 208L),
-                    diagnosticsSegment.get(JAVA_INT, 212L),
-                    diagnosticsSegment.get(JAVA_INT, 216L),
-                    diagnosticsSegment.get(JAVA_INT, 220L),
-                    diagnosticsSegment.get(JAVA_INT, 224L),
-                    diagnosticsSegment.get(JAVA_INT, 228L),
-                    diagnosticsSegment.get(JAVA_INT, 232L),
-                    diagnosticsSegment.get(JAVA_INT, 236L),
-                    diagnosticsSegment.get(JAVA_LONG, 240L),
-                    diagnosticsSegment.get(JAVA_LONG, 248L),
-                    diagnosticsSegment.get(JAVA_LONG, 256L),
-                    diagnosticsSegment.get(JAVA_LONG, 264L),
-                    diagnosticsSegment.get(JAVA_INT, 272L),
-                    diagnosticsSegment.get(JAVA_INT, 276L),
-                    diagnosticsSegment.get(JAVA_INT, 280L),
-                    diagnosticsSegment.get(JAVA_INT, 284L),
-                    diagnosticsSegment.get(JAVA_LONG, 288L),
-                    diagnosticsSegment.get(JAVA_INT, 296L),
-                    diagnosticsSegment.get(JAVA_INT, 300L),
-                    diagnosticsSegment.get(JAVA_INT, 304L),
-                    diagnosticsSegment.get(JAVA_INT, 308L),
-                    diagnosticsSegment.get(JAVA_INT, 312L),
-                    diagnosticsSegment.get(JAVA_INT, 316L),
-                    diagnosticsSegment.get(JAVA_INT, 320L),
-                    diagnosticsSegment.get(JAVA_INT, 324L),
-                    diagnosticsSegment.get(JAVA_INT, 328L),
-                    diagnosticsSegment.get(JAVA_FLOAT, 332L),
-                    diagnosticsSegment.get(JAVA_FLOAT, 336L),
-                    diagnosticsSegment.get(JAVA_INT, 340L),
-                    diagnosticsSegment.get(JAVA_FLOAT, 344L),
-                    diagnosticsSegment.get(JAVA_INT, 348L) != 0,
-                    diagnosticsSegment.get(JAVA_FLOAT, 352L),
-                    diagnosticsSegment.get(JAVA_FLOAT, 356L),
-                    diagnosticsSegment.get(JAVA_FLOAT, 360L),
-                    diagnosticsSegment.get(JAVA_INT, 364L),
-                    diagnosticsSegment.get(JAVA_FLOAT, 368L),
-                    diagnosticsSegment.get(JAVA_FLOAT, 372L),
-                    diagnosticsSegment.get(JAVA_INT, 376L) != 0
-                            ? uuidString(diagnosticsSegment.asSlice(380L, 16L))
-                            : "unavailable",
-                    diagnosticsSegment.get(JAVA_LONG, 400L),
-                    diagnosticsSegment.get(JAVA_LONG, 408L),
-                    diagnosticsSegment.get(JAVA_INT, 416L),
-                    diagnosticsSegment.get(JAVA_INT, 420L),
-                    diagnosticsSegment.get(JAVA_INT, 424L),
-                    diagnosticsSegment.get(JAVA_INT, 428L),
-                    diagnosticsSegment.get(JAVA_INT, 432L),
-                    diagnosticsSegment.get(JAVA_INT, 436L),
-                    diagnosticsSegment.get(JAVA_INT, 440L),
-                    diagnosticsSegment.get(JAVA_INT, 444L),
-                    diagnosticsSegment.get(JAVA_INT, 448L),
-                    diagnosticsSegment.get(JAVA_INT, 452L),
-                    diagnosticsSegment.get(JAVA_INT, 456L),
-                    diagnosticsSegment.get(JAVA_INT, 460L),
-                    diagnosticsSegment.get(JAVA_INT, 464L),
-                    diagnosticsSegment.get(JAVA_INT, 468L),
-                    diagnosticsSegment.get(JAVA_INT, 472L),
-                    diagnosticsSegment.get(JAVA_INT, 488L),
-                    diagnosticsSegment.get(JAVA_INT, 492L),
-                    diagnosticsSegment.get(JAVA_INT, 496L),
-                    diagnosticsSegment.get(JAVA_INT, 504L),
-                    diagnosticsSegment.get(JAVA_INT, 508L),
-                    diagnosticsSegment.get(JAVA_INT, 512L),
-                    diagnosticsSegment.get(JAVA_INT, 516L),
-                    intArray(diagnosticsSegment, 520L, DEVICE_UPDATE_PHASE_COUNT),
-                    intArray(diagnosticsSegment, 552L, DEVICE_UPDATE_PHASE_COUNT),
-                    intArray(diagnosticsSegment, 584L, DEVICE_UPDATE_PHASE_COUNT),
-                    diagnosticsSegment.get(JAVA_FLOAT, 616L),
-                    diagnosticsSegment.get(JAVA_FLOAT, 620L),
-                    diagnosticsSegment.get(JAVA_INT, 624L),
-                    diagnosticsSegment.get(JAVA_INT, 628L),
-                    diagnosticsSegment.get(JAVA_INT, 632L),
-                    diagnosticsSegment.get(JAVA_INT, 636L),
-                    diagnosticsSegment.get(JAVA_INT, 640L),
-                    diagnosticsSegment.get(JAVA_INT, 644L),
-                    diagnosticsSegment.get(JAVA_INT, 648L),
-                    diagnosticsSegment.get(JAVA_INT, 652L),
-                    diagnosticsSegment.get(JAVA_INT, 656L),
-                    diagnosticsSegment.get(JAVA_INT, 660L),
-                    diagnosticsSegment.get(JAVA_INT, 664L),
-                    diagnosticsSegment.get(JAVA_INT, 668L));
-        }
-
-        private static int[] intArray(MemorySegment source, long offset, int count) {
-            int[] result = new int[count];
-            for (int index = 0; index < count; index++) {
-                result[index] = source.get(JAVA_INT, offset + index * Integer.BYTES);
-            }
-            return result;
-        }
-
-        private static String uuidString(MemorySegment bytes) {
-            StringBuilder result = new StringBuilder(32);
-            for (long index = 0; index < bytes.byteSize(); index++) {
-                result.append(String.format(
-                        java.util.Locale.ROOT,
-                        "%02x",
-                        bytes.get(JAVA_BYTE, index) & 0xff));
-            }
-            return result.toString();
+            return NativeDiagnosticsDecoder.decode(
+                    diagnosticsSegment, DEVICE_UPDATE_PHASE_COUNT);
         }
 
         private RenderedFrame renderFrame(
