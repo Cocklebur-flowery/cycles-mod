@@ -10,8 +10,10 @@
 #include <chrono>
 #include <condition_variable>
 #include <cstdint>
+#include <cstring>
 #include <limits>
 #include <mutex>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -161,6 +163,251 @@ void refresh_vulkan_interop_slot_flags(
         }
     }
 }
+
+class VulkanInteropBinding final {
+ public:
+    void stop() {
+        {
+            std::lock_guard lock(mutex_);
+            stopping_ = true;
+        }
+        changed_.notify_all();
+    }
+
+    bool bind(
+        const CyclesBridgeVulkanInteropBuffer& descriptor,
+        std::uint64_t memory_handle,
+        std::uint64_t ready_semaphore_handle,
+        std::uint64_t release_semaphore_handle,
+        const std::optional<std::array<std::uint8_t, 16>>& selected_device_uuid,
+        std::string& error) {
+        if (!selected_device_uuid.has_value()) {
+            error = "selected Cycles device has no CUDA UUID";
+            return false;
+        }
+        if (std::memcmp(
+                descriptor.device_uuid,
+                selected_device_uuid->data(),
+                selected_device_uuid->size()) != 0) {
+            error = "Vulkan and Cycles device UUIDs do not match";
+            return false;
+        }
+        std::lock_guard lock(mutex_);
+        if (memory_handle_ != nullptr
+            || ready_semaphore_handle_ != nullptr
+            || release_semaphore_handle_ != nullptr
+            || (state_.flags
+                & (CYCLES_BRIDGE_VULKAN_INTEROP_BOUND
+                   | CYCLES_BRIDGE_VULKAN_INTEROP_ACTIVE
+                   | CYCLES_BRIDGE_VULKAN_INTEROP_SESSION_ATTACHED)) != 0U) {
+            error = "Vulkan interop buffer is already bound";
+            return false;
+        }
+        if (memory_handle_ != nullptr) {
+            CloseHandle(memory_handle_);
+        }
+        memory_handle_ = reinterpret_cast<HANDLE>(
+            static_cast<std::uintptr_t>(memory_handle));
+        ready_semaphore_handle_ = reinterpret_cast<HANDLE>(
+            static_cast<std::uintptr_t>(ready_semaphore_handle));
+        release_semaphore_handle_ = reinterpret_cast<HANDLE>(
+            static_cast<std::uintptr_t>(release_semaphore_handle));
+        descriptor_ = descriptor;
+        descriptor_.memory_handle = 0U;
+        descriptor_.ready_semaphore_handle = 0U;
+        descriptor_.release_semaphore_handle = 0U;
+        state_ = {};
+        state_.struct_size = sizeof(state_);
+        state_.struct_version = 1U;
+        state_.flags = CYCLES_BRIDGE_VULKAN_INTEROP_BOUND
+            | CYCLES_BRIDGE_VULKAN_INTEROP_TIMELINE_SYNC;
+        state_.width = descriptor.width;
+        state_.height = descriptor.height;
+        state_.slot_count = descriptor.slot_count;
+        slots_ = {};
+        return true;
+    }
+
+    bool unbind(std::string& error) {
+        std::lock_guard lock(mutex_);
+        if ((state_.flags
+             & (CYCLES_BRIDGE_VULKAN_INTEROP_ACTIVE
+                | CYCLES_BRIDGE_VULKAN_INTEROP_SESSION_ATTACHED)) != 0U) {
+            error = "Vulkan interop is active; destroy the renderer before releasing Vulkan memory";
+            return false;
+        }
+        if (memory_handle_ != nullptr) {
+            CloseHandle(memory_handle_);
+            memory_handle_ = nullptr;
+        }
+        if (ready_semaphore_handle_ != nullptr) {
+            CloseHandle(ready_semaphore_handle_);
+            ready_semaphore_handle_ = nullptr;
+        }
+        if (release_semaphore_handle_ != nullptr) {
+            CloseHandle(release_semaphore_handle_);
+            release_semaphore_handle_ = nullptr;
+        }
+        descriptor_ = {};
+        state_ = {};
+        slots_ = {};
+        return true;
+    }
+
+    void query_state(CyclesBridgeVulkanInteropState& state) const {
+        std::lock_guard lock(mutex_);
+        const std::uint32_t struct_size = state.struct_size;
+        const std::uint32_t struct_version = state.struct_version;
+        state = state_;
+        state.struct_size = struct_size;
+        state.struct_version = struct_version;
+    }
+
+    void acquire_frame(
+        std::uint64_t previous_generation,
+        CyclesBridgeVulkanInteropState& state) {
+        bool released_stale_slots = false;
+        {
+            std::lock_guard lock(mutex_);
+            VulkanInteropSlot* selected = nullptr;
+            std::uint32_t selected_index = 0U;
+            for (std::uint32_t index = 0; index < descriptor_.slot_count; ++index) {
+                VulkanInteropSlot& slot = slots_[index];
+                if (slot.owner == VulkanInteropSlotOwner::READY
+                    && slot.generation > previous_generation
+                    && (selected == nullptr || slot.generation > selected->generation)) {
+                    selected = &slot;
+                    selected_index = index;
+                }
+            }
+            if (selected != nullptr) {
+                for (std::uint32_t index = 0; index < descriptor_.slot_count; ++index) {
+                    VulkanInteropSlot& slot = slots_[index];
+                    if (&slot != selected
+                        && slot.owner == VulkanInteropSlotOwner::READY
+                        && slot.generation < selected->generation) {
+                        const std::uint64_t release_wait_value = selected->generation;
+                        slot = {};
+                        slot.release_wait_value = release_wait_value;
+                        released_stale_slots = true;
+                    }
+                }
+                selected->owner = VulkanInteropSlotOwner::ACQUIRED;
+                state_.width = selected->width;
+                state_.height = selected->height;
+                state_.depth_width = selected->depth_width;
+                state_.depth_height = selected->depth_height;
+                state_.sample_count = selected->sample_count;
+                state_.generation = selected->generation;
+                state_.slot_index = selected_index;
+            }
+            refresh_vulkan_interop_slot_flags(state_, slots_, descriptor_.slot_count);
+            const std::uint32_t struct_size = state.struct_size;
+            const std::uint32_t struct_version = state.struct_version;
+            state = state_;
+            state.struct_size = struct_size;
+            state.struct_version = struct_version;
+        }
+        if (released_stale_slots) {
+            changed_.notify_all();
+        }
+    }
+
+    bool release_frame(std::uint64_t generation, std::string& error) {
+        {
+            std::lock_guard lock(mutex_);
+            const auto acquired = std::find_if(
+                slots_.begin(),
+                slots_.begin() + descriptor_.slot_count,
+                [generation](const auto& slot) {
+                    return slot.owner == VulkanInteropSlotOwner::ACQUIRED
+                        && slot.generation == generation;
+                });
+            if (acquired == slots_.begin() + descriptor_.slot_count) {
+                error = "Vulkan interop frame token is not acquired";
+                return false;
+            }
+            acquired->owner = VulkanInteropSlotOwner::FREE;
+            acquired->release_wait_value = generation;
+            acquired->generation = 0U;
+            acquired->width = 0U;
+            acquired->height = 0U;
+            acquired->depth_width = 0U;
+            acquired->depth_height = 0U;
+            acquired->sample_count = 0U;
+            refresh_vulkan_interop_slot_flags(state_, slots_, descriptor_.slot_count);
+        }
+        changed_.notify_all();
+        return true;
+    }
+
+    VulkanInteropSnapshot snapshot(
+        const std::optional<std::array<std::uint8_t, 16>>& device_uuid) const {
+        std::lock_guard lock(mutex_);
+        const bool compatible_device = device_uuid.has_value()
+            && std::memcmp(
+                descriptor_.device_uuid,
+                device_uuid->data(),
+                device_uuid->size()) == 0;
+        if (memory_handle_ == nullptr || !compatible_device) {
+            return {};
+        }
+        return VulkanInteropSnapshot::duplicate(
+            memory_handle_,
+            ready_semaphore_handle_,
+            release_semaphore_handle_,
+            descriptor_);
+    }
+
+    void mark_session_attached() {
+        std::lock_guard lock(mutex_);
+        state_.flags |= CYCLES_BRIDGE_VULKAN_INTEROP_SESSION_ATTACHED;
+    }
+
+    void set_configured_camera_revision(std::uint64_t revision) {
+        std::lock_guard lock(mutex_);
+        configured_camera_revision_ = revision;
+    }
+
+    [[nodiscard]] std::uint64_t produced_camera_revision(
+        const FrameStore& fallback_frames) const {
+        std::lock_guard lock(mutex_);
+        if ((state_.flags & CYCLES_BRIDGE_VULKAN_INTEROP_ACTIVE) != 0U) {
+            return produced_camera_revision_;
+        }
+        return fallback_frames.produced_camera_revision();
+    }
+
+    void set_sample_count(std::uint32_t sample_count) {
+        std::lock_guard lock(mutex_);
+        state_.sample_count = sample_count;
+    }
+
+    CyclesBridgeVulkanInteropState& display_state() { return state_; }
+    VulkanInteropSlots& display_slots() { return slots_; }
+    std::mutex& display_mutex() { return mutex_; }
+    std::condition_variable& display_changed() { return changed_; }
+    bool& display_stopping() { return stopping_; }
+    std::uint64_t& display_configured_camera_revision() {
+        return configured_camera_revision_;
+    }
+    std::uint64_t& display_produced_camera_revision() {
+        return produced_camera_revision_;
+    }
+
+ private:
+    mutable std::mutex mutex_;
+    std::condition_variable changed_;
+    bool stopping_ = false;
+    HANDLE memory_handle_ = nullptr;
+    HANDLE ready_semaphore_handle_ = nullptr;
+    HANDLE release_semaphore_handle_ = nullptr;
+    CyclesBridgeVulkanInteropBuffer descriptor_{};
+    CyclesBridgeVulkanInteropState state_{};
+    VulkanInteropSlots slots_{};
+    std::uint64_t configured_camera_revision_ = 0;
+    std::uint64_t produced_camera_revision_ = 0;
+};
 
 class VulkanInteropDisplayDriver final : public ccl::DisplayDriver {
  public:

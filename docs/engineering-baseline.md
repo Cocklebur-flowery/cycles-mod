@@ -4,7 +4,8 @@
 
 检查日期：2026-08-16（Asia/Shanghai）
 
-检查对象：Scene revision 修复与 Minecraft 核心生命周期验收（HEAD `e3c8f1a`）
+检查对象：C/B/E 职责治理与 E6 Minecraft 生命周期验收（父提交 `976f15c`
+的最终 E6 工作树）
 
 本文件只描述上述提交附近的当前事实、验证证据和已知红项。它不是历史阶段
 记录，也不替代源码、构建配置、ABI 断言或测试。ABI、稳定契约、验证入口或
@@ -57,11 +58,11 @@ Java `MemoryLayout`/offset 常量和 C++ 全字段 size/offset 断言。公开 C
 | backend 初始化原始异常被通用错误覆盖 | `PASS` | `3a4812b fix(native): preserve backend initialization errors` |
 | DLSS runtime kernels 与开发安装树不同步 | `PASS` | `fca5bd6 fix(dev): synchronize DLSS runtime kernels`；用户确认原故障已修复 |
 
-2026-08-16 10:19 的 DLSS 客户端实机运行使用了随后原样提交为 `e3c8f1a` 的
-两文件工作树；提交动作发生在实机退出之后，期间没有继续修改产品源码。因此该次
-运行是最终源码内容的实机证据，但不是一次“提交后重新启动”的证据。提交完成后，
-默认与 DLSS 两套完整 `verifyProject` 已在 `e3c8f1a` 上重新执行并通过。两类证据
-在本基线中分别记录，不互相冒充。
+2026-08-16 13:40 至 13:45 的 DLSS 客户端实机运行使用父提交 `976f15c` 加 E6
+最终两文件工作树。运行期间没有继续修改产品源码；用户在退出后确认客户端验证
+正常。该运行是 E6 最终源码内容的实机证据，但不是一次“E6 提交后重新启动”的
+证据。默认与 DLSS 两套完整 `verifyProject` 已在同一 E6 工作树执行并通过。两类
+证据在本基线中分别记录，不互相冒充。
 
 ## 4. 2026-08-16 自动验证与生命周期复核
 
@@ -158,6 +159,30 @@ ctest --test-dir build/native-dlss --build-config Release -R ^cyclesrenderer_smo
 | ABI 兼容性 | `PASS` | ABI 仍为 43，interop state 仍为 80 bytes，字段顺序与 offset 未变 |
 | S5 原型阶段的完整 `verifyProject` | `NOT RUN` | 当时的独立 `panorama 0` 红项会阻断完整 render suite；当前完整结果见 4.2 与 4.3 |
 
+### 4.5 C/B/E 职责治理最终门禁
+
+E6 最终工作树执行：
+
+```text
+./gradlew buildNative --no-daemon
+./gradlew verifyProject --no-daemon
+./gradlew -PexperimentalDlss=true verifyProject --no-daemon
+```
+
+| 领域 | 状态 | 结果 |
+| --- | --- | --- |
+| E6 focused native build | `PASS` | 默认 Release native 目标在 Vulkan binding 迁移后重新构建成功 |
+| 默认完整门禁 | `PASS` | Java build 与 6 个 native/CTest 能力域全部通过 |
+| DLSS 完整门禁 | `PASS` | Experimental DLSS 的 Java build 与 6 个 native/CTest 能力域全部通过 |
+| ABI / 配置 / 资源 | `PASS` | E6 未修改 ABI 43、结构布局、配置键、shader、资源 ID 或第三方 patch |
+
+C 阶段已将 Draft 生命周期、编辑器 option model 与 catalog 从配置持久化门面中
+分离；B 阶段已将 layouts、symbol loading、各领域 marshalling、结果解码与 session
+ownership 从公共 native facade 中分离；E 阶段已将 frame storage、display transport、
+scene construction、camera conversion、session configuration 与 Vulkan binding 从
+engine 协调器中分离。完整提交序列和职责边界见
+[`architecture-refactoring-roadmap.md`](architecture-refactoring-roadmap.md)。
+
 ## 5. 分域测试结果
 
 无参数 smoke 继续保留原有完整顺序：
@@ -194,34 +219,40 @@ Raw，再显式请求零延迟 Still，并继续要求真实 Denoised 新帧。�
 | 场景 | 状态 | 说明 |
 | --- | --- | --- |
 | 原 backend/DLSS kernel 故障 | `PASS` | 用户确认修复 |
-| 最终 HEAD 同内容工作树启动 | `PASS` | `runDLSSclientExp.bat` 使用后来原样提交为 `e3c8f1a` 的源码启动；Native ABI 43 / OptiX 自检成功 |
-| F8 启用并产生真实世界首帧 | `PASS` | 实机确认；telemetry 最终达到 sample 64、504 sections |
-| F8 关闭并恢复原版 | `PASS` | 用户完成实机往返确认；当前日志未单独记录按键事件 |
-| F8 再次启用 | `PASS` | 用户完成连续关闭/再启用确认，无黑屏、陈旧画面或 native failure |
-| 持续移动与新区块更新 | `PASS` | scene revision 从 0 推进到 153，`scene_timing_revision` 最终追平 153；最大暂时落后 2，结束时为 0 |
-| 世界退出并重进 | `PASS` | 用户实机确认重进后可以再次启用；最终一次退出正常保存并关闭世界 |
+| E6 最终工作树启动 | `PASS` | `runDLSSclientExp.bat` 使用父提交 `976f15c` 加 E6 最终两文件工作树启动；两次 Native ABI 43 / OptiX 16x16 自检成功 |
+| F8 启用并产生真实世界首帧 | `PASS` | 实机确认；两次日志均从 scene staging 推进到跳过 vanilla world FrameGraph |
+| F8 关闭并恢复原版 | `PASS` | 两次 suspend 均记录 native bridge kept warm，随后恢复 vanilla world FrameGraph |
+| F8 再次启用 | `PASS` | 第二次 ABI 自检、scene build 与 active FrameGraph 接管成功，无 renderer failure |
+| 持续移动与新区块更新 | `PASS` | 用户实机确认；两段 telemetry 分别推进到 interop generation 1487 与 1069，并持续提交 scene revision |
+| 世界退出并重进 | `PASS` | 用户确认完整矩阵正常；日志同时证明最终 suspend、世界保存、客户端与 FML 正常关闭 |
 | resize / 动态分辨率实机 | `NOT RUN` | 默认与 DLSS native lifecycle suite 已通过，但本次未单独记录 Minecraft 窗口 resize |
 | Physical / Post-process DoF | `NOT RUN` | 本基线未执行 |
 | SDR / HDR / screenshot fallback | `NOT RUN` | 本基线未执行完整矩阵 |
 | 默认持续移动稳定性 | `NOT RUN` | 本次实机使用 experimental DLSS 变体，不能外推默认 artifact |
-| DLSS 持续移动稳定性 | `PASS` | revision 持续发布；未出现 fallback/failed，scene queue 最大约 42 ms，最终正常退出 |
+| DLSS 持续移动稳定性 | `PASS` | revision 与 interop generation 持续发布；未出现 renderer fallback/failed，最终正常退出 |
 
 这些项目必须通过实际客户端验证关闭，不能由 Java、Native 编译或 320x180
 smoke ready frame 推断。
 
 ## 7. 当前架构热点与保护边界
 
-下列文件不是因为行数本身被判定为问题，而是已经跨越多个职责或生命周期：
+三个原始多职责热点已经完成职责治理：
 
-- `native/src/cycles_engine.cpp`：session、worker、frame store、display driver、
-  Vulkan interop、scene/material/camera 构建和设置失效编排集中。
-- `src/main/java/dev/cyclesrenderer/nativebridge/NativeBridge.java`：ABI 常量、
-  layouts、symbols、marshalling、session state、DTO 与诊断解码集中。
-- `src/main/java/dev/cyclesrenderer/config/CyclesClientConfig.java`：持久化、
-  runtime snapshot 与 editor model 边界仍需治理。
+- `native/src/cycles_engine.cpp` 当前约 1,720 行，只保留请求队列、worker、session
+  create/rebuild/start、revision 协调、状态、首个错误和 reset/close。`FrameStore`、
+  display transport/binding、scene builder、camera adapter 与 session configuration 已有
+  独立私有组件。它仍然较长，但剩余代码属于同一渲染协调生命周期，不按数字继续拆。
+- `src/main/java/dev/cyclesrenderer/nativebridge/NativeBridge.java` 当前约 867 行，保留
+  稳定公共门面、公开 DTO 和错误边界。layouts、symbols、settings/scene/frame/interop
+  marshalling、capabilities/diagnostics/color/pass decoding 与 session ownership 已有
+  package-private 组件。
+- `src/main/java/dev/cyclesrenderer/config/CyclesClientConfig.java` 当前约 564 行，保留
+  NeoForge SPEC/persistence、revision 与 runtime snapshot。`SettingsDraft`、
+  `SettingsOption` 和 `SettingsCatalog` 分别拥有编辑生命周期、选项模型与目录。
 
-在完成对应特征测试和拆分计划之前，只允许在这些文件中进行必要修复或薄接线，
-不得继续加入新的独立职责。
+这些文件仍受热点保护：不得重新吸收已经抽离的职责。后置 R 阶段只读复核
+`CyclesRendererMod`、`VulkanFrameInterop`、`CyclesSettingsList` 和 ABI schema 扩展
+必要性；没有可分生命周期或漂移证据时不做机械拆分。
 
 `native/include/cycles_bridge.h` 虽然较大，但当前职责是单一稳定 C ABI；禁止
 为了行数机械拆分或改变布局。
@@ -267,5 +298,13 @@ smoke ready frame 推断。
     只读核对残留 `Prototype` 类型的真实职责与调用方；确认命名边界后再做纯命名
     阶段。随后为 `CyclesClientConfig` 建立持久化、runtime snapshot 与 editor model
     的特征测试和拆分计划。`NativeBridge` 与 `cycles_engine.cpp` 继续后置。
+12. `CONFIG RESPONSIBILITY DONE`：Draft、option model 与 catalog 已从持久化和
+    runtime snapshot 门面中分离，配置 key、默认值、范围和 enum ID 保持。
+13. `NATIVE BRIDGE RESPONSIBILITY DONE`：公开门面保持稳定；layouts、symbols、
+    marshalling、decoding 与 native session ownership 已分离并通过双变体门禁。
+14. `ENGINE RESPONSIBILITY DONE`：frame、interop、scene、camera、session config 和
+    Vulkan binding 已分离；E6 双变体自动化与 Minecraft DLSS 生命周期验收通过。
+15. `R REVIEW NEXT`：只读复核剩余热点与 ABI schema 漂移风险，更新最终基线；
+    未观察到独立职责或生命周期证据时不再拆文件。
 
-新功能开发继续冻结；当前只允许按上述顺序进行有特征测试保护的串行架构治理。
+新功能开发继续冻结；当前只允许完成 R 后置热点复核与基线收口。

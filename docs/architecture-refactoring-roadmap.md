@@ -6,6 +6,8 @@
 
 建立基线：`6e42ee7`
 
+执行进度：C、B、E 已完成；当前进入 R 后置热点复核与基线收口。
+
 本文件规定稳定化门禁关闭后的生产代码职责拆分顺序。它描述治理边界、依赖、
 验证和提交纪律，不替代当前源码、ABI schema、测试或
 [`engineering-baseline.md`](engineering-baseline.md) 中的事实状态。
@@ -66,6 +68,13 @@ C  配置职责拆分
   -> E  cycles_engine.cpp 私有组件拆分
   -> R  后置热点复核与基线收口
 ```
+
+| 阶段 | 状态 | 当前结果 |
+| --- | --- | --- |
+| C | `DONE` | 配置持久化/runtime snapshot、Draft、option model 与 catalog 已分离 |
+| B | `DONE` | NativeBridge 公共门面稳定，layouts、symbols、marshalling、decoding 与 session ownership 已分离 |
+| E | `DONE` | Engine 已收口为渲染协调器；默认/DLSS 自动门禁和 E6 Minecraft 生命周期验收通过 |
+| R | `NEXT` | 只读复核剩余热点和 ABI schema 漂移风险，按证据决定是否继续拆分 |
 
 配置阶段是低风险的拆分纪律验证，不替代两个主要核心文件。配置阶段完成后必须
 立即进入 `NativeBridge`，不得无限扩张 UI 或配置功能。
@@ -259,6 +268,10 @@ denoiser schedule、pass 注册和 scene settings。
 建议提交：`refactor(native): isolate session configuration`
 
 ### E6：收口 Engine Impl
+
+状态：`DONE`。父提交 `976f15c` 加 E6 最终工作树通过默认与 DLSS 完整
+`verifyProject`；用户完成 Minecraft DLSS 启用、首帧、持续移动、关闭、再启用、
+世界重进与退出验收。最终提交同时更新当前工程基线。
 
 完成后 `CyclesEngine::Impl` 只负责请求队列、worker、session create/rebuild/start、
 Scene/Camera revision 协调、状态、首个错误和 reset/close。
