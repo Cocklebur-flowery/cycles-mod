@@ -132,26 +132,26 @@ final class CameraAutomationConfig {
     }
 
     void appendOptions(List<SettingsOption<?>> options) {
-        options.add(CyclesClientConfig.booleanOption("color.autoExposure", CyclesClientConfig.Category.COLOR,
+        options.add(SettingsCatalog.booleanOption("color.autoExposure", CyclesClientConfig.Category.COLOR,
                 "config.cyclesrenderer.color.autoExposure", exposureEnabled));
-        options.add(CyclesClientConfig.booleanOption("color.autoExposure.locked", CyclesClientConfig.Category.COLOR,
+        options.add(SettingsCatalog.booleanOption("color.autoExposure.locked", CyclesClientConfig.Category.COLOR,
                 "config.cyclesrenderer.color.autoExposureLocked", exposureLocked));
-        options.add(CyclesClientConfig.enumOption("color.autoExposure.metering", CyclesClientConfig.Category.COLOR,
+        options.add(SettingsCatalog.enumOption("color.autoExposure.metering", CyclesClientConfig.Category.COLOR,
                 "config.cyclesrenderer.color.exposureMetering", metering,
                 CameraAutomationSettings.ExposureMetering.values()));
         addExposureNumbers(options);
-        options.add(CyclesClientConfig.enumOption("camera.autofocus.mode", CyclesClientConfig.Category.CAMERA,
+        options.add(SettingsCatalog.enumOption("camera.autofocus.mode", CyclesClientConfig.Category.CAMERA,
                 "config.cyclesrenderer.camera.autofocusMode", autofocusMode,
                 CameraAutomationSettings.AutofocusMode.values()));
-        options.add(CyclesClientConfig.booleanOption("camera.autofocus.locked", CyclesClientConfig.Category.CAMERA,
+        options.add(SettingsCatalog.booleanOption("camera.autofocus.locked", CyclesClientConfig.Category.CAMERA,
                 "config.cyclesrenderer.camera.autofocusLocked", autofocusLocked));
-        options.add(CyclesClientConfig.enumOption("camera.autofocus.target", CyclesClientConfig.Category.CAMERA,
+        options.add(SettingsCatalog.enumOption("camera.autofocus.target", CyclesClientConfig.Category.CAMERA,
                 "config.cyclesrenderer.camera.focusTarget", focusTarget,
                 CameraAutomationSettings.FocusTarget.values()));
         addFocusNumbers(options);
-        options.add(CyclesClientConfig.booleanOption("camera.autofocus.fluids", CyclesClientConfig.Category.CAMERA,
+        options.add(SettingsCatalog.booleanOption("camera.autofocus.fluids", CyclesClientConfig.Category.CAMERA,
                 "config.cyclesrenderer.camera.autofocusFluids", includeFluids));
-        options.add(CyclesClientConfig.enumOption("camera.autofocus.miss", CyclesClientConfig.Category.CAMERA,
+        options.add(SettingsCatalog.enumOption("camera.autofocus.miss", CyclesClientConfig.Category.CAMERA,
                 "config.cyclesrenderer.camera.focusMissBehavior", missBehavior,
                 CameraAutomationSettings.FocusMissBehavior.values()));
     }
@@ -188,7 +188,7 @@ final class CameraAutomationConfig {
             double minimum,
             double maximum,
             double step) {
-        options.add(CyclesClientConfig.doubleOption("color.autoExposure." + name,
+        options.add(SettingsCatalog.doubleOption("color.autoExposure." + name,
                 CyclesClientConfig.Category.COLOR,
                 "config.cyclesrenderer.color.autoExposure." + name,
                 value, minimum, maximum, step));
@@ -201,7 +201,7 @@ final class CameraAutomationConfig {
             double minimum,
             double maximum,
             double step) {
-        options.add(CyclesClientConfig.doubleOption("camera.autofocus." + name,
+        options.add(SettingsCatalog.doubleOption("camera.autofocus." + name,
                 CyclesClientConfig.Category.CAMERA,
                 "config.cyclesrenderer.camera.autofocus." + name,
                 value, minimum, maximum, step));

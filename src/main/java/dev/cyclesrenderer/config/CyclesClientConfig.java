@@ -2,9 +2,7 @@ package dev.cyclesrenderer.config;
 
 import net.neoforged.neoforge.common.ModConfigSpec;
 
-import java.util.ArrayList;
 import java.util.List;
-import java.util.function.UnaryOperator;
 import java.util.concurrent.atomic.AtomicLong;
 
 public final class CyclesClientConfig {
@@ -15,116 +13,116 @@ public final class CyclesClientConfig {
     private static final AtomicLong REVISION = new AtomicLong(1L);
 
     private static final ModConfigSpec.IntValue SCHEMA;
-    private static final ModConfigSpec.EnumValue<CyclesRenderSettings.DevicePolicy> DEVICE_POLICY;
-    private static final ModConfigSpec.EnumValue<CyclesRenderSettings.ResolutionMode> RESOLUTION_MODE;
-    private static final ModConfigSpec.IntValue RENDER_WIDTH;
-    private static final ModConfigSpec.IntValue RENDER_HEIGHT;
-    private static final ModConfigSpec.IntValue RESOLUTION_PERCENTAGE;
-    private static final ModConfigSpec.BooleanValue DYNAMIC_RESOLUTION;
-    private static final ModConfigSpec.IntValue INTERACTIVE_RESOLUTION_PERCENTAGE;
-    private static final ModConfigSpec.IntValue PASS_CACHE_MEGABYTES;
-    private static final ModConfigSpec.IntValue INTERACTIVE_SAMPLES;
-    private static final ModConfigSpec.IntValue STILL_SAMPLES;
-    private static final ModConfigSpec.IntValue STATIONARY_DELAY;
-    private static final ModConfigSpec.BooleanValue ADAPTIVE_SAMPLING;
-    private static final ModConfigSpec.IntValue MINIMUM_SAMPLES;
-    private static final ModConfigSpec.DoubleValue NOISE_THRESHOLD;
-    private static final ModConfigSpec.IntValue INTERACTIVE_TIME_LIMIT;
-    private static final ModConfigSpec.IntValue STILL_TIME_LIMIT;
-    private static final ModConfigSpec.EnumValue<CyclesRenderSettings.SamplingPattern> SAMPLING_PATTERN;
-    private static final ModConfigSpec.DoubleValue CAMERA_CLIP_NEAR;
-    private static final ModConfigSpec.DoubleValue CAMERA_CLIP_FAR;
-    private static final ModConfigSpec.EnumValue<CyclesRenderSettings.CameraType> CAMERA_TYPE;
-    private static final ModConfigSpec.EnumValue<CyclesRenderSettings.ProjectionMode> CAMERA_PROJECTION;
-    private static final ModConfigSpec.EnumValue<CyclesRenderSettings.PanoramaType> CAMERA_PANORAMA_TYPE;
-    private static final ModConfigSpec.DoubleValue CAMERA_FOCAL_LENGTH;
-    private static final ModConfigSpec.DoubleValue CAMERA_SENSOR_WIDTH;
-    private static final ModConfigSpec.DoubleValue CAMERA_FISHEYE_FOV;
-    private static final ModConfigSpec.DoubleValue CAMERA_FISHEYE_LENS;
-    private static final ModConfigSpec.DoubleValue CAMERA_LATITUDE_MIN;
-    private static final ModConfigSpec.DoubleValue CAMERA_LATITUDE_MAX;
-    private static final ModConfigSpec.DoubleValue CAMERA_LONGITUDE_MIN;
-    private static final ModConfigSpec.DoubleValue CAMERA_LONGITUDE_MAX;
-    private static final ModConfigSpec.DoubleValue CAMERA_POLYNOMIAL_K0;
-    private static final ModConfigSpec.DoubleValue CAMERA_POLYNOMIAL_K1;
-    private static final ModConfigSpec.DoubleValue CAMERA_POLYNOMIAL_K2;
-    private static final ModConfigSpec.DoubleValue CAMERA_POLYNOMIAL_K3;
-    private static final ModConfigSpec.DoubleValue CAMERA_POLYNOMIAL_K4;
-    private static final ModConfigSpec.DoubleValue CAMERA_CYLINDRICAL_LONGITUDE_MIN;
-    private static final ModConfigSpec.DoubleValue CAMERA_CYLINDRICAL_LONGITUDE_MAX;
-    private static final ModConfigSpec.DoubleValue CAMERA_CYLINDRICAL_HEIGHT_MIN;
-    private static final ModConfigSpec.DoubleValue CAMERA_CYLINDRICAL_HEIGHT_MAX;
-    private static final ModConfigSpec.DoubleValue CAMERA_CYLINDRICAL_RADIUS;
-    private static final ModConfigSpec.DoubleValue CAMERA_SHIFT_X;
-    private static final ModConfigSpec.DoubleValue CAMERA_SHIFT_Y;
-    private static final ModConfigSpec.BooleanValue CAMERA_SAFE_AREAS;
-    private static final ModConfigSpec.DoubleValue CAMERA_TITLE_SAFE_X;
-    private static final ModConfigSpec.DoubleValue CAMERA_TITLE_SAFE_Y;
-    private static final ModConfigSpec.DoubleValue CAMERA_ACTION_SAFE_X;
-    private static final ModConfigSpec.DoubleValue CAMERA_ACTION_SAFE_Y;
-    private static final ModConfigSpec.BooleanValue CAMERA_CENTER_CUT_SAFE_AREAS;
-    private static final ModConfigSpec.DoubleValue CAMERA_CENTER_TITLE_SAFE_X;
-    private static final ModConfigSpec.DoubleValue CAMERA_CENTER_TITLE_SAFE_Y;
-    private static final ModConfigSpec.DoubleValue CAMERA_CENTER_ACTION_SAFE_X;
-    private static final ModConfigSpec.DoubleValue CAMERA_CENTER_ACTION_SAFE_Y;
-    private static final ModConfigSpec.BooleanValue CAMERA_DEPTH_OF_FIELD;
-    private static final ModConfigSpec.EnumValue<CyclesRenderSettings.DepthOfFieldMode>
+    static final ModConfigSpec.EnumValue<CyclesRenderSettings.DevicePolicy> DEVICE_POLICY;
+    static final ModConfigSpec.EnumValue<CyclesRenderSettings.ResolutionMode> RESOLUTION_MODE;
+    static final ModConfigSpec.IntValue RENDER_WIDTH;
+    static final ModConfigSpec.IntValue RENDER_HEIGHT;
+    static final ModConfigSpec.IntValue RESOLUTION_PERCENTAGE;
+    static final ModConfigSpec.BooleanValue DYNAMIC_RESOLUTION;
+    static final ModConfigSpec.IntValue INTERACTIVE_RESOLUTION_PERCENTAGE;
+    static final ModConfigSpec.IntValue PASS_CACHE_MEGABYTES;
+    static final ModConfigSpec.IntValue INTERACTIVE_SAMPLES;
+    static final ModConfigSpec.IntValue STILL_SAMPLES;
+    static final ModConfigSpec.IntValue STATIONARY_DELAY;
+    static final ModConfigSpec.BooleanValue ADAPTIVE_SAMPLING;
+    static final ModConfigSpec.IntValue MINIMUM_SAMPLES;
+    static final ModConfigSpec.DoubleValue NOISE_THRESHOLD;
+    static final ModConfigSpec.IntValue INTERACTIVE_TIME_LIMIT;
+    static final ModConfigSpec.IntValue STILL_TIME_LIMIT;
+    static final ModConfigSpec.EnumValue<CyclesRenderSettings.SamplingPattern> SAMPLING_PATTERN;
+    static final ModConfigSpec.DoubleValue CAMERA_CLIP_NEAR;
+    static final ModConfigSpec.DoubleValue CAMERA_CLIP_FAR;
+    static final ModConfigSpec.EnumValue<CyclesRenderSettings.CameraType> CAMERA_TYPE;
+    static final ModConfigSpec.EnumValue<CyclesRenderSettings.ProjectionMode> CAMERA_PROJECTION;
+    static final ModConfigSpec.EnumValue<CyclesRenderSettings.PanoramaType> CAMERA_PANORAMA_TYPE;
+    static final ModConfigSpec.DoubleValue CAMERA_FOCAL_LENGTH;
+    static final ModConfigSpec.DoubleValue CAMERA_SENSOR_WIDTH;
+    static final ModConfigSpec.DoubleValue CAMERA_FISHEYE_FOV;
+    static final ModConfigSpec.DoubleValue CAMERA_FISHEYE_LENS;
+    static final ModConfigSpec.DoubleValue CAMERA_LATITUDE_MIN;
+    static final ModConfigSpec.DoubleValue CAMERA_LATITUDE_MAX;
+    static final ModConfigSpec.DoubleValue CAMERA_LONGITUDE_MIN;
+    static final ModConfigSpec.DoubleValue CAMERA_LONGITUDE_MAX;
+    static final ModConfigSpec.DoubleValue CAMERA_POLYNOMIAL_K0;
+    static final ModConfigSpec.DoubleValue CAMERA_POLYNOMIAL_K1;
+    static final ModConfigSpec.DoubleValue CAMERA_POLYNOMIAL_K2;
+    static final ModConfigSpec.DoubleValue CAMERA_POLYNOMIAL_K3;
+    static final ModConfigSpec.DoubleValue CAMERA_POLYNOMIAL_K4;
+    static final ModConfigSpec.DoubleValue CAMERA_CYLINDRICAL_LONGITUDE_MIN;
+    static final ModConfigSpec.DoubleValue CAMERA_CYLINDRICAL_LONGITUDE_MAX;
+    static final ModConfigSpec.DoubleValue CAMERA_CYLINDRICAL_HEIGHT_MIN;
+    static final ModConfigSpec.DoubleValue CAMERA_CYLINDRICAL_HEIGHT_MAX;
+    static final ModConfigSpec.DoubleValue CAMERA_CYLINDRICAL_RADIUS;
+    static final ModConfigSpec.DoubleValue CAMERA_SHIFT_X;
+    static final ModConfigSpec.DoubleValue CAMERA_SHIFT_Y;
+    static final ModConfigSpec.BooleanValue CAMERA_SAFE_AREAS;
+    static final ModConfigSpec.DoubleValue CAMERA_TITLE_SAFE_X;
+    static final ModConfigSpec.DoubleValue CAMERA_TITLE_SAFE_Y;
+    static final ModConfigSpec.DoubleValue CAMERA_ACTION_SAFE_X;
+    static final ModConfigSpec.DoubleValue CAMERA_ACTION_SAFE_Y;
+    static final ModConfigSpec.BooleanValue CAMERA_CENTER_CUT_SAFE_AREAS;
+    static final ModConfigSpec.DoubleValue CAMERA_CENTER_TITLE_SAFE_X;
+    static final ModConfigSpec.DoubleValue CAMERA_CENTER_TITLE_SAFE_Y;
+    static final ModConfigSpec.DoubleValue CAMERA_CENTER_ACTION_SAFE_X;
+    static final ModConfigSpec.DoubleValue CAMERA_CENTER_ACTION_SAFE_Y;
+    static final ModConfigSpec.BooleanValue CAMERA_DEPTH_OF_FIELD;
+    static final ModConfigSpec.EnumValue<CyclesRenderSettings.DepthOfFieldMode>
             CAMERA_DEPTH_OF_FIELD_MODE;
-    private static final ModConfigSpec.DoubleValue CAMERA_FOCUS_DISTANCE;
-    private static final ModConfigSpec.DoubleValue CAMERA_F_STOP;
-    private static final ModConfigSpec.BooleanValue CAMERA_APERTURE_CIRCULAR;
-    private static final ModConfigSpec.IntValue CAMERA_APERTURE_BLADES;
-    private static final ModConfigSpec.DoubleValue CAMERA_APERTURE_ROTATION;
-    private static final ModConfigSpec.DoubleValue CAMERA_APERTURE_RATIO;
-    private static final ModConfigSpec.BooleanValue ATMOSPHERE_SUN_DISC;
-    private static final ModConfigSpec.DoubleValue ATMOSPHERE_SUN_SIZE;
-    private static final ModConfigSpec.DoubleValue ATMOSPHERE_SUN_INTENSITY;
-    private static final ModConfigSpec.DoubleValue ATMOSPHERE_SUN_ELEVATION;
-    private static final ModConfigSpec.DoubleValue ATMOSPHERE_SUN_ROTATION;
-    private static final ModConfigSpec.DoubleValue ATMOSPHERE_ALTITUDE;
-    private static final ModConfigSpec.DoubleValue ATMOSPHERE_AIR_DENSITY;
-    private static final ModConfigSpec.DoubleValue ATMOSPHERE_AEROSOL_DENSITY;
-    private static final ModConfigSpec.DoubleValue ATMOSPHERE_OZONE_DENSITY;
-    private static final ModConfigSpec.EnumValue<CyclesRenderSettings.PbrMode> PBR_MODE;
-    private static final ModConfigSpec.DoubleValue PBR_NORMAL_STRENGTH;
-    private static final ModConfigSpec.DoubleValue PBR_EMISSION_SCALE;
-    private static final ModConfigSpec.DoubleValue PBR_FALLBACK_ROUGHNESS;
-    private static final ModConfigSpec.DoubleValue PBR_FALLBACK_F0;
-    private static final LabPbrConfig LAB_PBR;
-    private static final ModConfigSpec.IntValue MINIMUM_BOUNCE;
-    private static final ModConfigSpec.IntValue MAXIMUM_BOUNCE;
-    private static final ModConfigSpec.IntValue DIFFUSE_BOUNCES;
-    private static final ModConfigSpec.IntValue GLOSSY_BOUNCES;
-    private static final ModConfigSpec.IntValue TRANSMISSION_BOUNCES;
-    private static final ModConfigSpec.IntValue VOLUME_BOUNCES;
-    private static final ModConfigSpec.IntValue TRANSPARENT_BOUNCES;
-    private static final ModConfigSpec.DoubleValue CLAMP_DIRECT;
-    private static final ModConfigSpec.DoubleValue CLAMP_INDIRECT;
-    private static final ModConfigSpec.DoubleValue FILTER_GLOSSY;
-    private static final ModConfigSpec.BooleanValue REFLECTIVE_CAUSTICS;
-    private static final ModConfigSpec.BooleanValue REFRACTIVE_CAUSTICS;
-    private static final ModConfigSpec.EnumValue<CyclesRenderSettings.PixelFilter> PIXEL_FILTER;
-    private static final ModConfigSpec.DoubleValue FILTER_WIDTH;
-    private static final ModConfigSpec.IntValue SEED;
-    private static final ModConfigSpec.EnumValue<CyclesRenderSettings.DenoiserMode> DENOISER_MODE;
-    private static final ModConfigSpec.IntValue DENOISER_START_SAMPLE;
-    private static final ModConfigSpec.EnumValue<CyclesRenderSettings.DenoiserInput> DENOISER_INPUT;
-    private static final ModConfigSpec.EnumValue<CyclesRenderSettings.DenoiserPrefilter> DENOISER_PREFILTER;
-    private static final ModConfigSpec.EnumValue<CyclesRenderSettings.DenoiserQuality> DENOISER_QUALITY;
-    private static final ModConfigSpec.EnumValue<CyclesRenderSettings.DlssQualityMode> DLSS_QUALITY_MODE;
-    private static final ModConfigSpec.BooleanValue DENOISER_USE_GPU;
-    private static final ModConfigSpec.DoubleValue EXPOSURE_EV;
-    private static final ModConfigSpec.DoubleValue GAMMA;
-    private static final ModConfigSpec.EnumValue<CyclesRenderSettings.DisplayDevice> DISPLAY_DEVICE;
-    private static final ModConfigSpec.EnumValue<CyclesRenderSettings.ViewTransform> VIEW_TRANSFORM;
-    private static final ModConfigSpec.EnumValue<CyclesRenderSettings.ColorLook> COLOR_LOOK;
-    private static final ModConfigSpec.EnumValue<CyclesRenderSettings.WorkingSpace> WORKING_SPACE;
-    private static final ModConfigSpec.BooleanValue WHITE_BALANCE;
-    private static final ModConfigSpec.DoubleValue WHITE_BALANCE_TEMPERATURE;
-    private static final ModConfigSpec.DoubleValue WHITE_BALANCE_TINT;
-    private static final ModConfigSpec.EnumValue<CyclesRenderSettings.PassView> ACTIVE_PASS;
-    private static final ModConfigSpec.BooleanValue DEBUG_OVERLAY;
-    private static final CameraAutomationConfig CAMERA_AUTOMATION;
+    static final ModConfigSpec.DoubleValue CAMERA_FOCUS_DISTANCE;
+    static final ModConfigSpec.DoubleValue CAMERA_F_STOP;
+    static final ModConfigSpec.BooleanValue CAMERA_APERTURE_CIRCULAR;
+    static final ModConfigSpec.IntValue CAMERA_APERTURE_BLADES;
+    static final ModConfigSpec.DoubleValue CAMERA_APERTURE_ROTATION;
+    static final ModConfigSpec.DoubleValue CAMERA_APERTURE_RATIO;
+    static final ModConfigSpec.BooleanValue ATMOSPHERE_SUN_DISC;
+    static final ModConfigSpec.DoubleValue ATMOSPHERE_SUN_SIZE;
+    static final ModConfigSpec.DoubleValue ATMOSPHERE_SUN_INTENSITY;
+    static final ModConfigSpec.DoubleValue ATMOSPHERE_SUN_ELEVATION;
+    static final ModConfigSpec.DoubleValue ATMOSPHERE_SUN_ROTATION;
+    static final ModConfigSpec.DoubleValue ATMOSPHERE_ALTITUDE;
+    static final ModConfigSpec.DoubleValue ATMOSPHERE_AIR_DENSITY;
+    static final ModConfigSpec.DoubleValue ATMOSPHERE_AEROSOL_DENSITY;
+    static final ModConfigSpec.DoubleValue ATMOSPHERE_OZONE_DENSITY;
+    static final ModConfigSpec.EnumValue<CyclesRenderSettings.PbrMode> PBR_MODE;
+    static final ModConfigSpec.DoubleValue PBR_NORMAL_STRENGTH;
+    static final ModConfigSpec.DoubleValue PBR_EMISSION_SCALE;
+    static final ModConfigSpec.DoubleValue PBR_FALLBACK_ROUGHNESS;
+    static final ModConfigSpec.DoubleValue PBR_FALLBACK_F0;
+    static final LabPbrConfig LAB_PBR;
+    static final ModConfigSpec.IntValue MINIMUM_BOUNCE;
+    static final ModConfigSpec.IntValue MAXIMUM_BOUNCE;
+    static final ModConfigSpec.IntValue DIFFUSE_BOUNCES;
+    static final ModConfigSpec.IntValue GLOSSY_BOUNCES;
+    static final ModConfigSpec.IntValue TRANSMISSION_BOUNCES;
+    static final ModConfigSpec.IntValue VOLUME_BOUNCES;
+    static final ModConfigSpec.IntValue TRANSPARENT_BOUNCES;
+    static final ModConfigSpec.DoubleValue CLAMP_DIRECT;
+    static final ModConfigSpec.DoubleValue CLAMP_INDIRECT;
+    static final ModConfigSpec.DoubleValue FILTER_GLOSSY;
+    static final ModConfigSpec.BooleanValue REFLECTIVE_CAUSTICS;
+    static final ModConfigSpec.BooleanValue REFRACTIVE_CAUSTICS;
+    static final ModConfigSpec.EnumValue<CyclesRenderSettings.PixelFilter> PIXEL_FILTER;
+    static final ModConfigSpec.DoubleValue FILTER_WIDTH;
+    static final ModConfigSpec.IntValue SEED;
+    static final ModConfigSpec.EnumValue<CyclesRenderSettings.DenoiserMode> DENOISER_MODE;
+    static final ModConfigSpec.IntValue DENOISER_START_SAMPLE;
+    static final ModConfigSpec.EnumValue<CyclesRenderSettings.DenoiserInput> DENOISER_INPUT;
+    static final ModConfigSpec.EnumValue<CyclesRenderSettings.DenoiserPrefilter> DENOISER_PREFILTER;
+    static final ModConfigSpec.EnumValue<CyclesRenderSettings.DenoiserQuality> DENOISER_QUALITY;
+    static final ModConfigSpec.EnumValue<CyclesRenderSettings.DlssQualityMode> DLSS_QUALITY_MODE;
+    static final ModConfigSpec.BooleanValue DENOISER_USE_GPU;
+    static final ModConfigSpec.DoubleValue EXPOSURE_EV;
+    static final ModConfigSpec.DoubleValue GAMMA;
+    static final ModConfigSpec.EnumValue<CyclesRenderSettings.DisplayDevice> DISPLAY_DEVICE;
+    static final ModConfigSpec.EnumValue<CyclesRenderSettings.ViewTransform> VIEW_TRANSFORM;
+    static final ModConfigSpec.EnumValue<CyclesRenderSettings.ColorLook> COLOR_LOOK;
+    static final ModConfigSpec.EnumValue<CyclesRenderSettings.WorkingSpace> WORKING_SPACE;
+    static final ModConfigSpec.BooleanValue WHITE_BALANCE;
+    static final ModConfigSpec.DoubleValue WHITE_BALANCE_TEMPERATURE;
+    static final ModConfigSpec.DoubleValue WHITE_BALANCE_TINT;
+    static final ModConfigSpec.EnumValue<CyclesRenderSettings.PassView> ACTIVE_PASS;
+    static final ModConfigSpec.BooleanValue DEBUG_OVERLAY;
+    static final CameraAutomationConfig CAMERA_AUTOMATION;
 
     static {
         ModConfigSpec.Builder builder = new ModConfigSpec.Builder();
@@ -416,7 +414,7 @@ public final class CyclesClientConfig {
         CAMERA_AUTOMATION = CameraAutomationConfig.define(builder);
 
         SPEC = builder.build();
-        OPTIONS = buildOptions();
+        OPTIONS = SettingsCatalog.buildOptions();
     }
 
     private CyclesClientConfig() {
@@ -536,319 +534,6 @@ public final class CyclesClientConfig {
         draft.accept(changes);
         changedAndSave();
         return true;
-    }
-
-    private static List<SettingsOption<?>> buildOptions() {
-        List<SettingsOption<?>> options = new ArrayList<>();
-        options.add(enumOption("device.policy", Category.DEVICE,
-                "config.cyclesrenderer.device.policy", DEVICE_POLICY,
-                CyclesRenderSettings.DevicePolicy.values()));
-
-        options.add(enumOption("output.resolutionMode", Category.OUTPUT,
-                "config.cyclesrenderer.output.resolutionMode", RESOLUTION_MODE,
-                CyclesRenderSettings.ResolutionMode.values()));
-        options.add(intOption("output.width", Category.OUTPUT,
-                "config.cyclesrenderer.output.width", RENDER_WIDTH, 160, 3840, 16));
-        options.add(intOption("output.height", Category.OUTPUT,
-                "config.cyclesrenderer.output.height", RENDER_HEIGHT, 90, 2160, 9));
-        options.add(intOption("output.percentage", Category.OUTPUT,
-                "config.cyclesrenderer.output.percentage", RESOLUTION_PERCENTAGE, 25, 100, 1));
-        options.add(booleanOption("output.dynamicResolution", Category.OUTPUT,
-                "config.cyclesrenderer.output.dynamicResolution", DYNAMIC_RESOLUTION));
-        options.add(intOption("output.interactivePercentage", Category.OUTPUT,
-                "config.cyclesrenderer.output.interactivePercentage",
-                INTERACTIVE_RESOLUTION_PERCENTAGE, 25, 100, 1));
-        options.add(intOption("output.passCacheMegabytes", Category.OUTPUT,
-                "config.cyclesrenderer.output.passCacheMegabytes",
-                PASS_CACHE_MEGABYTES, 64, 4096, 64));
-
-        options.add(intOption("sampling.interactiveSamples", Category.SAMPLING,
-                "config.cyclesrenderer.sampling.interactiveSamples",
-                INTERACTIVE_SAMPLES, 1, 4096, 1));
-        options.add(intOption("sampling.stillSamples", Category.SAMPLING,
-                "config.cyclesrenderer.sampling.stillSamples", STILL_SAMPLES, 1, 4096, 1));
-        options.add(intOption("sampling.stationaryDelay", Category.SAMPLING,
-                "config.cyclesrenderer.sampling.stationaryDelay", STATIONARY_DELAY, 0, 10000, 10));
-        options.add(booleanOption("sampling.adaptive", Category.SAMPLING,
-                "config.cyclesrenderer.sampling.adaptive", ADAPTIVE_SAMPLING));
-        options.add(intOption("sampling.minimumSamples", Category.SAMPLING,
-                "config.cyclesrenderer.sampling.minimumSamples", MINIMUM_SAMPLES, 0, 4096, 1));
-        options.add(doubleOption("sampling.noiseThreshold", Category.SAMPLING,
-                "config.cyclesrenderer.sampling.noiseThreshold", NOISE_THRESHOLD, 0.0D, 1.0D, 0.001D));
-        options.add(intOption("sampling.interactiveTimeLimit", Category.SAMPLING,
-                "config.cyclesrenderer.sampling.interactiveTimeLimit",
-                INTERACTIVE_TIME_LIMIT, 0, 60000, 10));
-        options.add(intOption("sampling.stillTimeLimit", Category.SAMPLING,
-                "config.cyclesrenderer.sampling.stillTimeLimit", STILL_TIME_LIMIT, 0, 600000, 100));
-        options.add(enumOption("sampling.pattern", Category.SAMPLING,
-                "config.cyclesrenderer.sampling.pattern", SAMPLING_PATTERN,
-                CyclesRenderSettings.SamplingPattern.values()));
-
-        options.add(intOption("lightPaths.minimumBounce", Category.LIGHT_PATHS,
-                "config.cyclesrenderer.lightPaths.minimumBounce", MINIMUM_BOUNCE, 0, 64, 1));
-        options.add(intOption("lightPaths.maximumBounce", Category.LIGHT_PATHS,
-                "config.cyclesrenderer.lightPaths.maximumBounce", MAXIMUM_BOUNCE, 0, 64, 1));
-        options.add(intOption("lightPaths.diffuseBounces", Category.LIGHT_PATHS,
-                "config.cyclesrenderer.lightPaths.diffuseBounces", DIFFUSE_BOUNCES, 0, 64, 1));
-        options.add(intOption("lightPaths.glossyBounces", Category.LIGHT_PATHS,
-                "config.cyclesrenderer.lightPaths.glossyBounces", GLOSSY_BOUNCES, 0, 64, 1));
-        options.add(intOption("lightPaths.transmissionBounces", Category.LIGHT_PATHS,
-                "config.cyclesrenderer.lightPaths.transmissionBounces", TRANSMISSION_BOUNCES, 0, 64, 1));
-        options.add(intOption("lightPaths.volumeBounces", Category.LIGHT_PATHS,
-                "config.cyclesrenderer.lightPaths.volumeBounces", VOLUME_BOUNCES, 0, 64, 1));
-        options.add(intOption("lightPaths.transparentBounces", Category.LIGHT_PATHS,
-                "config.cyclesrenderer.lightPaths.transparentBounces", TRANSPARENT_BOUNCES, 0, 64, 1));
-        options.add(doubleOption("lightPaths.clampDirect", Category.LIGHT_PATHS,
-                "config.cyclesrenderer.lightPaths.clampDirect", CLAMP_DIRECT, 0.0D, 100000.0D, 0.1D));
-        options.add(doubleOption("lightPaths.clampIndirect", Category.LIGHT_PATHS,
-                "config.cyclesrenderer.lightPaths.clampIndirect", CLAMP_INDIRECT, 0.0D, 100000.0D, 0.1D));
-        options.add(doubleOption("lightPaths.filterGlossy", Category.LIGHT_PATHS,
-                "config.cyclesrenderer.lightPaths.filterGlossy", FILTER_GLOSSY, 0.0D, 100.0D, 0.1D));
-        options.add(booleanOption("lightPaths.reflectiveCaustics", Category.LIGHT_PATHS,
-                "config.cyclesrenderer.lightPaths.reflectiveCaustics", REFLECTIVE_CAUSTICS));
-        options.add(booleanOption("lightPaths.refractiveCaustics", Category.LIGHT_PATHS,
-                "config.cyclesrenderer.lightPaths.refractiveCaustics", REFRACTIVE_CAUSTICS));
-
-        options.add(enumOption("filter.type", Category.FILTER,
-                "config.cyclesrenderer.filter.type", PIXEL_FILTER,
-                CyclesRenderSettings.PixelFilter.values()));
-        options.add(doubleOption("filter.width", Category.FILTER,
-                "config.cyclesrenderer.filter.width", FILTER_WIDTH, 0.01D, 10.0D, 0.01D));
-        options.add(intOption("filter.seed", Category.FILTER,
-                "config.cyclesrenderer.filter.seed", SEED, 0, Integer.MAX_VALUE, 1));
-
-        options.add(enumOption("denoise.mode", Category.DENOISE,
-                "config.cyclesrenderer.denoise.mode", DENOISER_MODE,
-                CyclesRenderSettings.DenoiserMode.values()));
-        options.add(intOption("denoise.startSample", Category.DENOISE,
-                "config.cyclesrenderer.denoise.startSample", DENOISER_START_SAMPLE, 1, 4096, 1));
-        options.add(enumOption("denoise.input", Category.DENOISE,
-                "config.cyclesrenderer.denoise.input", DENOISER_INPUT,
-                CyclesRenderSettings.DenoiserInput.values()));
-        options.add(enumOption("denoise.prefilter", Category.DENOISE,
-                "config.cyclesrenderer.denoise.prefilter", DENOISER_PREFILTER,
-                CyclesRenderSettings.DenoiserPrefilter.values()));
-        options.add(enumOption("denoise.quality", Category.DENOISE,
-                "config.cyclesrenderer.denoise.quality", DENOISER_QUALITY,
-                CyclesRenderSettings.DenoiserQuality.values()));
-        options.add(enumOption("denoise.dlssMode", Category.DENOISE,
-                "config.cyclesrenderer.denoise.dlssMode", DLSS_QUALITY_MODE,
-                CyclesRenderSettings.DlssQualityMode.values()));
-        options.add(booleanOption("denoise.useGpu", Category.DENOISE,
-                "config.cyclesrenderer.denoise.useGpu", DENOISER_USE_GPU));
-
-        options.add(doubleOption("camera.clipNear", Category.CAMERA,
-                "config.cyclesrenderer.camera.clipNear", CAMERA_CLIP_NEAR, 0.001D, 10.0D, 0.001D));
-        options.add(doubleOption("camera.clipFar", Category.CAMERA,
-                "config.cyclesrenderer.camera.clipFar", CAMERA_CLIP_FAR, 0.0D, 1000000.0D, 1.0D));
-        options.add(enumOption("camera.type", Category.CAMERA,
-                "config.cyclesrenderer.camera.type", CAMERA_TYPE,
-                CyclesRenderSettings.CameraType.values()));
-        options.add(enumOption("camera.projection", Category.CAMERA,
-                "config.cyclesrenderer.camera.projection", CAMERA_PROJECTION,
-                CyclesRenderSettings.ProjectionMode.values()));
-        options.add(enumOption("camera.panoramaType", Category.CAMERA,
-                "config.cyclesrenderer.camera.panoramaType", CAMERA_PANORAMA_TYPE,
-                new CyclesRenderSettings.PanoramaType[] {
-                    CyclesRenderSettings.PanoramaType.EQUIRECTANGULAR,
-                    CyclesRenderSettings.PanoramaType.EQUIANGULAR_CUBEMAP_FACE,
-                    CyclesRenderSettings.PanoramaType.MIRRORBALL,
-                    CyclesRenderSettings.PanoramaType.FISHEYE_EQUIDISTANT,
-                    CyclesRenderSettings.PanoramaType.FISHEYE_EQUISOLID,
-                    CyclesRenderSettings.PanoramaType.FISHEYE_LENS_POLYNOMIAL,
-                    CyclesRenderSettings.PanoramaType.CENTRAL_CYLINDRICAL
-                }));
-        options.add(doubleOption("camera.focalLength", Category.CAMERA,
-                "config.cyclesrenderer.camera.focalLength", CAMERA_FOCAL_LENGTH, 1.0D, 300.0D, 0.1D));
-        options.add(doubleOption("camera.sensorWidth", Category.CAMERA,
-                "config.cyclesrenderer.camera.sensorWidth", CAMERA_SENSOR_WIDTH, 1.0D, 100.0D, 0.1D));
-        options.add(doubleOption("camera.fisheyeFov", Category.CAMERA,
-                "config.cyclesrenderer.camera.fisheyeFov", CAMERA_FISHEYE_FOV, 10.0D, 1800.0D, 1.0D));
-        options.add(doubleOption("camera.fisheyeLens", Category.CAMERA,
-                "config.cyclesrenderer.camera.fisheyeLens", CAMERA_FISHEYE_LENS, 0.01D, 100.0D, 0.01D));
-        options.add(doubleOption("camera.latitudeMin", Category.CAMERA,
-                "config.cyclesrenderer.camera.latitudeMin", CAMERA_LATITUDE_MIN, -90.0D, 90.0D, 1.0D));
-        options.add(doubleOption("camera.latitudeMax", Category.CAMERA,
-                "config.cyclesrenderer.camera.latitudeMax", CAMERA_LATITUDE_MAX, -90.0D, 90.0D, 1.0D));
-        options.add(doubleOption("camera.longitudeMin", Category.CAMERA,
-                "config.cyclesrenderer.camera.longitudeMin", CAMERA_LONGITUDE_MIN, -180.0D, 180.0D, 1.0D));
-        options.add(doubleOption("camera.longitudeMax", Category.CAMERA,
-                "config.cyclesrenderer.camera.longitudeMax", CAMERA_LONGITUDE_MAX, -180.0D, 180.0D, 1.0D));
-        options.add(doubleOption("camera.polynomialK0", Category.CAMERA,
-                "config.cyclesrenderer.camera.polynomialK0", CAMERA_POLYNOMIAL_K0, -1000000.0D, 1000000.0D, 0.000001D));
-        options.add(doubleOption("camera.polynomialK1", Category.CAMERA,
-                "config.cyclesrenderer.camera.polynomialK1", CAMERA_POLYNOMIAL_K1, -1000000.0D, 1000000.0D, 0.000001D));
-        options.add(doubleOption("camera.polynomialK2", Category.CAMERA,
-                "config.cyclesrenderer.camera.polynomialK2", CAMERA_POLYNOMIAL_K2, -1000000.0D, 1000000.0D, 0.000001D));
-        options.add(doubleOption("camera.polynomialK3", Category.CAMERA,
-                "config.cyclesrenderer.camera.polynomialK3", CAMERA_POLYNOMIAL_K3, -1000000.0D, 1000000.0D, 0.000001D));
-        options.add(doubleOption("camera.polynomialK4", Category.CAMERA,
-                "config.cyclesrenderer.camera.polynomialK4", CAMERA_POLYNOMIAL_K4, -1000000.0D, 1000000.0D, 0.000001D));
-        options.add(doubleOption("camera.cylindricalLongitudeMin", Category.CAMERA,
-                "config.cyclesrenderer.camera.cylindricalLongitudeMin", CAMERA_CYLINDRICAL_LONGITUDE_MIN, -180.0D, 180.0D, 1.0D));
-        options.add(doubleOption("camera.cylindricalLongitudeMax", Category.CAMERA,
-                "config.cyclesrenderer.camera.cylindricalLongitudeMax", CAMERA_CYLINDRICAL_LONGITUDE_MAX, -180.0D, 180.0D, 1.0D));
-        options.add(doubleOption("camera.cylindricalHeightMin", Category.CAMERA,
-                "config.cyclesrenderer.camera.cylindricalHeightMin", CAMERA_CYLINDRICAL_HEIGHT_MIN, -10.0D, 10.0D, 0.1D));
-        options.add(doubleOption("camera.cylindricalHeightMax", Category.CAMERA,
-                "config.cyclesrenderer.camera.cylindricalHeightMax", CAMERA_CYLINDRICAL_HEIGHT_MAX, -10.0D, 10.0D, 0.1D));
-        options.add(doubleOption("camera.cylindricalRadius", Category.CAMERA,
-                "config.cyclesrenderer.camera.cylindricalRadius", CAMERA_CYLINDRICAL_RADIUS, 0.00001D, 1000000.0D, 0.01D));
-        options.add(doubleOption("camera.shiftX", Category.CAMERA,
-                "config.cyclesrenderer.camera.shiftX", CAMERA_SHIFT_X, -10.0D, 10.0D, 0.001D));
-        options.add(doubleOption("camera.shiftY", Category.CAMERA,
-                "config.cyclesrenderer.camera.shiftY", CAMERA_SHIFT_Y, -10.0D, 10.0D, 0.001D));
-        options.add(booleanOption("camera.depthOfField", Category.CAMERA,
-                "config.cyclesrenderer.camera.depthOfField", CAMERA_DEPTH_OF_FIELD));
-        options.add(enumOption("camera.depthOfFieldMode", Category.CAMERA,
-                "config.cyclesrenderer.camera.depthOfFieldMode", CAMERA_DEPTH_OF_FIELD_MODE,
-                CyclesRenderSettings.DepthOfFieldMode.values()));
-        options.add(doubleOption("camera.focusDistance", Category.CAMERA,
-                "config.cyclesrenderer.camera.focusDistance", CAMERA_FOCUS_DISTANCE, 0.01D, 1000000.0D, 0.01D));
-        options.add(doubleOption("camera.fStop", Category.CAMERA,
-                "config.cyclesrenderer.camera.fStop", CAMERA_F_STOP, 0.1D, 128.0D, 0.1D));
-        options.add(booleanOption("camera.apertureCircular", Category.CAMERA,
-                "config.cyclesrenderer.camera.apertureCircular", CAMERA_APERTURE_CIRCULAR));
-        options.add(intOption("camera.apertureBlades", Category.CAMERA,
-                "config.cyclesrenderer.camera.apertureBlades", CAMERA_APERTURE_BLADES, 3, 16, 1));
-        options.add(doubleOption("camera.apertureRotation", Category.CAMERA,
-                "config.cyclesrenderer.camera.apertureRotation", CAMERA_APERTURE_ROTATION, -360.0D, 360.0D, 1.0D));
-        options.add(doubleOption("camera.apertureRatio", Category.CAMERA,
-                "config.cyclesrenderer.camera.apertureRatio", CAMERA_APERTURE_RATIO, 0.1D, 10.0D, 0.01D));
-        options.add(booleanOption("camera.safeAreas", Category.CAMERA,
-                "config.cyclesrenderer.camera.safeAreas", CAMERA_SAFE_AREAS));
-        options.add(doubleOption("camera.titleSafeX", Category.CAMERA,
-                "config.cyclesrenderer.camera.titleSafeX", CAMERA_TITLE_SAFE_X, 0.0D, 0.5D, 0.001D));
-        options.add(doubleOption("camera.titleSafeY", Category.CAMERA,
-                "config.cyclesrenderer.camera.titleSafeY", CAMERA_TITLE_SAFE_Y, 0.0D, 0.5D, 0.001D));
-        options.add(doubleOption("camera.actionSafeX", Category.CAMERA,
-                "config.cyclesrenderer.camera.actionSafeX", CAMERA_ACTION_SAFE_X, 0.0D, 0.5D, 0.001D));
-        options.add(doubleOption("camera.actionSafeY", Category.CAMERA,
-                "config.cyclesrenderer.camera.actionSafeY", CAMERA_ACTION_SAFE_Y, 0.0D, 0.5D, 0.001D));
-        options.add(booleanOption("camera.centerCutSafeAreas", Category.CAMERA,
-                "config.cyclesrenderer.camera.centerCutSafeAreas", CAMERA_CENTER_CUT_SAFE_AREAS));
-        options.add(doubleOption("camera.centerTitleSafeX", Category.CAMERA,
-                "config.cyclesrenderer.camera.centerTitleSafeX", CAMERA_CENTER_TITLE_SAFE_X, 0.0D, 0.5D, 0.001D));
-        options.add(doubleOption("camera.centerTitleSafeY", Category.CAMERA,
-                "config.cyclesrenderer.camera.centerTitleSafeY", CAMERA_CENTER_TITLE_SAFE_Y, 0.0D, 0.5D, 0.001D));
-        options.add(doubleOption("camera.centerActionSafeX", Category.CAMERA,
-                "config.cyclesrenderer.camera.centerActionSafeX", CAMERA_CENTER_ACTION_SAFE_X, 0.0D, 0.5D, 0.001D));
-        options.add(doubleOption("camera.centerActionSafeY", Category.CAMERA,
-                "config.cyclesrenderer.camera.centerActionSafeY", CAMERA_CENTER_ACTION_SAFE_Y, 0.0D, 0.5D, 0.001D));
-
-        options.add(booleanOption("atmosphere.sunDisc", Category.ATMOSPHERE,
-                "config.cyclesrenderer.atmosphere.sunDisc", ATMOSPHERE_SUN_DISC));
-        options.add(doubleOption("atmosphere.sunSize", Category.ATMOSPHERE,
-                "config.cyclesrenderer.atmosphere.sunSize", ATMOSPHERE_SUN_SIZE, 0.01D, 180.0D, 0.01D));
-        options.add(doubleOption("atmosphere.sunIntensity", Category.ATMOSPHERE,
-                "config.cyclesrenderer.atmosphere.sunIntensity", ATMOSPHERE_SUN_INTENSITY, 0.0D, 1000.0D, 0.1D));
-        options.add(doubleOption("atmosphere.sunElevation", Category.ATMOSPHERE,
-                "config.cyclesrenderer.atmosphere.sunElevation", ATMOSPHERE_SUN_ELEVATION, -90.0D, 90.0D, 1.0D));
-        options.add(doubleOption("atmosphere.sunRotation", Category.ATMOSPHERE,
-                "config.cyclesrenderer.atmosphere.sunRotation", ATMOSPHERE_SUN_ROTATION, -360.0D, 360.0D, 1.0D));
-        options.add(doubleOption("atmosphere.altitude", Category.ATMOSPHERE,
-                "config.cyclesrenderer.atmosphere.altitude", ATMOSPHERE_ALTITUDE, 0.0D, 60000.0D, 10.0D));
-        options.add(doubleOption("atmosphere.airDensity", Category.ATMOSPHERE,
-                "config.cyclesrenderer.atmosphere.airDensity", ATMOSPHERE_AIR_DENSITY, 0.0D, 10.0D, 0.01D));
-        options.add(doubleOption("atmosphere.aerosolDensity", Category.ATMOSPHERE,
-                "config.cyclesrenderer.atmosphere.aerosolDensity", ATMOSPHERE_AEROSOL_DENSITY, 0.0D, 10.0D, 0.01D));
-        options.add(doubleOption("atmosphere.ozoneDensity", Category.ATMOSPHERE,
-                "config.cyclesrenderer.atmosphere.ozoneDensity", ATMOSPHERE_OZONE_DENSITY, 0.0D, 10.0D, 0.01D));
-
-        options.add(enumOption("materials.pbrMode", Category.MATERIALS,
-                "config.cyclesrenderer.materials.pbrMode", PBR_MODE,
-                CyclesRenderSettings.PbrMode.values()));
-        options.add(doubleOption("materials.normalStrength", Category.MATERIALS,
-                "config.cyclesrenderer.materials.normalStrength", PBR_NORMAL_STRENGTH, 0.0D, 4.0D, 0.01D));
-        options.add(doubleOption("materials.emissionScale", Category.MATERIALS,
-                "config.cyclesrenderer.materials.emissionScale", PBR_EMISSION_SCALE, 0.0D, 100.0D, 0.1D));
-        options.add(doubleOption("materials.fallbackRoughness", Category.MATERIALS,
-                "config.cyclesrenderer.materials.fallbackRoughness", PBR_FALLBACK_ROUGHNESS, 0.0D, 1.0D, 0.01D));
-        options.add(doubleOption("materials.fallbackF0", Category.MATERIALS,
-                "config.cyclesrenderer.materials.fallbackF0", PBR_FALLBACK_F0, 0.0D, 0.08D, 0.001D));
-        LAB_PBR.appendOptions(options);
-
-        options.add(enumOption("color.display", Category.COLOR,
-                "config.cyclesrenderer.color.display", DISPLAY_DEVICE,
-                CyclesRenderSettings.DisplayDevice.values()));
-        options.add(enumOption("color.viewTransform", Category.COLOR,
-                "config.cyclesrenderer.color.viewTransform", VIEW_TRANSFORM,
-                CyclesRenderSettings.ViewTransform.values()));
-        options.add(enumOption("color.look", Category.COLOR,
-                "config.cyclesrenderer.color.look", COLOR_LOOK,
-                CyclesRenderSettings.ColorLook.values()));
-        options.add(doubleOption("color.exposure", Category.COLOR,
-                "config.cyclesrenderer.color.exposure", EXPOSURE_EV, -20.0D, 20.0D, 0.1D));
-        options.add(doubleOption("color.gamma", Category.COLOR,
-                "config.cyclesrenderer.color.gamma", GAMMA, 0.1D, 5.0D, 0.01D));
-        options.add(booleanOption("color.whiteBalance", Category.COLOR,
-                "config.cyclesrenderer.color.whiteBalance", WHITE_BALANCE));
-        options.add(doubleOption("color.temperature", Category.COLOR,
-                "config.cyclesrenderer.color.temperature", WHITE_BALANCE_TEMPERATURE,
-                1800.0D, 100000.0D, 50.0D));
-        options.add(doubleOption("color.tint", Category.COLOR,
-                "config.cyclesrenderer.color.tint", WHITE_BALANCE_TINT, -150.0D, 150.0D, 1.0D));
-        options.add(enumOption("color.workingSpace", Category.COLOR,
-                "config.cyclesrenderer.color.workingSpace", WORKING_SPACE,
-                CyclesRenderSettings.WorkingSpace.values()));
-
-        options.add(enumOption("diagnostics.activePass", Category.DIAGNOSTICS,
-                "config.cyclesrenderer.diagnostics.activePass", ACTIVE_PASS,
-                CyclesRenderSettings.PassView.values()));
-        options.add(booleanOption("diagnostics.debugOverlay", Category.DIAGNOSTICS,
-                "config.cyclesrenderer.diagnostics.debugOverlay", DEBUG_OVERLAY));
-        CAMERA_AUTOMATION.appendOptions(options);
-        return List.copyOf(options);
-    }
-
-    static SettingsOption<Boolean> booleanOption(
-            String id,
-            Category category,
-            String translationKey,
-            ModConfigSpec.BooleanValue value) {
-        return new SettingsOption<>(id, category, translationKey, ValueKind.BOOLEAN,
-                value::get, value::set, UnaryOperator.identity(), 0.0D, 1.0D, 1.0D, List.of());
-    }
-
-    static SettingsOption<Integer> intOption(
-            String id,
-            Category category,
-            String translationKey,
-            ModConfigSpec.IntValue value,
-            int minimum,
-            int maximum,
-            int step) {
-        return new SettingsOption<>(id, category, translationKey, ValueKind.INTEGER,
-                value::get, value::set,
-                candidate -> Math.clamp(candidate, minimum, maximum),
-                minimum, maximum, step, List.of());
-    }
-
-    static SettingsOption<Double> doubleOption(
-            String id,
-            Category category,
-            String translationKey,
-            ModConfigSpec.DoubleValue value,
-            double minimum,
-            double maximum,
-            double step) {
-        return new SettingsOption<>(id, category, translationKey, ValueKind.DOUBLE,
-                value::get, value::set,
-                candidate -> Math.clamp(candidate, minimum, maximum),
-                minimum, maximum, step, List.of());
-    }
-
-    static <E extends Enum<E>> SettingsOption<E> enumOption(
-            String id,
-            Category category,
-            String translationKey,
-            ModConfigSpec.EnumValue<E> value,
-            E[] choices) {
-        List<E> allowed = List.of(choices);
-        return new SettingsOption<>(id, category, translationKey, ValueKind.ENUM,
-                value::get, value::set,
-                candidate -> allowed.contains(candidate) ? candidate : value.get(),
-                0.0D, Math.max(0, choices.length - 1), 1.0D, allowed);
     }
 
     public enum Category {

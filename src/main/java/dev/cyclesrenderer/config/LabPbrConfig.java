@@ -83,27 +83,27 @@ final class LabPbrConfig {
     }
 
     void appendOptions(List<SettingsOption<?>> options) {
-        options.add(CyclesClientConfig.doubleOption(
+        options.add(SettingsCatalog.doubleOption(
                 "materials.wetness", CyclesClientConfig.Category.MATERIALS,
                 "config.cyclesrenderer.materials.wetness", wetness,
                 0.0D, 1.0D, 0.01D));
-        options.add(CyclesClientConfig.doubleOption(
+        options.add(SettingsCatalog.doubleOption(
                 "materials.subsurfaceScale", CyclesClientConfig.Category.MATERIALS,
                 "config.cyclesrenderer.materials.subsurfaceScale", subsurfaceScale,
                 0.0D, 1.0D, 0.001D));
-        options.add(CyclesClientConfig.doubleOption(
+        options.add(SettingsCatalog.doubleOption(
                 "materials.heightStrength", CyclesClientConfig.Category.MATERIALS,
                 "config.cyclesrenderer.materials.heightStrength", heightStrength,
                 0.0D, 4.0D, 0.05D));
-        options.add(CyclesClientConfig.doubleOption(
+        options.add(SettingsCatalog.doubleOption(
                 "materials.heightDistance", CyclesClientConfig.Category.MATERIALS,
                 "config.cyclesrenderer.materials.heightDistance", heightDistance,
                 0.0D, 1.0D, 0.005D));
-        options.add(CyclesClientConfig.enumOption(
+        options.add(SettingsCatalog.enumOption(
                 "materials.heightMappingMode", CyclesClientConfig.Category.MATERIALS,
                 "config.cyclesrenderer.materials.heightMappingMode", heightMappingMode,
                 CyclesRenderSettings.HeightMappingMode.values()));
-        options.add(CyclesClientConfig.intOption(
+        options.add(SettingsCatalog.intOption(
                 "materials.parallaxSteps", CyclesClientConfig.Category.MATERIALS,
                 "config.cyclesrenderer.materials.parallaxSteps", parallaxSteps,
                 4, 64, 1));
