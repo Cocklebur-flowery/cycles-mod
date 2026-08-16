@@ -2,6 +2,8 @@ package dev.cyclesrenderer.nativebridge;
 
 import dev.cyclesrenderer.config.CameraAutomationSettings;
 import dev.cyclesrenderer.config.CyclesRenderSettings;
+import dev.cyclesrenderer.scene.SectionGeometrySnapshot;
+import net.minecraft.resources.Identifier;
 import org.junit.jupiter.api.Test;
 
 import java.lang.foreign.Arena;
@@ -25,6 +27,7 @@ import java.util.List;
 import static java.lang.foreign.ValueLayout.JAVA_BYTE;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 class NativeBridgeContractTest {
     private static final String EXPECTED_PUBLIC_SURFACE_SHA256 =
@@ -35,6 +38,10 @@ class NativeBridgeContractTest {
             "082938fc97164a89f40200d9b639ec2b745f84da286d0a11294878d117193101";
     private static final String EXPECTED_SETTINGS_BYTES_SHA256 =
             "5fe2085228a3b850f95ce957d70ac2a6a64544fb53d3a072ef6ab8e6fc52f4d8";
+    private static final String EXPECTED_SCENE_RESOURCES_BYTES_SHA256 =
+            "628596f41db25d96af6ed23724770cf710433ee98b90e7c0a2aad69a086ad9c8";
+    private static final String EXPECTED_SECTION_BYTES_SHA256 =
+            "529c0c70873dfad6f97f474c7ec510e769e3c232b9e1a063d1e49623ce0f3128";
 
     @Test
     void publicFacadeRemainsStable() throws IllegalAccessException {
@@ -90,6 +97,69 @@ class NativeBridgeContractTest {
             String fingerprint = sha256(target.toArray(JAVA_BYTE));
             assertEquals(EXPECTED_SETTINGS_BYTES_SHA256, fingerprint,
                     "Native settings wire bytes changed: " + fingerprint);
+        }
+    }
+
+    @Test
+    void nativeSceneResourcesMarshallerPreservesWireBytes() {
+        try (Arena arena = Arena.ofConfined()) {
+            NativeSceneMarshaller.SceneResourcesSegments segments =
+                    NativeSceneMarshaller.writeResources(arena, 1, sampleSceneResources());
+            String fingerprint = sha256(concatenate(
+                    segments.resources(),
+                    segments.materials(),
+                    segments.textureDescriptors(),
+                    segments.texturePixels()));
+            assertEquals(EXPECTED_SCENE_RESOURCES_BYTES_SHA256, fingerprint,
+                    "Native scene-resource wire bytes changed: " + fingerprint);
+        }
+    }
+
+    @Test
+    void nativeSectionMarshallerPreservesWireBytes() {
+        try (Arena arena = Arena.ofConfined()) {
+            NativeSceneMarshaller.SectionSegments segments =
+                    NativeSceneMarshaller.writeSection(arena, 1, sampleSection());
+            String fingerprint = sha256(concatenate(
+                    segments.section(), segments.vertices(), segments.triangles()));
+            assertEquals(EXPECTED_SECTION_BYTES_SHA256, fingerprint,
+                    "Native section wire bytes changed: " + fingerprint);
+        }
+    }
+
+    @Test
+    void nativeSceneMarshallerPreservesValidationErrors() {
+        try (Arena arena = Arena.ofConfined()) {
+            IllegalArgumentException emptyResources = assertThrows(
+                    IllegalArgumentException.class,
+                    () -> NativeSceneMarshaller.writeResources(
+                            arena,
+                            1,
+                            new SectionGeometrySnapshot.SceneResources(
+                                    0,
+                                    0,
+                                    0,
+                                    new SectionGeometrySnapshot.MaterialData[0],
+                                    new SectionGeometrySnapshot.TextureData[0])));
+            assertEquals("scene resources cannot be empty", emptyResources.getMessage());
+
+            SectionGeometrySnapshot valid = sampleSection();
+            SectionGeometrySnapshot invalid = new SectionGeometrySnapshot(
+                    valid.sectionNode(),
+                    valid.originX(),
+                    valid.originY(),
+                    valid.originZ(),
+                    new float[] {1.0f},
+                    valid.vertexColors(),
+                    valid.triangleData(),
+                    valid.quadCount(),
+                    valid.sequence());
+            IllegalArgumentException invalidGeometry = assertThrows(
+                    IllegalArgumentException.class,
+                    () -> NativeSceneMarshaller.writeSection(arena, 1, invalid));
+            assertEquals(
+                    "section geometry array length mismatch",
+                    invalidGeometry.getMessage());
         }
     }
 
@@ -195,6 +265,77 @@ class NativeBridgeContractTest {
         Constructor<CyclesRenderSettings> constructor =
                 CyclesRenderSettings.class.getDeclaredConstructor(parameterTypes);
         return constructor.newInstance(arguments);
+    }
+
+    private static SectionGeometrySnapshot.SceneResources sampleSceneResources() {
+        SectionGeometrySnapshot.TextureData[] textures = {
+                texture("color", new byte[] {1, 2, 3, 4},
+                        SectionGeometrySnapshot.TEXTURE_ROLE_COLOR_SRGB),
+                texture("normal", new byte[] {5, 6, 7, 8},
+                        SectionGeometrySnapshot.TEXTURE_ROLE_DATA_LINEAR),
+                texture("material", new byte[] {9, 10, 11, 12},
+                        SectionGeometrySnapshot.TEXTURE_ROLE_DATA_LINEAR),
+                texture("auxiliary", new byte[] {13, 14, 15, 16},
+                        SectionGeometrySnapshot.TEXTURE_ROLE_DATA_LINEAR)
+        };
+        SectionGeometrySnapshot.MaterialData[] materials = {
+                new SectionGeometrySnapshot.MaterialData(
+                        0,
+                        SectionGeometrySnapshot.MATERIAL_FLAG_CUTOUT
+                                | SectionGeometrySnapshot.MATERIAL_FLAG_TRANSMISSION,
+                        2.5f,
+                        0.25f,
+                        1,
+                        2,
+                        SectionGeometrySnapshot.PBR_FORMAT_LAB_1_3,
+                        3)
+        };
+        return new SectionGeometrySnapshot.SceneResources(
+                11, -22, 33, materials, textures);
+    }
+
+    private static SectionGeometrySnapshot.TextureData texture(
+            String path,
+            byte[] pixels,
+            int role) {
+        return new SectionGeometrySnapshot.TextureData(
+                Identifier.fromNamespaceAndPath("cyclesrenderer", path),
+                1,
+                1,
+                pixels,
+                role);
+    }
+
+    private static SectionGeometrySnapshot sampleSection() {
+        float[] vertices = new float[3 * SectionGeometrySnapshot.VERTEX_FLOAT_STRIDE];
+        for (int index = 0; index < vertices.length; index++) {
+            vertices[index] = index + 0.25f;
+        }
+        return new SectionGeometrySnapshot(
+                0x0102030405060708L,
+                -17,
+                34,
+                -51,
+                vertices,
+                new int[] {0x10203040, 0x50607080, 0x90a0b0c0},
+                new int[] {0, 1, 2, SectionGeometrySnapshot.MATERIAL_GLASS},
+                1,
+                99L);
+    }
+
+    private static byte[] concatenate(MemorySegment... segments) {
+        int length = 0;
+        for (MemorySegment segment : segments) {
+            length = Math.addExact(length, Math.toIntExact(segment.byteSize()));
+        }
+        byte[] result = new byte[length];
+        int offset = 0;
+        for (MemorySegment segment : segments) {
+            byte[] bytes = segment.toArray(JAVA_BYTE);
+            System.arraycopy(bytes, 0, result, offset, bytes.length);
+            offset += bytes.length;
+        }
+        return result;
     }
 
     private static String fingerprint(List<String> lines) {
