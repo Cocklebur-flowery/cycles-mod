@@ -1,10 +1,14 @@
 package dev.cyclesrenderer.nativebridge;
 
+import dev.cyclesrenderer.config.CameraAutomationSettings;
+import dev.cyclesrenderer.config.CyclesRenderSettings;
 import org.junit.jupiter.api.Test;
 
+import java.lang.foreign.Arena;
 import java.lang.foreign.GroupLayout;
 import java.lang.foreign.MemoryLayout;
 import java.lang.foreign.MemoryLayout.PathElement;
+import java.lang.foreign.MemorySegment;
 import java.lang.reflect.Constructor;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
@@ -18,6 +22,7 @@ import java.util.Comparator;
 import java.util.HexFormat;
 import java.util.List;
 
+import static java.lang.foreign.ValueLayout.JAVA_BYTE;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 
@@ -28,6 +33,8 @@ class NativeBridgeContractTest {
             "d578c93283f841b1f794e406c537094858e397ebed6d9e520654dcda0b97a16f";
     private static final String EXPECTED_SYMBOL_TABLE_SHA256 =
             "082938fc97164a89f40200d9b639ec2b745f84da286d0a11294878d117193101";
+    private static final String EXPECTED_SETTINGS_BYTES_SHA256 =
+            "5fe2085228a3b850f95ce957d70ac2a6a64544fb53d3a072ef6ab8e6fc52f4d8";
 
     @Test
     void publicFacadeRemainsStable() throws IllegalAccessException {
@@ -71,6 +78,19 @@ class NativeBridgeContractTest {
         String fingerprint = fingerprint(symbols);
         assertEquals(EXPECTED_SYMBOL_TABLE_SHA256, fingerprint,
                 "NativeBridge symbol table changed: " + fingerprint);
+    }
+
+    @Test
+    void nativeSettingsMarshallerPreservesWireBytes() throws ReflectiveOperationException {
+        try (Arena arena = Arena.ofConfined()) {
+            MemorySegment target = arena.allocate(NativeLayouts.SETTINGS_LAYOUT);
+            target.fill((byte) 0x5a);
+            NativeSettingsMarshaller.write(target, 1, sampleSettings());
+
+            String fingerprint = sha256(target.toArray(JAVA_BYTE));
+            assertEquals(EXPECTED_SETTINGS_BYTES_SHA256, fingerprint,
+                    "Native settings wire bytes changed: " + fingerprint);
+        }
     }
 
     private static List<String> publicSurfaceLines() throws IllegalAccessException {
@@ -148,11 +168,44 @@ class NativeBridgeContractTest {
         return type.isArray() ? typeName(type.componentType()) + "[]" : type.getName();
     }
 
+    private static CyclesRenderSettings sampleSettings() throws ReflectiveOperationException {
+        RecordComponent[] components = CyclesRenderSettings.class.getRecordComponents();
+        Class<?>[] parameterTypes = new Class<?>[components.length];
+        Object[] arguments = new Object[components.length];
+        for (int index = 0; index < components.length; index++) {
+            Class<?> type = components[index].getType();
+            parameterTypes[index] = type;
+            if (type == long.class) {
+                arguments[index] = 0x0102030405060708L;
+            } else if (type == int.class) {
+                arguments[index] = 1000 + index;
+            } else if (type == float.class) {
+                arguments[index] = index + 0.25f;
+            } else if (type == boolean.class) {
+                arguments[index] = (index & 1) == 0;
+            } else if (type.isEnum()) {
+                Object[] constants = type.getEnumConstants();
+                arguments[index] = constants[index % constants.length];
+            } else if (type == CameraAutomationSettings.class) {
+                arguments[index] = null;
+            } else {
+                throw new AssertionError("unsupported settings component " + type.getName());
+            }
+        }
+        Constructor<CyclesRenderSettings> constructor =
+                CyclesRenderSettings.class.getDeclaredConstructor(parameterTypes);
+        return constructor.newInstance(arguments);
+    }
+
     private static String fingerprint(List<String> lines) {
         String canonical = String.join("\n", lines) + "\n";
+        return sha256(canonical.getBytes(StandardCharsets.UTF_8));
+    }
+
+    private static String sha256(byte[] bytes) {
         try {
             byte[] digest = MessageDigest.getInstance("SHA-256")
-                    .digest(canonical.getBytes(StandardCharsets.UTF_8));
+                    .digest(bytes);
             return HexFormat.of().formatHex(digest);
         } catch (NoSuchAlgorithmException exception) {
             throw new AssertionError("SHA-256 unavailable", exception);
