@@ -1,0 +1,195 @@
+name: Performance Report
+description: Report an observed or measured renderer performance problem
+title: "perf(scope): "
+labels:
+  - "type:performance"
+  - "status:needs-triage"
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Initial reports may describe a measured regression or a repeatable subjective stall. Maintainers will require a controlled baseline before promoting the Issue into managed performance work. Do not prescribe an optimization in the Issue.
+
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: Describe the performance problem and affected workflow in one concise paragraph.
+    validations:
+      required: true
+
+  - type: textarea
+    id: current-measurement
+    attributes:
+      label: Current measurement
+      description: Record the observed metric and unit. If no measurement exists yet, state the repeatable subjective observation explicitly.
+    validations:
+      required: true
+
+  - type: textarea
+    id: baseline-measurement
+    attributes:
+      label: Baseline measurement
+      description: Record the comparable known-good value, or explain why a controlled baseline is not yet available.
+
+  - type: textarea
+    id: measurement-method
+    attributes:
+      label: Measurement method
+      description: Describe the metric, sample count or window, capture method, and controls used for comparison.
+
+  - type: textarea
+    id: workload
+    attributes:
+      label: Workload
+      description: Describe the scene, actions, resolution, settings, and steady-state or transition being measured.
+    validations:
+      required: true
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Fill known values. Unknown values are acceptable during intake.
+      value: |
+        Commit:
+        Working tree / artifact identity:
+        Minecraft:
+        NeoForge:
+        ABI:
+        GPU / driver:
+        OS:
+        Resolution:
+        Relevant configuration:
+    validations:
+      required: true
+
+  - type: dropdown
+    id: variant
+    attributes:
+      label: Variant
+      options:
+        - default
+        - experimental-dlss
+        - unknown
+
+  - type: dropdown
+    id: render-device
+    attributes:
+      label: Render device
+      options:
+        - optix
+        - cuda
+        - cpu
+        - unknown
+
+  - type: dropdown
+    id: presentation-path
+    attributes:
+      label: Presentation path
+      options:
+        - vulkan-interop
+        - cpu-upload
+        - unknown
+
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Evidence
+      description: Attach traces, telemetry windows, screenshots, logs, or repository-relative benchmark output.
+
+  - type: textarea
+    id: impact
+    attributes:
+      label: Impact
+      description: Describe affected latency, frame time, throughput, CPU/GPU synchronization, memory, or workflow frequency.
+
+  - type: textarea
+    id: semantic-invariants
+    attributes:
+      label: Semantic invariants
+      description: State the visual, sample, latency, resolution, memory, or lifecycle behavior that a performance change must preserve.
+
+  - type: textarea
+    id: failed-attempts
+    attributes:
+      label: Failed attempts
+      description: Record attempted optimizations and measurement experiments so future work does not repeat them.
+      value: |
+        None recorded.
+
+  - type: textarea
+    id: workaround
+    attributes:
+      label: Workaround
+      description: Record a workaround, reliability, and lost capability. Write "None known." when unavailable.
+
+  - type: textarea
+    id: resolution-criteria
+    attributes:
+      label: Resolution criteria
+      description: For managed work, define comparable measurements and semantic checks required before closure.
+      placeholder: |
+        - [ ] ...
+        - [ ] ...
+
+  - type: textarea
+    id: deferred-context
+    attributes:
+      label: Deferred context
+      value: |
+        Deferred reason:
+        Last evaluated:
+        Resume trigger:
+
+  - type: textarea
+    id: related
+    attributes:
+      label: Related
+      description: Link related Issues, Stages or ADRs, commits, pull requests, tests, traces, and documentation.
+
+  - type: checkboxes
+    id: submission-checks
+    attributes:
+      label: Submission checks
+      options:
+        - label: I searched for an existing duplicate Issue.
+          required: true
+        - label: I did not claim a percentage improvement or regression without a comparable baseline.
+          required: true
+
+  - type: textarea
+    id: chinese-overview
+    attributes:
+      label: 中文概要
+      description: Managed Issues end with a short Chinese context-recovery overview. It is not a translation or engineering fact authority.
+      value: |
+        > 本节用于快速理解和上下文恢复，不是工程事实的规范来源。
+        > 如与上方英文正文存在差异，以英文正文为准。
+
+        #### 问题
+
+        用 2～4 句话说明这个 Issue 到底出了什么问题。
+
+        #### 当前结论
+
+        - 已确认：
+        - 尚未确认：
+        - 当前状态：
+
+        #### 已失败 / 无效方向
+
+        - A1：
+        - A2：
+        - A3：
+
+        #### 当前规避方案
+
+        ...
+
+        #### 以后重新处理时先看
+
+        - 最重要的证据：
+        - 不要重复尝试：
+        - 恢复工作的触发条件：
+        - 关闭前必须验证：

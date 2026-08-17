@@ -1,0 +1,159 @@
+name: Engineering Investigation
+description: Track a bounded unknown that is not yet a confirmed bug or performance regression
+title: "investigation(scope): "
+labels:
+  - "type:investigation"
+  - "status:needs-triage"
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this form for a bounded engineering unknown. It is not a way to avoid recording reproduction evidence for a known bug. Keep confirmed facts separate from hypotheses and define what outcome ends the investigation.
+
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: Summarize the bounded unknown and affected engineering boundary.
+    validations:
+      required: true
+
+  - type: textarea
+    id: investigation-question
+    attributes:
+      label: Investigation question
+      description: State the single question this Issue exists to answer.
+    validations:
+      required: true
+
+  - type: textarea
+    id: why-this-matters
+    attributes:
+      label: Why this matters
+      description: Explain which decision, contract, failure, or measurement remains blocked by this unknown.
+    validations:
+      required: true
+
+  - type: textarea
+    id: confirmed-facts
+    attributes:
+      label: Confirmed facts
+      description: Record only facts supported by source inspection, runtime evidence, or repeatable tests.
+    validations:
+      required: true
+
+  - type: textarea
+    id: unknowns
+    attributes:
+      label: Unknowns
+      description: List what evidence or contract is still missing. Do not present guesses as facts.
+    validations:
+      required: true
+
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Evidence
+      description: Add runtime evidence, source entry points, tests, traces, logs, or authoritative documents.
+
+  - type: textarea
+    id: confirmed-boundaries
+    attributes:
+      label: Confirmed boundaries
+      description: Record tested scope, exclusions supported by evidence, and areas not evaluated.
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: For runtime investigations, record the build and device environment. Otherwise write "Not applicable — reason".
+      value: |
+        Commit:
+        Working tree / artifact identity:
+        Minecraft:
+        NeoForge:
+        ABI:
+        GPU / driver:
+        OS:
+        Resolution:
+        Relevant configuration:
+
+  - type: textarea
+    id: failed-attempts
+    attributes:
+      label: Failed attempts
+      description: Record disproven hypotheses and inconclusive experiments so later work does not repeat them.
+      value: |
+        None recorded.
+
+  - type: textarea
+    id: exit-criteria
+    attributes:
+      label: Exit criteria
+      description: State how the investigation ends, such as conversion to a Bug or Performance Issue, an accepted ADR, a disproven concern, or a named external block.
+      placeholder: |
+        - [ ] ...
+        - [ ] ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: deferred-context
+    attributes:
+      label: Deferred context
+      value: |
+        Deferred reason:
+        Last evaluated:
+        Resume trigger:
+
+  - type: textarea
+    id: related
+    attributes:
+      label: Related
+      description: Link related Issues, Stages or ADRs, commits, pull requests, tests, and documentation.
+
+  - type: checkboxes
+    id: submission-checks
+    attributes:
+      label: Submission checks
+      options:
+        - label: I searched for an existing duplicate Issue.
+          required: true
+        - label: I separated confirmed facts from hypotheses and unknowns.
+          required: true
+
+  - type: textarea
+    id: chinese-overview
+    attributes:
+      label: 中文概要
+      description: Managed Issues end with a short Chinese context-recovery overview. It is not a translation or engineering fact authority.
+      value: |
+        > 本节用于快速理解和上下文恢复，不是工程事实的规范来源。
+        > 如与上方英文正文存在差异，以英文正文为准。
+
+        #### 问题
+
+        用 2～4 句话说明这个 Issue 到底出了什么问题。
+
+        #### 当前结论
+
+        - 已确认：
+        - 尚未确认：
+        - 当前状态：
+
+        #### 已失败 / 无效方向
+
+        - A1：
+        - A2：
+        - A3：
+
+        #### 当前规避方案
+
+        ...
+
+        #### 以后重新处理时先看
+
+        - 最重要的证据：
+        - 不要重复尝试：
+        - 恢复工作的触发条件：
+        - 关闭前必须验证：

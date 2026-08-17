@@ -1,0 +1,229 @@
+name: Bug Report
+description: Report an observed renderer defect
+title: "bug(scope): "
+labels:
+  - "type:bug"
+  - "status:needs-triage"
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for reporting an observed defect. Initial reports only need enough information to understand and reproduce the problem. Internal ABI, lifecycle, and closure details may remain unknown until maintainers promote the Issue into the managed engineering lifecycle.
+
+        Record facts separately from hypotheses. Do not prescribe a future implementation in the Issue. Suspected security vulnerabilities must use a confirmed private reporting route instead of this public form.
+
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: Describe the observed defect and affected workflow in one concise paragraph.
+    validations:
+      required: true
+
+  - type: textarea
+    id: current-behavior
+    attributes:
+      label: Current behavior
+      description: Describe what currently happens. Record observable facts without assuming a root cause.
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected-behavior
+    attributes:
+      label: Expected behavior
+      description: Describe the observable correct result without prescribing an implementation.
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction
+      description: Provide the minimum known reproduction procedure. Write what is unknown when the procedure is incomplete.
+      placeholder: |
+        1. ...
+        2. ...
+        3. ...
+    validations:
+      required: true
+
+  - type: dropdown
+    id: reproducibility
+    attributes:
+      label: Reproducibility
+      description: Select the closest currently observed reproduction rate.
+      options:
+        - Always
+        - Intermittent
+        - Not reliably reproducible
+        - Unknown
+    validations:
+      required: true
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Fill known values. Unknown values are acceptable during intake.
+      value: |
+        Commit:
+        Working tree / artifact identity:
+        Minecraft:
+        NeoForge:
+        ABI:
+        GPU / driver:
+        OS:
+        Resolution:
+        Relevant configuration:
+
+  - type: dropdown
+    id: variant
+    attributes:
+      label: Variant
+      options:
+        - default
+        - experimental-dlss
+        - unknown
+
+  - type: dropdown
+    id: render-device
+    attributes:
+      label: Render device
+      options:
+        - optix
+        - cuda
+        - cpu
+        - unknown
+
+  - type: dropdown
+    id: presentation-path
+    attributes:
+      label: Presentation path
+      options:
+        - vulkan-interop
+        - cpu-upload
+        - unknown
+
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Evidence
+      description: Add runtime observations, logs, telemetry, screenshots, traces, and relevant entry points or contracts. Do not dump unrelated logs or propose file changes.
+
+  - type: textarea
+    id: impact
+    attributes:
+      label: Impact
+      description: Describe correctness, stability, performance, visual-output, or investigation impact. Do not write only "important".
+
+  - type: textarea
+    id: confirmed-boundaries
+    attributes:
+      label: Confirmed boundaries
+      description: Separate conditions that reproduce, conditions actually tested without reproduction, and conditions not evaluated.
+      value: |
+        Reproduces with:
+
+        - ...
+
+        Does not reproduce with:
+
+        - ...
+
+        Not evaluated:
+
+        - ...
+
+  - type: textarea
+    id: investigation-hypotheses
+    attributes:
+      label: Investigation hypotheses
+      description: Optional. Hypotheses are not confirmed facts and must not become a proposed solution.
+      value: |
+        None recorded.
+
+  - type: textarea
+    id: failed-attempts
+    attributes:
+      label: Failed attempts
+      description: Keep attempted fixes and runtime experiments so future developers and AI do not repeat them. Managed Issues require either "None recorded." or the complete A1/A2 ledger format from the Issue convention.
+      value: |
+        None recorded.
+
+  - type: textarea
+    id: workaround
+    attributes:
+      label: Workaround
+      description: Record the current workaround, its reliability, and lost capability. Write "None known." when no workaround exists.
+
+  - type: textarea
+    id: resolution-criteria
+    attributes:
+      label: Resolution criteria
+      description: For managed work, list observable evidence required before the Issue may be closed. Do not prescribe an implementation.
+      placeholder: |
+        - [ ] ...
+        - [ ] ...
+
+  - type: textarea
+    id: deferred-context
+    attributes:
+      label: Deferred context
+      description: Complete only when the Issue is intentionally deferred.
+      value: |
+        Deferred reason:
+        Last evaluated:
+        Resume trigger:
+
+  - type: textarea
+    id: related
+    attributes:
+      label: Related
+      description: Link related Issues, Stages or ADRs, commits, pull requests, regression tests, and authoritative documentation.
+
+  - type: checkboxes
+    id: submission-checks
+    attributes:
+      label: Submission checks
+      options:
+        - label: I searched for an existing duplicate Issue.
+          required: true
+        - label: I separated confirmed observations from hypotheses.
+          required: true
+
+  - type: textarea
+    id: chinese-overview
+    attributes:
+      label: 中文概要
+      description: Managed Issues end with a short Chinese context-recovery overview. It is not a translation or engineering fact authority.
+      value: |
+        > 本节用于快速理解和上下文恢复，不是工程事实的规范来源。
+        > 如与上方英文正文存在差异，以英文正文为准。
+
+        #### 问题
+
+        用 2～4 句话说明这个 Issue 到底出了什么问题。
+
+        #### 当前结论
+
+        - 已确认：
+        - 尚未确认：
+        - 当前状态：
+
+        #### 已失败 / 无效方向
+
+        - A1：
+        - A2：
+        - A3：
+
+        #### 当前规避方案
+
+        ...
+
+        #### 以后重新处理时先看
+
+        - 最重要的证据：
+        - 不要重复尝试：
+        - 恢复工作的触发条件：
+        - 关闭前必须验证：
