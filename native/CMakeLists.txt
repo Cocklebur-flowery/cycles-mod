@@ -275,9 +275,15 @@ foreach(smoke_suite IN LISTS CYCLESRENDERER_SMOKE_SUITES)
         PROPERTIES
             RUN_SERIAL TRUE
             SKIP_RETURN_CODE 77
+            TIMEOUT 180
     )
 endforeach()
 add_test(
     NAME cyclesrenderer_scene_update
     COMMAND cyclesrenderer_scene_update_test
+)
+set_tests_properties(
+    cyclesrenderer_scene_update
+    PROPERTIES
+        TIMEOUT 60
 )

@@ -6,6 +6,7 @@ import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.renderer.texture.TextureAtlas;
 import net.minecraft.client.renderer.texture.TextureAtlasSprite;
 import net.minecraft.core.SectionPos;
+import net.minecraft.data.AtlasIds;
 import net.minecraft.resources.Identifier;
 import net.minecraft.server.level.ChunkTrackingView;
 import net.minecraft.util.Mth;
@@ -437,10 +438,7 @@ public final class SectionSceneManager {
             int originY,
             int originZ,
             CyclesRenderSettings settings) {
-        Object texture = minecraft.getTextureManager().getTexture(TextureAtlas.LOCATION_BLOCKS);
-        if (!(texture instanceof TextureAtlas atlas)) {
-            throw new IllegalStateException("Minecraft block texture is not a TextureAtlas");
-        }
+        TextureAtlas atlas = minecraft.getAtlasManager().getAtlasOrThrow(AtlasIds.BLOCKS);
         Map<Identifier, TextureAtlasSprite> sprites = atlas.getTextures();
         if (sprites.isEmpty()) {
             throw new IllegalStateException("Minecraft block texture atlas has no sprites");
@@ -480,7 +478,13 @@ public final class SectionSceneManager {
                 settings.pbrFallbackF0());
         byte[] pixels = SectionSceneResourceBuilder.copyRgba(atlasLayout, spriteInputs);
         return SectionSceneResourceBuilder.build(
-                originX, originY, originZ, atlasLayout, pixels, pbrAtlases);
+                originX,
+                originY,
+                originZ,
+                atlas.location(),
+                atlasLayout,
+                pixels,
+                pbrAtlases);
     }
 
     public record UpdateResult(

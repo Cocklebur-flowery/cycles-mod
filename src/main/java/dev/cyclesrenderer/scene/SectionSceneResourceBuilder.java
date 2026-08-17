@@ -1,6 +1,5 @@
 package dev.cyclesrenderer.scene;
 
-import net.minecraft.client.renderer.texture.TextureAtlas;
 import net.minecraft.resources.Identifier;
 import net.minecraft.util.ARGB;
 
@@ -73,6 +72,7 @@ final class SectionSceneResourceBuilder {
             int originX,
             int originY,
             int originZ,
+            Identifier colorAtlas,
             AtlasLayout layout,
             byte[] colorPixels,
             LabPbrAtlasBuilder.Atlases pbrAtlases) {
@@ -96,8 +96,8 @@ final class SectionSceneResourceBuilder {
                 auxiliaryTextureIndex,
                 pbrFormat);
         SectionGeometrySnapshot.TextureData[] textures = hasPbrAtlases
-                ? pbrTextures(layout, colorPixels, pbrAtlases)
-                : colorTextures(layout, colorPixels);
+                ? pbrTextures(colorAtlas, layout, colorPixels, pbrAtlases)
+                : colorTextures(colorAtlas, layout, colorPixels);
         return new SectionGeometrySnapshot.SceneResources(
                 originX, originY, originZ, materials, textures);
     }
@@ -154,11 +154,12 @@ final class SectionSceneResourceBuilder {
     }
 
     private static SectionGeometrySnapshot.TextureData[] colorTextures(
+            Identifier colorAtlas,
             AtlasLayout layout,
             byte[] colorPixels) {
         return new SectionGeometrySnapshot.TextureData[] {
             texture(
-                    TextureAtlas.LOCATION_BLOCKS,
+                    colorAtlas,
                     layout,
                     colorPixels,
                     SectionGeometrySnapshot.TEXTURE_ROLE_COLOR_SRGB)
@@ -166,12 +167,13 @@ final class SectionSceneResourceBuilder {
     }
 
     private static SectionGeometrySnapshot.TextureData[] pbrTextures(
+            Identifier colorAtlas,
             AtlasLayout layout,
             byte[] colorPixels,
             LabPbrAtlasBuilder.Atlases pbrAtlases) {
         return new SectionGeometrySnapshot.TextureData[] {
             texture(
-                    TextureAtlas.LOCATION_BLOCKS,
+                    colorAtlas,
                     layout,
                     colorPixels,
                     SectionGeometrySnapshot.TEXTURE_ROLE_COLOR_SRGB),

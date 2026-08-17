@@ -1,6 +1,5 @@
 package dev.cyclesrenderer.scene;
 
-import net.minecraft.client.renderer.texture.TextureAtlas;
 import net.minecraft.resources.Identifier;
 import org.junit.jupiter.api.Test;
 
@@ -12,6 +11,9 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 final class SectionSceneResourceBuilderTest {
+    private static final Identifier BLOCK_ATLAS =
+            Identifier.withDefaultNamespace("textures/atlas/blocks.png");
+
     @Test
     void measuresAtlasAndCopiesArgbPixelsAsRgba() {
         List<SectionSceneResourceBuilder.SpriteInput> sprites = List.of(
@@ -56,7 +58,13 @@ final class SectionSceneResourceBuilderTest {
 
         SectionGeometrySnapshot.SceneResources resources =
                 SectionSceneResourceBuilder.build(
-                        256, -256, 512, layout, colors, LabPbrAtlasBuilder.empty());
+                        256,
+                        -256,
+                        512,
+                        BLOCK_ATLAS,
+                        layout,
+                        colors,
+                        LabPbrAtlasBuilder.empty());
 
         assertEquals(256, resources.originX());
         assertEquals(-256, resources.originY());
@@ -68,7 +76,7 @@ final class SectionSceneResourceBuilderTest {
         assertEquals(1, resources.textures().length);
         assertTexture(
                 resources.textures()[0],
-                TextureAtlas.LOCATION_BLOCKS,
+                BLOCK_ATLAS,
                 2,
                 1,
                 colors,
@@ -87,12 +95,13 @@ final class SectionSceneResourceBuilderTest {
                 1, 1, normals, materials, auxiliary, 0, 0, 0, 0);
 
         SectionGeometrySnapshot.SceneResources resources =
-                SectionSceneResourceBuilder.build(0, 0, 0, layout, colors, pbr);
+                SectionSceneResourceBuilder.build(
+                        0, 0, 0, BLOCK_ATLAS, layout, colors, pbr);
 
         assertMaterialDescriptors(
                 resources.materials(), 1, SectionGeometrySnapshot.PBR_FORMAT_LAB_1_3);
         assertEquals(4, resources.textures().length);
-        assertTexture(resources.textures()[0], TextureAtlas.LOCATION_BLOCKS,
+        assertTexture(resources.textures()[0], BLOCK_ATLAS,
                 1, 1, colors, SectionGeometrySnapshot.TEXTURE_ROLE_COLOR_SRGB);
         assertTexture(resources.textures()[1], id("blocks_normal"),
                 1, 1, normals, SectionGeometrySnapshot.TEXTURE_ROLE_DATA_LINEAR);
@@ -110,7 +119,8 @@ final class SectionSceneResourceBuilderTest {
                 1, 1, new byte[4], new byte[4], new byte[4], 0, 0, 0, 0);
 
         SectionGeometrySnapshot.SceneResources resources =
-                SectionSceneResourceBuilder.build(0, 0, 0, layout, new byte[8], mismatched);
+                SectionSceneResourceBuilder.build(
+                        0, 0, 0, BLOCK_ATLAS, layout, new byte[8], mismatched);
 
         assertEquals(1, resources.textures().length);
         assertMaterialDescriptors(

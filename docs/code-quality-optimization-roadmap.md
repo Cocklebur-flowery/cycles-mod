@@ -1,6 +1,6 @@
 # Cycles Renderer 代码级质量优化路线图
 
-状态：`Q0 / Q0C / Q1 / Q2 / Q3 / Q4a / Q4b / Q4c DONE`（2026-08-17）
+状态：`Q0 / Q0C / Q1 / Q2 / Q3 / Q4a / Q4b / Q4c / Q5 DONE`（2026-08-17）
 
 检查基线：`019d7ec`
 
@@ -214,6 +214,28 @@ focused suite 5/5 通过；`compileJava test jar --rerun-tasks` 执行 10 个 ta
 执行通过，没有绕过编译门禁。生产与测试编译仍报告 deprecation 概要，具体 owner 留给
 Q5 使用 `-Xlint:deprecation` 定位；逐阶段 Minecraft atlas/PBR 抽查合并到 V0。
 
+### 4.10 Q5 编译警告与双变体门禁可靠性
+
+Q5 为所有 Java 编译启用 `-Xlint:deprecation`。精确诊断只定位到已弃用的
+`TextureAtlas.LOCATION_BLOCKS`：生产代码改为通过 `AtlasIds.BLOCKS` 获取 atlas，并把
+atlas 的实际 `Identifier` 显式交给资源 builder；测试使用等价的非弃用 ID。材质索引、
+纹理角色、像素内容和 native payload 未改变。Gradle publishing repository 同时改用
+Gradle 10 兼容的赋值语法，`--warning-mode all` 下项目 Java 与 Gradle 脚本不再产生上述
+两类警告。
+
+每个 smoke suite 增加 180 秒 CTest 上限，scene-update 增加 60 秒上限。生成的 default
+与 DLSS `CTestTestfile.cmake` 均包含这些 timeout，因此 Q4b 遇到的无输出无限等待会被
+明确判为失败，而不是依赖人工终止。timeout 只限制测试进程，不改变产品 native
+运行时、测试断言或 suite 顺序。
+
+仓库官方 `run-client.cmd` 固定使用 JDK 17 启动 Gradle，并以 Java 25 toolchain 编译。
+直接调用 `gradlew.bat` 时当前 PATH 指向 JDK 26，Gradle 9.2.1 在重新编译 Groovy 脚本时
+报告 `Unsupported class file major version 70`；这是非官方 launcher 环境不兼容，不以
+修改系统 Java 或升级 Gradle扩大 Q5 范围。改用官方入口后，Java 编译门禁、默认完整
+门禁与 DLSS 完整门禁均通过；两条完整门禁各通过全部 6 个 CTest 域，耗时分别约
+74.37 秒和 82.87 秒。native 构建仍会输出来自 `.deps` 中 Cycles/OpenImageIO 的 MSVC
+第三方警告，Q5 不修改或掩盖第三方源码。逐阶段实机检查继续合并到 V0。
+
 ## 5. 后续阶段顺序
 
 Q0C 依据二次独立复核补齐当前事实同步、测试可靠性和算法前实机基线；后续仍按
@@ -229,7 +251,7 @@ Q0C  Q0 文档与当前工程基线同步                    DONE
   -> Q4a 设置可见性 characterization test         DONE
   -> Q4b geometry decode characterization test    DONE
   -> Q4c scene resource characterization boundary DONE
-  -> Q5  编译警告与双变体门禁可靠性复核           PENDING
+  -> Q5  编译警告与双变体门禁可靠性复核           DONE
   -> V0  算法修改前实机基线                       PENDING
   -> A0  单一算法、单一指标与正确性 oracle 选择    PENDING
   -> A1  经独立确认后的单算法优化                  PENDING
