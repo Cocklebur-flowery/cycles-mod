@@ -1,6 +1,7 @@
 # 2D 异步深度重投影
 
-状态：`2D-R0`～`2D-R6c` 已实现并通过自动门禁；游戏内 R6c 人工复验待执行
+状态：`2D-R0`～`2D-R6c` 已实现并通过自动门禁；2026-08-18 游戏内视觉验收 `FAIL`，后续开发 `DEFERRED`
+问题生命周期：[#1 asynchronous reprojection shakes during camera motion](https://github.com/Cocklebur-flowery/cycles-mod/issues/1)
 设计基线：`337d3bf`
 生产基线：ABI45、单 Cycles Session、Vulkan 三槽原子颜色/深度/metadata interop
 
@@ -231,22 +232,40 @@ GPU pass 时间、显存和 invalid coverage 必须记录，但 R0 不预设未�
 `C:\Users\cang\AppData\Local\Microsoft SDKs` 而失败。`createMinecraftArtifacts` 被排除，原因是
 外部 Java 进程持有 NeoForge patched jar；测试和打包使用已有且可用的 patched artifact。
 
-### 游戏内人工验收：`NOT RUN`
+### 2026-08-18 游戏内人工验收：`FAIL / DEFERRED`
 
-用户已明确由人工启动客户端，因此下列项目不能写成通过：
+人工启动客户端后的视觉证据确认，R6c 已经让重投影在草地等有效深度区域明显生效，
+因此先前“永久 coverage 旁路”不再掩盖实际输出。但相机旋转或移动时出现高频、全画面的
+“地震式”震动，没有形成预期的显示帧运动连续性。该结果是主体视觉验收失败，不能以自动
+门禁、GPU pass 执行或局部边缘破碎替代。
 
-- 默认关闭：F8 首帧、F9 Performance 默认值、无额外深度/目标/pass、画面与关闭基线一致。
-- 开启与运动：转向、步行、横移、跳跃、贴近方块、快速 180°；确认无黑帧和大面积旧像素伪造。
-- F10：requested/actual、source age、相机 revision、source/depth、warp/display 尺寸、coverage、
-  旁路原因和 GPU 时间持续更新。
-- 生命周期：窗口缩放、F8 关闭/重开、world unload、interop rebuild、正常退出和 pending readback 回调。
-- 模式矩阵：Post DoF 开/关；Physical DoF、全景、鱼眼明确旁路；新 generation 到达时无错 slot/旧 metadata。
-- Default 与 experimental DLSS 客户端各跑一次。DLSS RR 的低分辨率深度不会冒充完整尺寸输入，
-  因此尺寸不匹配时应安全旁路，并在 F10 中给出非 actual 状态。
+已执行并确认：
 
-R6c 起安全门使用 90% 的“3×3 邻域后仍不可填充”coverage；快速运动低于该门槛仍整帧旁路。
-在上述人工矩阵完成前，2D 的代码和自动门禁已收口，但不能宣称游戏内视觉/性能验收完成，
-也不能再调整 coverage 门槛或给出性能提升百分比。
+- 重投影在草地和有效深度几何区域可以变为可见实际输出。
+- 相机旋转或移动时，重投影输出出现严重的高频全画面震动。
+- 关闭 Post Depth of Field 后问题仍然存在。
+- 关闭 denoiser 后问题仍然存在。
+- 关闭 `performance.reprojection.enabled` 可以可靠旁路该缺陷，但会失去异步显示帧重投影能力。
+
+已记录的失败或局部有效方向：
+
+- `A1 / bc36e9c`：源尺寸 coverage 修正解决低分辨率永久旁路，使重投影变得可见；没有解决
+  运动稳定性，状态为 `retained-partial`。
+- `A2 / runtime experiment`：同时关闭 Post Depth of Field 和 denoiser 没有改善震动，不能再把
+  两者当作该问题的唯一原因，状态为 `rejected`。
+
+以下矩阵仍为 `NOT RUN`，不能从当前失败或此前自动门禁外推：
+
+- Default 与 experimental DLSS 运行产物的受控对照；本次人工观察没有保存可确认的 Variant 身份。
+- source/current camera、generation、coverage 和显示结果的同步逐帧记录。
+- 缓慢 yaw/pitch/平移、源 generation 切换、快速运动 fallback 的确定性运动稳定性证据。
+- 窗口缩放、F8 关闭/重开、world unload、interop rebuild、pending readback 和正常退出的本缺陷复验。
+- Physical DoF、全景、鱼眼、CPU upload、其他 GPU 和 render device 的边界复验。
+
+R6c 起安全门仍使用 90% 的“3×3 邻域后仍不可填充”coverage；当前证据不授权再次调整门槛，
+也不支持任何性能提升百分比。2D 自动门禁保持既有 `PASS` 记录，但视觉验收明确为 `FAIL`。
+继续试错的工程投入产出比过低，后续工作已转入开放的 `S3 Moderate / DEFERRED` Issue #1；
+恢复条件、Failed attempts、规避方案和关闭标准以该 Issue 的英文正文为准。
 
 ## 10. 停止条件
 
