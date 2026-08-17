@@ -1,6 +1,6 @@
 # Cycles Renderer 代码级质量优化路线图
 
-状态：`Q0 / Q0C / Q1 / Q2 / Q3 / Q4a / Q4b / Q4c / Q5 / V0 DONE`（2026-08-17）
+状态：`Q0 / Q0C / Q1 / Q2 / Q3 / Q4a / Q4b / Q4c / Q5 / V0 / A0 DONE`（2026-08-17）
 
 检查基线：`019d7ec`
 
@@ -246,8 +246,35 @@ resize、动态分辨率、Physical/Post Process/关闭景深切换，以及移�
 截图路径、退出世界和关闭客户端亦未报告异常。
 
 该结论是当前提交基线上的人工集成证据，不替代像素 golden、跨 GPU/驱动矩阵或性能
-基准，也不向尚未执行的 A0/A1 算法工作外推。后续若改变可见算法、采样、材质、降噪、
+基准，也不向后续 A0/A1 算法工作外推。后续若改变可见算法、采样、材质、降噪、
 相机或色彩语义，仍须按对应门禁建立独立数值 oracle 和同场景对照。
+
+### 4.12 A0 单算法、指标与正确性 oracle 选择
+
+A0 只读分析 V0 的 schema 4 遥测，并排除首次全场景建立 revision 后统计 62 次增量
+scene revision。`geometry_update_last_us` 的中位数约 17.4 ms、P95 约 162.6 ms、最大值
+约 364.8 ms，其中 30 次达到 20 ms；对应高值 revision 的 device phase 几乎全部落在
+`mesh_geometry`。这些数据证明下一项算法工作必须位于 native mesh update 热段，但不能
+单独证明其中某一条语句就是全部耗时来源。
+
+A1 唯一候选选为 `realtime_section_mesh.cpp` 的 8-bit sRGB channel decode。当前固定
+Section 网格写入对每个顶点的 RGB 三通道分别执行一次分段函数和 `std::pow`；输入空间
+只有 256 个精确整数值，适合在不改变 color transform、alpha、UNORM rounding、材质或
+网格生命周期的前提下评估只读 lookup。刚完成的 sparse device upload patch、dirty-range
+合并、Section 容量策略、BVH refit、Session reset 和任务调度均明确排除，避免与性能阶段
+重叠或把生命周期变化伪装成局部算法优化。
+
+A1 的唯一主指标是同一 Release 编译器、同一输入序列下每个 decoded RGB vertex 的
+耗时；实现前先保存公式基线，候选必须在重复窗口的中位数上至少快 2 倍，且 steady-state
+不分配内存。`mesh_geometry` 与 scene-to-first-frame 只作为同一 V0 场景的次级集成指标，
+不得用一次噪声样本代替 microbenchmark。
+
+正确性 oracle 分三层：穷举 256 个 channel 值与现有 IEC sRGB 分段公式比较，绝对误差
+不超过 `1e-7`；覆盖阈值两侧、黑白和混合 RGB 的最终 working-space `uchar4`，要求量化
+结果与公式路径逐字节相同且 alpha 不变；最后运行 default/DLSS scene-update、render、
+scene-lifecycle 与完整门禁，保持 frame publication、checksum、Section count、refit、
+rebuild、deactivate 和 slot reuse 契约。任一层失败或性能不足 2 倍即放弃 A1，不放宽
+颜色误差、测试断言或可见画面契约。
 
 ## 5. 后续阶段顺序
 
@@ -266,7 +293,7 @@ Q0C  Q0 文档与当前工程基线同步                    DONE
   -> Q4c scene resource characterization boundary DONE
   -> Q5  编译警告与双变体门禁可靠性复核           DONE
   -> V0  算法修改前实机基线                       DONE
-  -> A0  单一算法、单一指标与正确性 oracle 选择    PENDING
+  -> A0  单一算法、单一指标与正确性 oracle 选择    DONE
   -> A1  经独立确认后的单算法优化                  PENDING
 ```
 
