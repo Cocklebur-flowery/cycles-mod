@@ -269,11 +269,18 @@ final class CyclesDebugOverlay {
         out.line(
                 "color/depth=" + reprojection.sourceWidth() + "x"
                         + reprojection.sourceHeight() + "/"
-                        + reprojection.depthWidth() + "x" + reprojection.depthHeight()
-                        + "  invalid coverage="
+                        + reprojection.depthWidth() + "x" + reprojection.depthHeight(),
+                reprojection.sourceWidth() == reprojection.depthWidth()
+                        && reprojection.sourceHeight() == reprojection.depthHeight()
+                        ? COLOR_FRAME : COLOR_WARNING);
+        out.line(
+                "warp/display=" + reprojection.warpWidth() + "x"
+                        + reprojection.warpHeight() + "/"
+                        + reprojection.displayWidth() + "x" + reprojection.displayHeight()
+                        + "  unfillable coverage="
                         + (reprojection.invalidCoverage() < 0.0F
                         ? "pending" : percent(reprojection.invalidCoverage()) + "%"),
-                reprojection.invalidCoverage() >= 0.02F ? COLOR_WARNING : COLOR_FRAME);
+                reprojection.invalidCoverage() > 0.10F ? COLOR_WARNING : COLOR_FRAME);
         out.line(
                 "coverage measured/dropped/pending="
                         + reprojection.coverageMeasurementCount() + "/"

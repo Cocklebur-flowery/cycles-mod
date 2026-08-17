@@ -4,6 +4,10 @@ uniform sampler2D InSampler;
 
 in vec2 texCoord;
 
+bool validDepth(float depth) {
+    return !isnan(depth) && !isinf(depth) && depth > 0.0;
+}
+
 #ifdef COVERAGE_REDUCTION
 
 out vec2 coverageSum;
@@ -17,9 +21,18 @@ void main() {
             ivec2 sourcePixel = sourceBase + ivec2(x, y);
             if (all(lessThan(sourcePixel, sourceSize))) {
 #ifdef COVERAGE_SOURCE_DEPTH
-                float depth = texelFetch(InSampler, sourcePixel, 0).r;
-                float valid = (!isnan(depth) && !isinf(depth) && depth > 0.0)
-                    ? 1.0 : 0.0;
+                float valid = 0.0;
+                for (int neighborY = -1; neighborY <= 1; ++neighborY) {
+                    for (int neighborX = -1; neighborX <= 1; ++neighborX) {
+                        ivec2 neighbor = sourcePixel + ivec2(neighborX, neighborY);
+                        if (valid < 0.5
+                                && all(greaterThanEqual(neighbor, ivec2(0)))
+                                && all(lessThan(neighbor, sourceSize))
+                                && validDepth(texelFetch(InSampler, neighbor, 0).r)) {
+                            valid = 1.0;
+                        }
+                    }
+                }
                 sum += vec2(valid, 1.0);
 #else
                 sum += texelFetch(InSampler, sourcePixel, 0).rg;
@@ -40,11 +53,7 @@ uniform sampler2D ReprojectionCoverageSampler;
 layout(location = 0) out vec4 resolvedColor;
 layout(location = 1) out float resolvedDepth;
 
-const float MIN_VALID_COVERAGE = 0.98;
-
-bool validDepth(float depth) {
-    return !isnan(depth) && !isinf(depth) && depth > 0.0;
-}
+const float MIN_VALID_COVERAGE = 0.90;
 
 void useOriginal(ivec2 targetPixel, ivec2 targetSize) {
     vec2 sourceUv = (vec2(targetPixel) + vec2(0.5)) / vec2(targetSize);

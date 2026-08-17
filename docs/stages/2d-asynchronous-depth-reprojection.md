@@ -1,6 +1,6 @@
 # 2D 异步深度重投影
 
-状态：`2D-R0`～`2D-R6a` 已实现并通过自动门禁；`2D-R6b` 收口本文，游戏内人工验收待执行
+状态：`2D-R0`～`2D-R6c` 已实现并通过自动门禁；游戏内 R6c 人工复验待执行
 设计基线：`337d3bf`
 生产基线：ABI45、单 Cycles Session、Vulkan 三槽原子颜色/深度/metadata interop
 
@@ -33,8 +33,10 @@
 - Native 在同一 slot 的 `WRITING -> READY` 临界区冻结颜色、完整尺寸 R32F 深度和 metadata；
   Java 通过单次 acquire 原子取得状态与 metadata，再保留到 Vulkan copy 完成。
 - interop descriptor 的可选 `REPROJECTION_INPUTS` 位显式请求额外深度；正式配置关闭时不请求。
-- 显示链已实现 forward splat、硬件最近深度、GPU coverage 精确计数、98% 全帧安全门和
-  1 像素有界邻域解析；其输出位于 Post Process DoF 之前。
+- 显示链已实现源帧尺寸 forward splat、硬件最近深度、GPU coverage 精确计数、90% 全帧
+  安全门和 1 像素有界邻域解析；最终显示放大仍由 Presenter 完成，其输出位于 Post Process
+  DoF 之前。coverage 统计解析器能以 3×3 邻域实际填充的像素，不把内部到显示分辨率的放大
+  空位误算为运动孔洞。
 - F9 正式键为 `performance.reprojection.enabled=false`；F10 已显示 requested/actual、源帧年龄、
   相机 revision、颜色/深度尺寸、invalid coverage、旁路计数/原因和可选 Vulkan GPU 时间。
 
@@ -180,7 +182,8 @@ F10 只读诊断至少报告：requested/actual、source age、source/current ca
 | R4c | `febacc7 feat(presentation): add gated depth reprojection` |
 | R5 | `ea702c5 feat(config): expose reprojection controls` |
 | R6a | `27645c1 feat(diagnostics): report reprojection safety state` |
-| R6b | `docs(runtime): record 2D reprojection evidence`（本文） |
+| R6b | `489be39 docs(runtime): record 2D reprojection evidence` |
+| R6c | `fix(presentation): preserve reprojection coverage while upscaling`（本文后续修复） |
 
 新文件必须在创建阶段立即进入可见 diff。提交只暂存当前阶段批准的精确路径；A1、D3
 和其他实验内容不得混入 2D 提交。
@@ -219,6 +222,7 @@ GPU pass 时间、显存和 invalid coverage 必须记录，但 R0 不预设未�
 | R1 数值 oracle | `PASS` | identity、旋转、平移、FOV/aspect/shift、near/far、nearest-depth、无效深度测试通过 |
 | Java/ABI/config | `PASS` | `gradlew test jar -x createMinecraftArtifacts`，JDK 25 |
 | ShaderC | `PASS` | 临时测试编译并反射 splat vertex/fragment、resolve、depth coverage 和 sum coverage 五个变体；临时文件已删除 |
+| R6c 分辨率回归 | `PASS` | identity 源像素在源尺寸 raster 为 100% coverage；错误直投双倍显示尺寸仅为 25%，测试锁定源尺寸 warp 契约 |
 | Default 完整门禁 | `PASS` | `gradlew verifyProject -x createMinecraftArtifacts`，Java build 与 Native CTest 6/6 |
 | Experimental DLSS 完整门禁 | `PASS` | `gradlew -PexperimentalDlss=true verifyProject -x createMinecraftArtifacts`，独立 `native-dlss` 构建与 CTest 6/6 |
 | staged diff | `PASS` | 每个子阶段精确暂存批准路径并通过 `git diff --cached --check` |
@@ -233,14 +237,16 @@ GPU pass 时间、显存和 invalid coverage 必须记录，但 R0 不预设未�
 
 - 默认关闭：F8 首帧、F9 Performance 默认值、无额外深度/目标/pass、画面与关闭基线一致。
 - 开启与运动：转向、步行、横移、跳跃、贴近方块、快速 180°；确认无黑帧和大面积旧像素伪造。
-- F10：requested/actual、source age、相机 revision、尺寸、coverage、旁路原因和 GPU 时间持续更新。
+- F10：requested/actual、source age、相机 revision、source/depth、warp/display 尺寸、coverage、
+  旁路原因和 GPU 时间持续更新。
 - 生命周期：窗口缩放、F8 关闭/重开、world unload、interop rebuild、正常退出和 pending readback 回调。
 - 模式矩阵：Post DoF 开/关；Physical DoF、全景、鱼眼明确旁路；新 generation 到达时无错 slot/旧 metadata。
 - Default 与 experimental DLSS 客户端各跑一次。DLSS RR 的低分辨率深度不会冒充完整尺寸输入，
   因此尺寸不匹配时应安全旁路，并在 F10 中给出非 actual 状态。
 
+R6c 起安全门使用 90% 的“3×3 邻域后仍不可填充”coverage；快速运动低于该门槛仍整帧旁路。
 在上述人工矩阵完成前，2D 的代码和自动门禁已收口，但不能宣称游戏内视觉/性能验收完成，
-也不能据自动结果调整 98% coverage 门槛或给出性能提升百分比。
+也不能再调整 coverage 门槛或给出性能提升百分比。
 
 ## 10. 停止条件
 

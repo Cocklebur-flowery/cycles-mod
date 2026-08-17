@@ -2,6 +2,7 @@ package dev.cyclesrenderer.render;
 
 import org.junit.jupiter.api.Test;
 
+import java.util.ArrayList;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -108,6 +109,33 @@ final class DepthReprojectionMathTest {
         assertEquals(Double.POSITIVE_INFINITY, raster.axialDepths()[0]);
     }
 
+    @Test
+    void sourceResolutionRasterAvoidsDisplayUpscaleCoveragePenalty() {
+        int sourceWidth = 8;
+        int sourceHeight = 4;
+        var projection = perspective(2.0D, 0.0D, 0.0D, 0.1D, 100.0D);
+        List<DepthReprojectionMath.SourceSample> samples = new ArrayList<>();
+        for (int y = 0; y < sourceHeight; y++) {
+            for (int x = 0; x < sourceWidth; x++) {
+                samples.add(new DepthReprojectionMath.SourceSample(
+                        y * sourceWidth + x,
+                        (x + 0.5D) / sourceWidth,
+                        (y + 0.5D) / sourceHeight,
+                        10.0D));
+            }
+        }
+
+        var sourceRaster = DepthReprojectionMath.rasterizeNearest(
+                sourceWidth, sourceHeight,
+                IDENTITY_POSE, projection, IDENTITY_POSE, projection, samples);
+        var doubledDisplayRaster = DepthReprojectionMath.rasterizeNearest(
+                sourceWidth * 2, sourceHeight * 2,
+                IDENTITY_POSE, projection, IDENTITY_POSE, projection, samples);
+
+        assertEquals(1.0D, validCoverage(sourceRaster), TOLERANCE);
+        assertEquals(0.25D, validCoverage(doubledDisplayRaster), TOLERANCE);
+    }
+
     private static DepthReprojectionMath.Projection requireProjection(
             DepthReprojectionMath.Pose sourcePose,
             DepthReprojectionMath.Perspective sourceProjection,
@@ -125,6 +153,16 @@ final class DepthReprojectionMathTest {
         assertTrue(DepthReprojectionMath.project(
                 IDENTITY_POSE, projection, 0.5D, 0.5D, depth,
                 IDENTITY_POSE, projection).isEmpty());
+    }
+
+    private static double validCoverage(DepthReprojectionMath.Raster raster) {
+        int valid = 0;
+        for (int sourceIndex : raster.sourceIndices()) {
+            if (sourceIndex >= 0) {
+                valid++;
+            }
+        }
+        return (double) valid / raster.sourceIndices().length;
     }
 
     private static DepthReprojectionMath.Perspective perspective(

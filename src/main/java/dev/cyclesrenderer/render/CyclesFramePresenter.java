@@ -316,6 +316,8 @@ public final class CyclesFramePresenter {
                 telemetry.currentCameraRevision(), telemetry.sourceAgeMicros(),
                 telemetry.sourceWidth(), telemetry.sourceHeight(),
                 telemetry.depthWidth(), telemetry.depthHeight(),
+                telemetry.warpWidth(), telemetry.warpHeight(),
+                telemetry.displayWidth(), telemetry.displayHeight(),
                 telemetry.invalidCoverage(), telemetry.lastBypassReason());
     }
 
@@ -623,6 +625,10 @@ public final class CyclesFramePresenter {
             int sourceHeight,
             int depthWidth,
             int depthHeight,
+            int warpWidth,
+            int warpHeight,
+            int displayWidth,
+            int displayHeight,
             float invalidCoverage,
             String lastBypassReason) {
     }

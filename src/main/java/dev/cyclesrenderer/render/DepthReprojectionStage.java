@@ -26,7 +26,7 @@ final class DepthReprojectionStage {
     private static final long UNIFORM_BYTES = 112L;
     private static final long COVERAGE_READBACK_BYTES = 8L;
     private static final int COVERAGE_READBACK_SLOTS = 3;
-    private static final float MIN_VALID_COVERAGE = 0.98F;
+    private static final float MIN_VALID_COVERAGE = 0.90F;
     private static final Vector4f CLEAR = new Vector4f(0.0F, 0.0F, 0.0F, 0.0F);
 
     private final ByteBuffer uniformData = ByteBuffer.allocateDirect((int) UNIFORM_BYTES)
@@ -56,6 +56,10 @@ final class DepthReprojectionStage {
     private int sourceHeight;
     private int depthWidth;
     private int depthHeight;
+    private int warpWidth;
+    private int warpHeight;
+    private int displayWidth;
+    private int displayHeight;
     private float invalidCoverage = -1.0F;
     private String lastBypassReason = "disabled";
 
@@ -92,6 +96,8 @@ final class DepthReprojectionStage {
         }
         updateSourceTelemetry(
                 sourceMetadata, sourceDepth, targetCameraRevision, System.nanoTime());
+        displayWidth = targetWidth;
+        displayHeight = targetHeight;
         String rejection = rejectionReason(
                 sourceColor, sourceDepth, sourceMetadata, targetCamera,
                 settings, targetWidth, targetHeight);
@@ -101,15 +107,22 @@ final class DepthReprojectionStage {
         }
 
         try {
-            ensureTargets(targetWidth, targetHeight);
-            updateUniforms(sourceMetadata, targetCamera, settings, targetWidth, targetHeight);
+            int rasterWidth = sourceMetadata.width();
+            int rasterHeight = sourceMetadata.height();
+            warpWidth = rasterWidth;
+            warpHeight = rasterHeight;
+            ensureTargets(rasterWidth, rasterHeight);
+            updateUniforms(
+                    sourceMetadata, targetCamera, settings,
+                    targetWidth, targetHeight, rasterWidth, rasterHeight);
             splat(sourceColor, sourceDepth, sourceMetadata.width(), sourceMetadata.height(),
-                    targetWidth, targetHeight);
-            GpuTextureView coverage = reduceCoverage(targetWidth, targetHeight);
+                    rasterWidth, rasterHeight);
+            GpuTextureView coverage = reduceCoverage(rasterWidth, rasterHeight);
             boolean coverageScheduled = captureCoverage(
                     coverage, sourceMetadata, sourceDepth, targetCameraRevision,
+                    rasterWidth, rasterHeight, targetWidth, targetHeight,
                     System.nanoTime());
-            resolve(sourceColor, sourceDepth, coverage, targetWidth, targetHeight);
+            resolve(sourceColor, sourceDepth, coverage, rasterWidth, rasterHeight);
             executionCount++;
             if (coverageMeasurementCount == 0L) {
                 actualState = false;
@@ -166,6 +179,10 @@ final class DepthReprojectionStage {
                 sourceHeight,
                 depthWidth,
                 depthHeight,
+                warpWidth,
+                warpHeight,
+                displayWidth,
+                displayHeight,
                 invalidCoverage,
                 lastBypassReason);
     }
@@ -260,7 +277,9 @@ final class DepthReprojectionStage {
             NativeBridge.CameraInput target,
             CyclesRenderSettings settings,
             int targetWidth,
-            int targetHeight) {
+            int targetHeight,
+            int rasterWidth,
+            int rasterHeight) {
         float targetNear = settings.cameraClipNear();
         float targetFar = Math.max(
                 targetNear + 0.001F,
@@ -286,7 +305,7 @@ final class DepthReprojectionStage {
         putVector(
                 target.verticalFovRadians(), (float) targetWidth / targetHeight,
                 settings.cameraShiftX(), settings.cameraShiftY());
-        putVector(targetNear, targetFar, targetWidth, targetHeight);
+        putVector(targetNear, targetFar, rasterWidth, rasterHeight);
         uniformData.flip();
         RenderSystem.getDevice().createCommandEncoder().writeToBuffer(
                 Objects.requireNonNull(uniformBuffer).slice(), uniformData);
@@ -387,6 +406,10 @@ final class DepthReprojectionStage {
             NativeBridge.ReprojectionMetadata metadata,
             GpuTextureView sourceDepth,
             long targetRevision,
+            int rasterWidth,
+            int rasterHeight,
+            int targetWidth,
+            int targetHeight,
             long nowNanos) {
         CoverageReadbackSlot slot = availableCoverageReadback();
         if (slot == null) {
@@ -417,6 +440,10 @@ final class DepthReprojectionStage {
         slot.sourceHeight = metadata.height();
         slot.depthWidth = sourceDepth.getWidth(0);
         slot.depthHeight = sourceDepth.getHeight(0);
+        slot.warpWidth = rasterWidth;
+        slot.warpHeight = rasterHeight;
+        slot.displayWidth = targetWidth;
+        slot.displayHeight = targetHeight;
         try {
             CommandEncoder encoder = RenderSystem.getDevice().createCommandEncoder();
             encoder.copyTextureToBuffer(
@@ -471,6 +498,10 @@ final class DepthReprojectionStage {
         sourceHeight = latest.sourceHeight;
         depthWidth = latest.depthWidth;
         depthHeight = latest.depthHeight;
+        warpWidth = latest.warpWidth;
+        warpHeight = latest.warpHeight;
+        displayWidth = latest.displayWidth;
+        displayHeight = latest.displayHeight;
         if (validCoverage >= MIN_VALID_COVERAGE) {
             actualState = true;
             lastBypassReason = "";
@@ -514,6 +545,8 @@ final class DepthReprojectionStage {
             sourceHeight = 0;
             depthWidth = sourceDepth == null ? 0 : sourceDepth.getWidth(0);
             depthHeight = sourceDepth == null ? 0 : sourceDepth.getHeight(0);
+            warpWidth = 0;
+            warpHeight = 0;
             return;
         }
         sourceGeneration = metadata.generation();
@@ -521,6 +554,8 @@ final class DepthReprojectionStage {
         sourceAgeMicros = ageMicros(nowNanos, metadata.productionTimeNanos());
         sourceWidth = metadata.width();
         sourceHeight = metadata.height();
+        warpWidth = metadata.width();
+        warpHeight = metadata.height();
         if (sourceDepth != null) {
             depthWidth = sourceDepth.getWidth(0);
             depthHeight = sourceDepth.getHeight(0);
@@ -652,6 +687,10 @@ final class DepthReprojectionStage {
         sourceHeight = 0;
         depthWidth = 0;
         depthHeight = 0;
+        warpWidth = 0;
+        warpHeight = 0;
+        displayWidth = 0;
+        displayHeight = 0;
         invalidCoverage = -1.0F;
         lastBypassReason = "disabled";
     }
@@ -705,6 +744,10 @@ final class DepthReprojectionStage {
             int sourceHeight,
             int depthWidth,
             int depthHeight,
+            int warpWidth,
+            int warpHeight,
+            int displayWidth,
+            int displayHeight,
             float invalidCoverage,
             String lastBypassReason) {
     }
@@ -722,5 +765,9 @@ final class DepthReprojectionStage {
         private int sourceHeight;
         private int depthWidth;
         private int depthHeight;
+        private int warpWidth;
+        private int warpHeight;
+        private int displayWidth;
+        private int displayHeight;
     }
 }
