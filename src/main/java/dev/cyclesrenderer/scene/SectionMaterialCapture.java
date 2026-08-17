@@ -64,21 +64,16 @@ final class SectionMaterialCapture {
         for (int corner = 0; corner < BakedQuad.VERTEX_COUNT; corner++) {
             colors[corner] = packRgba(ARGB.multiply(quad.bakedColors().color(corner), tint));
         }
-        int materialOverride;
+        BlockMaterialFacts materialFacts = blockMaterialFacts(state);
+        int materialOverride = classifyBlockMaterial(materialFacts);
         FoliageSolidifier.Silhouette silhouette = null;
-        if (isGlass(state)) {
-            materialOverride = SectionGeometrySnapshot.MATERIAL_GLASS;
-        } else if (isFoliage(state)) {
-            materialOverride = SectionGeometrySnapshot.MATERIAL_FOLIAGE;
-            if (layer == ChunkSectionLayer.CUTOUT && isSolidifiedFoliage(state)) {
-                TextureAtlasSprite sprite = quad.materialInfo().sprite();
-                int frame = LabPbrAnimationFrames.currentImageFrame(sprite);
-                silhouette = foliageSilhouettes.computeIfAbsent(
-                        new FoliageKey(sprite, frame),
-                        ignored -> FoliageSolidifier.capture(sprite, frame));
-            }
-        } else {
-            materialOverride = SectionGeometrySnapshot.MATERIAL_UNCHANGED;
+        if (materialOverride == SectionGeometrySnapshot.MATERIAL_FOLIAGE
+                && shouldSolidifyFoliage(layer, materialFacts)) {
+            TextureAtlasSprite sprite = quad.materialInfo().sprite();
+            int frame = LabPbrAnimationFrames.currentImageFrame(sprite);
+            silhouette = foliageSilhouettes.computeIfAbsent(
+                    new FoliageKey(sprite, frame),
+                    ignored -> FoliageSolidifier.capture(sprite, frame));
         }
         blockQuads.computeIfAbsent(
                         signature(layer, x, y, z, quad), ignored -> new ArrayDeque<>())
@@ -107,7 +102,8 @@ final class SectionMaterialCapture {
                 && captured.materialOverride() != SectionGeometrySnapshot.MATERIAL_UNCHANGED
                 ? captured.materialOverride()
                 : fallbackMaterial;
-        if (material == fallbackMaterial && isWaterQuad(layer, vertices, vertexBase)) {
+        if (material == fallbackMaterial
+                && isWaterQuad(waterSprites, layer, vertices, vertexBase)) {
             material = SectionGeometrySnapshot.MATERIAL_WATER;
         }
         return new DecodedQuad(
@@ -129,8 +125,12 @@ final class SectionMaterialCapture {
         }
     }
 
-    private boolean isWaterQuad(ChunkSectionLayer layer, float[] vertices, int vertexBase) {
-        for (SpriteBounds bounds : waterSprites) {
+    static boolean isWaterQuad(
+            List<SpriteBounds> sprites,
+            ChunkSectionLayer layer,
+            float[] vertices,
+            int vertexBase) {
+        for (SpriteBounds bounds : sprites) {
             if (bounds.layer() != layer) {
                 continue;
             }
@@ -182,24 +182,38 @@ final class SectionMaterialCapture {
         return 0xFFFFFFFF;
     }
 
-    private static boolean isGlass(BlockState state) {
-        return state.is(BlockTags.IMPERMEABLE)
-                || state.getBlock() == Blocks.GLASS_PANE
-                || state.getBlock() instanceof StainedGlassPaneBlock;
+    static int classifyBlockMaterial(BlockMaterialFacts facts) {
+        if (facts.impermeable()
+                || facts.plainGlassPane()
+                || facts.stainedGlassPane()) {
+            return SectionGeometrySnapshot.MATERIAL_GLASS;
+        }
+        if (facts.leaves()
+                || facts.vegetation()
+                || facts.growingPlant()
+                || facts.vine()) {
+            return SectionGeometrySnapshot.MATERIAL_FOLIAGE;
+        }
+        return SectionGeometrySnapshot.MATERIAL_UNCHANGED;
     }
 
-    private static boolean isFoliage(BlockState state) {
-        return state.is(BlockTags.LEAVES)
-                || state.getBlock() instanceof VegetationBlock
-                || state.getBlock() instanceof GrowingPlantBlock
-                || state.getBlock() instanceof VineBlock;
+    static boolean shouldSolidifyFoliage(
+            ChunkSectionLayer layer,
+            BlockMaterialFacts facts) {
+        return layer == ChunkSectionLayer.CUTOUT
+                && !facts.leaves()
+                && (facts.vegetation() || facts.growingPlant() || facts.vine());
     }
 
-    private static boolean isSolidifiedFoliage(BlockState state) {
-        return !state.is(BlockTags.LEAVES)
-                && (state.getBlock() instanceof VegetationBlock
-                || state.getBlock() instanceof GrowingPlantBlock
-                || state.getBlock() instanceof VineBlock);
+    private static BlockMaterialFacts blockMaterialFacts(BlockState state) {
+        return new BlockMaterialFacts(
+                state.is(BlockTags.IMPERMEABLE),
+                state.getBlock() == Blocks.GLASS_PANE,
+                state.getBlock() instanceof StainedGlassPaneBlock,
+                state.is(BlockTags.LEAVES),
+                state.getBlock() instanceof VegetationBlock,
+                state.getBlock() instanceof GrowingPlantBlock,
+                state.getBlock() instanceof VineBlock);
     }
 
     private static QuadSignature signature(
@@ -279,7 +293,17 @@ final class SectionMaterialCapture {
     private record FoliageKey(TextureAtlasSprite sprite, int imageFrame) {
     }
 
-    private record SpriteBounds(
+    record BlockMaterialFacts(
+            boolean impermeable,
+            boolean plainGlassPane,
+            boolean stainedGlassPane,
+            boolean leaves,
+            boolean vegetation,
+            boolean growingPlant,
+            boolean vine) {
+    }
+
+    record SpriteBounds(
             ChunkSectionLayer layer,
             float minU,
             float maxU,

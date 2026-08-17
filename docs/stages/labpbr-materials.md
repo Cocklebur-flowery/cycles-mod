@@ -1,6 +1,6 @@
 # LabPBR 1.3 材质桥与 PBR-C 第一里程碑
 
-状态：`F0 / F1 / F2 DONE`；`F3 / F4 PENDING`；`V1 AWAITING USER`
+状态：`F0 / F1 / F2 / F3 DONE`；`F4 PENDING`；`V1 AWAITING USER`
 
 当前检查基线：`8202bb3`（2026-08-18，Asia/Shanghai）
 
@@ -193,7 +193,7 @@ PBR-C 第一里程碑不修改 ABI、结构大小、offset、enum/flag 数值、
 F0  当前事实、ABI 与阶段文档重建                 DONE
 F1  LabPBR atlas 逐字节 characterization          DONE
 F2  独立 Native PBR material smoke               DONE
-F3  Section glass/water/foliage classification    PENDING
+F3  Section glass/water/foliage classification    DONE
 F4  F10 PBR 数据图集计数修正                      PENDING
 V1  用户定向 Minecraft 实机验收                   AWAITING USER
 ```
