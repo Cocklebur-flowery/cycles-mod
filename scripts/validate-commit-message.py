@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import re
 import subprocess
 import sys
@@ -40,6 +41,24 @@ ABSOLUTE_PATH_PATTERN = re.compile(
 )
 SENSITIVE_PATTERN = re.compile(
     r"(?i)(?:ghp_|github_pat_|sk-[a-z0-9]{10,}|(?:token|secret|password)\s*[:=])"
+)
+ISSUE_POLICY_PATH = Path(__file__).resolve().parent / "policy" / "issue-policy.json"
+ISSUE_POLICY = json.loads(ISSUE_POLICY_PATH.read_text(encoding="utf-8"))
+ISSUE_LINKAGE = ISSUE_POLICY["issue_linkage"]
+REFS_FOOTER_PATTERN = re.compile(
+    rf"^{re.escape(ISSUE_LINKAGE['commit_footer'])}:\s*(\S.*)\s*$"
+)
+ISSUE_REFERENCE_PATTERN = re.compile(
+    r"^(?:[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)?#[1-9][0-9]*$"
+)
+REPOSITORY_ISSUE_REFERENCE_PREFIX = re.compile(
+    r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+#"
+)
+CLOSING_ISSUE_PATTERN = re.compile(
+    r"\b(?:"
+    + "|".join(re.escape(value) for value in ISSUE_LINKAGE["closing_keywords"])
+    + r")\s*:?\s+(?:[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)?#[1-9][0-9]*\b",
+    re.IGNORECASE,
 )
 
 
@@ -152,6 +171,30 @@ def validate_message(message: str) -> list[str]:
         if ABSOLUTE_PATH_PATTERN.search(line) or SENSITIVE_PATTERN.search(line):
             errors.append("commit message contains an absolute path or sensitive-looking value")
             break
+
+    refs = [
+        match.group(1)
+        for line in body
+        if (match := REFS_FOOTER_PATTERN.fullmatch(line.strip()))
+    ]
+    if len(refs) > 1:
+        errors.append("include at most one Refs footer")
+    elif refs:
+        for raw_token in re.split(r"[\s,]+", refs[0]):
+            token = raw_token.strip("()[]")
+            issue_like = token.startswith("#") or bool(
+                REPOSITORY_ISSUE_REFERENCE_PREFIX.match(token)
+            )
+            if issue_like and not ISSUE_REFERENCE_PATTERN.fullmatch(token):
+                errors.append(
+                    "Issue references in Refs must use #123 or owner/repository#123"
+                )
+                break
+
+    if CLOSING_ISSUE_PATTERN.search(message):
+        errors.append(
+            "commit messages must not close Issues; use Refs and close from an accepted PR or manual review"
+        )
 
     if title_match and title_match.group("type") == "revert":
         if not any(REVERT_FOOTER_PATTERN.fullmatch(line.strip()) for line in body):

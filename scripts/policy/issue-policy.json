@@ -232,6 +232,22 @@
     "complete": "policy:complete",
     "incomplete": "policy:incomplete"
   },
+  "issue_linkage": {
+    "commit_footer": "Refs",
+    "pull_request_reference": "Refs",
+    "pull_request_closure": "Closes",
+    "closing_keywords": [
+      "close",
+      "closes",
+      "closed",
+      "fix",
+      "fixes",
+      "fixed",
+      "resolve",
+      "resolves",
+      "resolved"
+    ]
+  },
   "vague_title_summaries": [
     "fix everything",
     "renderer issue",

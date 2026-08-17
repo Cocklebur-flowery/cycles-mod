@@ -392,6 +392,25 @@ Runtime evidence:
 
 不要引用聊天消息、本机绝对路径、临时日志或被忽略构建目录作为唯一依据。
 
+Issue 不是每个 `fix` 或 `perf` 提交的前置条件。开发中直接发现并完成验证的小型错误或
+性能改进，不需要为了提交而临时制造 Issue。
+
+如果同一个问题已经进入 Issue 生命周期，后续实质性调查、回归测试、修复和性能提交必须
+使用现有 footer 关联：
+
+```text
+Refs: #123
+```
+
+跨仓库引用使用 `Refs: owner/repository#123`。Issue 晚于早期提交创建时不重写历史；在 Issue
+的 `Related` 中补记旧 hash，后续提交再使用 `Refs`。本地提交校验器只能验证已经写出的引用
+格式，不能可靠推断仓库中是否存在语义相同的 Issue，因此不得实现“所有 fix/perf 必须先有
+Issue”的全局规则。
+
+Commit message 禁止使用 `Closes #123`、`Fixes #123` 或 `Resolves #123`。关闭权属于满足
+Resolution criteria 的 PR，或完成显式人工验收后的手动关闭；不能让一个中间提交提前结束
+问题生命周期。完整 Issue 语义见 [Issue 规范](issue-conventions.md)。
+
 ## 8. 按变更类型选择验证正文
 
 ### 8.1 Java 私有实现
