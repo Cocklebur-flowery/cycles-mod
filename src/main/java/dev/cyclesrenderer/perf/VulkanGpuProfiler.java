@@ -167,6 +167,9 @@ final class VulkanGpuProfiler implements AutoCloseable {
             emit(slot, values, PerformanceSample.GpuStage.DISPLAY_PASS,
                     PerformanceSample.GpuMarker.DISPLAY_BEGIN,
                     PerformanceSample.GpuMarker.DISPLAY_END);
+            emit(slot, values, PerformanceSample.GpuStage.REPROJECTION,
+                    PerformanceSample.GpuMarker.REPROJECTION_BEGIN,
+                    PerformanceSample.GpuMarker.REPROJECTION_END);
             resultSink.complete(slot.frameId);
             slot.pending = false;
             slot.markerMask = 0;

@@ -62,6 +62,8 @@ final class CyclesDebugOverlay {
             VulkanFrameInterop.Telemetry buffer = interopBuffer.telemetry();
             VulkanFrameInterop.CopyTelemetry copy = interopBuffer.copyTelemetry();
             CyclesFramePresenter.Telemetry presentation = presenter.telemetry();
+            CyclesFramePresenter.ReprojectionTelemetry reprojection =
+                    presenter.reprojectionTelemetry();
             AutomaticExposureStage.Telemetry exposure =
                     presenter.automaticExposureTelemetry();
             SectionGeometryCollector.Telemetry capture = SectionGeometryCollector.telemetry();
@@ -77,6 +79,8 @@ final class CyclesDebugOverlay {
 
             writeLiveRates(out, minecraft, diagnostics, interop, copy, presentation);
             writeFrameInterop(out, diagnostics, interop, buffer, copy, presentation);
+            writeReprojection(
+                    out, requestedSettings, acceptedSettings, reprojection, runtime);
             writeOutput(out, swapchain, hdrOutput);
             writePerformance(out, runtime, capture, scene, presentation, diagnostics);
             writeDynamicState(out, diagnostics, requestedSettings, acceptedSettings,
@@ -236,6 +240,55 @@ final class CyclesDebugOverlay {
         if (!hdrOutput.error().isEmpty()) {
             out.line("output conversion error=" + hdrOutput.error(), COLOR_ERROR);
         }
+    }
+
+    private static void writeReprojection(
+            Writer out,
+            CyclesRenderSettings requestedSettings,
+            CyclesRenderSettings acceptedSettings,
+            CyclesFramePresenter.ReprojectionTelemetry reprojection,
+            RuntimeStats runtime) {
+        out.section("[ ASYNCHRONOUS DEPTH REPROJECTION ]", COLOR_FRAME);
+        out.line(
+                "requested config/accepted/stage="
+                        + requestedSettings.reprojectionEnabled() + "/"
+                        + acceptedSettings.reprojectionEnabled() + "/"
+                        + reprojection.requested()
+                        + "  actual=" + reprojection.actual()
+                        + "  execute/bypass=" + reprojection.executionCount() + "/"
+                        + reprojection.bypassCount(),
+                reprojection.requested() && !reprojection.actual()
+                        ? COLOR_WARNING : COLOR_FRAME);
+        out.line(
+                "source generation/age=" + reprojection.sourceGeneration() + "/"
+                        + reprojection.sourceAgeMicros() + "us"
+                        + "  camera source/current="
+                        + reprojection.sourceCameraRevision() + "/"
+                        + reprojection.currentCameraRevision(),
+                reprojection.sourceGeneration() > 0L ? COLOR_FRAME : COLOR_STATIC);
+        out.line(
+                "color/depth=" + reprojection.sourceWidth() + "x"
+                        + reprojection.sourceHeight() + "/"
+                        + reprojection.depthWidth() + "x" + reprojection.depthHeight()
+                        + "  invalid coverage="
+                        + (reprojection.invalidCoverage() < 0.0F
+                        ? "pending" : percent(reprojection.invalidCoverage()) + "%"),
+                reprojection.invalidCoverage() >= 0.02F ? COLOR_WARNING : COLOR_FRAME);
+        out.line(
+                "coverage measured/dropped/pending="
+                        + reprojection.coverageMeasurementCount() + "/"
+                        + reprojection.droppedCoverageReadbacks() + "/"
+                        + reprojection.pendingCoverageReadbacks()
+                        + "  last bypass="
+                        + valueOrDash(reprojection.lastBypassReason()),
+                reprojection.droppedCoverageReadbacks() == 0L ? COLOR_FRAME : COLOR_WARNING);
+        out.line(
+                "GPU reprojection us last/EMA/max="
+                        + timing(runtime.lastReprojectionGpuMicros(),
+                        runtime.emaReprojectionGpuMicros(),
+                        runtime.maxReprojectionGpuMicros())
+                        + "  measured=" + runtime.reprojectionGpuCount(),
+                runtime.reprojectionGpuCount() > 0L ? COLOR_TIMING : COLOR_STATIC);
     }
 
     private static void writePerformance(
@@ -638,7 +691,11 @@ final class CyclesDebugOverlay {
             long lastCameraCallMicros,
             long emaCameraCallMicros,
             long maxCameraCallMicros,
-            long skippedFrameDeliveryCount) {
+            long skippedFrameDeliveryCount,
+            long reprojectionGpuCount,
+            long lastReprojectionGpuMicros,
+            long emaReprojectionGpuMicros,
+            long maxReprojectionGpuMicros) {
     }
 
     private static final class Writer {

@@ -22,4 +22,10 @@ public interface DisplayPerformanceProbe {
     long beginDisplayStage();
 
     void endDisplayStage(Stage stage, long startedNanos);
+
+    default void beginReprojectionGpu() {
+    }
+
+    default void endReprojectionGpu() {
+    }
 }

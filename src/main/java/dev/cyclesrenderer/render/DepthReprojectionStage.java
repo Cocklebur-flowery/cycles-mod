@@ -2,8 +2,10 @@ package dev.cyclesrenderer.render;
 
 import com.mojang.blaze3d.GpuFormat;
 import com.mojang.blaze3d.buffers.GpuBuffer;
+import com.mojang.blaze3d.buffers.GpuBufferSlice;
 import com.mojang.blaze3d.pipeline.RenderTarget;
 import com.mojang.blaze3d.pipeline.TextureTarget;
+import com.mojang.blaze3d.systems.CommandEncoder;
 import com.mojang.blaze3d.systems.RenderPass;
 import com.mojang.blaze3d.systems.RenderPassDescriptor;
 import com.mojang.blaze3d.systems.RenderSystem;
@@ -22,6 +24,9 @@ import java.util.OptionalDouble;
 /** Forward-splats a matched HDR/depth source frame into the current perspective camera. */
 final class DepthReprojectionStage {
     private static final long UNIFORM_BYTES = 112L;
+    private static final long COVERAGE_READBACK_BYTES = 8L;
+    private static final int COVERAGE_READBACK_SLOTS = 3;
+    private static final float MIN_VALID_COVERAGE = 0.98F;
     private static final Vector4f CLEAR = new Vector4f(0.0F, 0.0F, 0.0F, 0.0F);
 
     private final ByteBuffer uniformData = ByteBuffer.allocateDirect((int) UNIFORM_BYTES)
@@ -33,6 +38,32 @@ final class DepthReprojectionStage {
     private TextureTarget resolvedColor;
     private TextureTarget resolvedDepth;
     private GpuBuffer uniformBuffer;
+    private final CoverageReadbackSlot[] coverageReadbacks =
+            new CoverageReadbackSlot[COVERAGE_READBACK_SLOTS];
+    private volatile long epoch;
+    private long coverageSequence;
+    private boolean requestedState;
+    private boolean actualState;
+    private long executionCount;
+    private long bypassCount;
+    private long coverageMeasurementCount;
+    private long droppedCoverageReadbacks;
+    private long sourceGeneration;
+    private long sourceCameraRevision;
+    private long currentCameraRevision;
+    private long sourceAgeMicros;
+    private int sourceWidth;
+    private int sourceHeight;
+    private int depthWidth;
+    private int depthHeight;
+    private float invalidCoverage = -1.0F;
+    private String lastBypassReason = "disabled";
+
+    DepthReprojectionStage() {
+        for (int index = 0; index < coverageReadbacks.length; index++) {
+            coverageReadbacks[index] = new CoverageReadbackSlot();
+        }
+    }
 
     Result apply(
             boolean requested,
@@ -40,18 +71,32 @@ final class DepthReprojectionStage {
             GpuTextureView sourceDepth,
             NativeBridge.ReprojectionMetadata sourceMetadata,
             NativeBridge.CameraInput targetCamera,
+            long targetCameraRevision,
             CyclesRenderSettings settings,
             int targetWidth,
             int targetHeight) {
         RenderSystem.assertOnRenderThread();
         Objects.requireNonNull(sourceColor);
+        requestedState = requested;
+        try {
+            pollCoverage();
+        } catch (RuntimeException error) {
+            recordBypass("coverage-readback:" + error.getClass().getSimpleName());
+            releaseResources();
+            return Result.bypassed(sourceColor, sourceDepth, lastBypassReason);
+        }
         if (!requested) {
+            actualState = false;
+            lastBypassReason = "disabled";
             return Result.bypassed(sourceColor, sourceDepth, "disabled");
         }
+        updateSourceTelemetry(
+                sourceMetadata, sourceDepth, targetCameraRevision, System.nanoTime());
         String rejection = rejectionReason(
                 sourceColor, sourceDepth, sourceMetadata, targetCamera,
                 settings, targetWidth, targetHeight);
         if (!rejection.isEmpty()) {
+            recordBypass(rejection);
             return Result.bypassed(sourceColor, sourceDepth, rejection);
         }
 
@@ -61,7 +106,16 @@ final class DepthReprojectionStage {
             splat(sourceColor, sourceDepth, sourceMetadata.width(), sourceMetadata.height(),
                     targetWidth, targetHeight);
             GpuTextureView coverage = reduceCoverage(targetWidth, targetHeight);
+            boolean coverageScheduled = captureCoverage(
+                    coverage, sourceMetadata, sourceDepth, targetCameraRevision,
+                    System.nanoTime());
             resolve(sourceColor, sourceDepth, coverage, targetWidth, targetHeight);
+            executionCount++;
+            if (coverageMeasurementCount == 0L) {
+                actualState = false;
+                lastBypassReason = coverageScheduled
+                        ? "coverage-pending" : "coverage-unmeasured";
+            }
             return new Result(
                     Objects.requireNonNull(resolvedColor.getColorTextureView()),
                     Objects.requireNonNull(resolvedDepth.getColorTextureView()),
@@ -74,17 +128,46 @@ final class DepthReprojectionStage {
                 error.addSuppressed(cleanupError);
             }
             String detail = error.getMessage();
+            recordBypass("gpu:" + error.getClass().getSimpleName()
+                    + (detail == null || detail.isBlank() ? "" : ":" + detail));
             return Result.bypassed(
                     sourceColor,
                     sourceDepth,
-                    "gpu:" + error.getClass().getSimpleName()
-                            + (detail == null || detail.isBlank() ? "" : ":" + detail));
+                    lastBypassReason);
         }
     }
 
     void reset() {
         RenderSystem.assertOnRenderThread();
         releaseResources();
+        clearTelemetry();
+    }
+
+    Telemetry telemetry() {
+        int pending = 0;
+        for (CoverageReadbackSlot slot : coverageReadbacks) {
+            if (slot.inFlight) {
+                pending++;
+            }
+        }
+        return new Telemetry(
+                requestedState,
+                actualState,
+                executionCount,
+                bypassCount,
+                coverageMeasurementCount,
+                droppedCoverageReadbacks,
+                pending,
+                sourceGeneration,
+                sourceCameraRevision,
+                currentCameraRevision,
+                sourceAgeMicros,
+                sourceWidth,
+                sourceHeight,
+                depthWidth,
+                depthHeight,
+                invalidCoverage,
+                lastBypassReason);
     }
 
     private static String rejectionReason(
@@ -299,6 +382,167 @@ final class DepthReprojectionStage {
         }
     }
 
+    private boolean captureCoverage(
+            GpuTextureView coverage,
+            NativeBridge.ReprojectionMetadata metadata,
+            GpuTextureView sourceDepth,
+            long targetRevision,
+            long nowNanos) {
+        CoverageReadbackSlot slot = availableCoverageReadback();
+        if (slot == null) {
+            droppedCoverageReadbacks++;
+            return false;
+        }
+        int slotIndex = 0;
+        while (coverageReadbacks[slotIndex] != slot) {
+            slotIndex++;
+        }
+        if (slot.buffer == null) {
+            int labelIndex = slotIndex;
+            slot.buffer = RenderSystem.getDevice().createBuffer(
+                    () -> "Cycles reprojection coverage readback " + labelIndex,
+                    GpuBuffer.USAGE_COPY_DST | GpuBuffer.USAGE_MAP_READ,
+                    COVERAGE_READBACK_BYTES);
+        }
+        long scheduledEpoch = epoch;
+        long scheduledSequence = ++coverageSequence;
+        slot.sequence = scheduledSequence;
+        slot.inFlight = true;
+        slot.ready = false;
+        slot.sourceGeneration = metadata.generation();
+        slot.sourceCameraRevision = metadata.cameraRevision();
+        slot.currentCameraRevision = targetRevision;
+        slot.productionTimeNanos = metadata.productionTimeNanos();
+        slot.sourceWidth = metadata.width();
+        slot.sourceHeight = metadata.height();
+        slot.depthWidth = sourceDepth.getWidth(0);
+        slot.depthHeight = sourceDepth.getHeight(0);
+        try {
+            CommandEncoder encoder = RenderSystem.getDevice().createCommandEncoder();
+            encoder.copyTextureToBuffer(
+                    coverage.texture(),
+                    Objects.requireNonNull(slot.buffer),
+                    0L,
+                    () -> completeCoverage(
+                            slot, scheduledEpoch, scheduledSequence),
+                    0);
+        } catch (RuntimeException error) {
+            slot.inFlight = false;
+            throw error;
+        }
+        sourceAgeMicros = ageMicros(nowNanos, metadata.productionTimeNanos());
+        return true;
+    }
+
+    private void pollCoverage() {
+        CoverageReadbackSlot latest = null;
+        for (CoverageReadbackSlot slot : coverageReadbacks) {
+            if (slot.ready && (latest == null || slot.sequence > latest.sequence)) {
+                latest = slot;
+            }
+        }
+        if (latest == null) {
+            return;
+        }
+        for (CoverageReadbackSlot slot : coverageReadbacks) {
+            if (slot.ready && slot.sequence <= latest.sequence) {
+                slot.ready = false;
+            }
+        }
+        float validCount;
+        float totalCount;
+        try (GpuBufferSlice.MappedView mapped =
+                     Objects.requireNonNull(latest.buffer).map(true, false)) {
+            ByteBuffer data = mapped.data().order(ByteOrder.nativeOrder());
+            validCount = data.getFloat();
+            totalCount = data.getFloat();
+        }
+        float validCoverage = Float.isFinite(validCount)
+                && Float.isFinite(totalCount) && totalCount > 0.0F
+                ? Math.clamp(validCount / totalCount, 0.0F, 1.0F)
+                : 0.0F;
+        invalidCoverage = 1.0F - validCoverage;
+        coverageMeasurementCount++;
+        sourceGeneration = latest.sourceGeneration;
+        sourceCameraRevision = latest.sourceCameraRevision;
+        currentCameraRevision = latest.currentCameraRevision;
+        sourceAgeMicros = ageMicros(System.nanoTime(), latest.productionTimeNanos);
+        sourceWidth = latest.sourceWidth;
+        sourceHeight = latest.sourceHeight;
+        depthWidth = latest.depthWidth;
+        depthHeight = latest.depthHeight;
+        if (validCoverage >= MIN_VALID_COVERAGE) {
+            actualState = true;
+            lastBypassReason = "";
+        } else {
+            recordBypass("coverage");
+        }
+    }
+
+    private CoverageReadbackSlot availableCoverageReadback() {
+        for (CoverageReadbackSlot slot : coverageReadbacks) {
+            if (!slot.inFlight && !slot.ready) {
+                return slot;
+            }
+        }
+        return null;
+    }
+
+    private void completeCoverage(
+            CoverageReadbackSlot slot,
+            long scheduledEpoch,
+            long scheduledSequence) {
+        if (slot.sequence == scheduledSequence) {
+            slot.inFlight = false;
+            if (scheduledEpoch == epoch && slot.buffer != null) {
+                slot.ready = true;
+            }
+        }
+    }
+
+    private void updateSourceTelemetry(
+            NativeBridge.ReprojectionMetadata metadata,
+            GpuTextureView sourceDepth,
+            long targetRevision,
+            long nowNanos) {
+        currentCameraRevision = targetRevision;
+        if (metadata == null) {
+            sourceGeneration = 0L;
+            sourceCameraRevision = 0L;
+            sourceAgeMicros = 0L;
+            sourceWidth = 0;
+            sourceHeight = 0;
+            depthWidth = sourceDepth == null ? 0 : sourceDepth.getWidth(0);
+            depthHeight = sourceDepth == null ? 0 : sourceDepth.getHeight(0);
+            return;
+        }
+        sourceGeneration = metadata.generation();
+        sourceCameraRevision = metadata.cameraRevision();
+        sourceAgeMicros = ageMicros(nowNanos, metadata.productionTimeNanos());
+        sourceWidth = metadata.width();
+        sourceHeight = metadata.height();
+        if (sourceDepth != null) {
+            depthWidth = sourceDepth.getWidth(0);
+            depthHeight = sourceDepth.getHeight(0);
+        } else {
+            depthWidth = 0;
+            depthHeight = 0;
+        }
+    }
+
+    private void recordBypass(String reason) {
+        actualState = false;
+        bypassCount++;
+        lastBypassReason = reason;
+    }
+
+    private static long ageMicros(long nowNanos, long productionTimeNanos) {
+        if (productionTimeNanos <= 0L || nowNanos <= productionTimeNanos) {
+            return 0L;
+        }
+        return (nowNanos - productionTimeNanos) / 1_000L;
+    }
+
     private void resolve(
             GpuTextureView sourceColor,
             GpuTextureView sourceDepth,
@@ -365,6 +609,7 @@ final class DepthReprojectionStage {
     }
 
     private void releaseResources() {
+        epoch++;
         destroy(splatColor);
         destroy(splatDepth);
         destroy(coverageA);
@@ -381,6 +626,34 @@ final class DepthReprojectionStage {
             uniformBuffer.close();
             uniformBuffer = null;
         }
+        for (CoverageReadbackSlot slot : coverageReadbacks) {
+            slot.sequence = 0L;
+            slot.inFlight = false;
+            slot.ready = false;
+            if (slot.buffer != null) {
+                slot.buffer.close();
+                slot.buffer = null;
+            }
+        }
+    }
+
+    private void clearTelemetry() {
+        requestedState = false;
+        actualState = false;
+        executionCount = 0L;
+        bypassCount = 0L;
+        coverageMeasurementCount = 0L;
+        droppedCoverageReadbacks = 0L;
+        sourceGeneration = 0L;
+        sourceCameraRevision = 0L;
+        currentCameraRevision = 0L;
+        sourceAgeMicros = 0L;
+        sourceWidth = 0;
+        sourceHeight = 0;
+        depthWidth = 0;
+        depthHeight = 0;
+        invalidCoverage = -1.0F;
+        lastBypassReason = "disabled";
     }
 
     private static void destroy(TextureTarget target) {
@@ -414,5 +687,40 @@ final class DepthReprojectionStage {
                 String reason) {
             return new Result(sourceColor, sourceDepth, false, reason);
         }
+    }
+
+    record Telemetry(
+            boolean requested,
+            boolean actual,
+            long executionCount,
+            long bypassCount,
+            long coverageMeasurementCount,
+            long droppedCoverageReadbacks,
+            int pendingCoverageReadbacks,
+            long sourceGeneration,
+            long sourceCameraRevision,
+            long currentCameraRevision,
+            long sourceAgeMicros,
+            int sourceWidth,
+            int sourceHeight,
+            int depthWidth,
+            int depthHeight,
+            float invalidCoverage,
+            String lastBypassReason) {
+    }
+
+    private static final class CoverageReadbackSlot {
+        private GpuBuffer buffer;
+        private volatile boolean inFlight;
+        private volatile boolean ready;
+        private long sequence;
+        private long sourceGeneration;
+        private long sourceCameraRevision;
+        private long currentCameraRevision;
+        private long productionTimeNanos;
+        private int sourceWidth;
+        private int sourceHeight;
+        private int depthWidth;
+        private int depthHeight;
     }
 }

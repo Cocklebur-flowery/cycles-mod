@@ -44,7 +44,8 @@ public final class PerformanceSample {
         VULKAN_RENDER("vulkan_render"),
         CYCLES_WINDOW("cycles_window"),
         INTEROP_WINDOW("interop_window"),
-        DISPLAY_PASS("display_pass");
+        DISPLAY_PASS("display_pass"),
+        REPROJECTION("reprojection");
 
         private final String jsonName;
 
@@ -65,7 +66,9 @@ public final class PerformanceSample {
         DISPLAY_BEGIN,
         DISPLAY_END,
         CYCLES_END,
-        FRAME_END
+        FRAME_END,
+        REPROJECTION_BEGIN,
+        REPROJECTION_END
     }
 
     private long frameId = -1L;

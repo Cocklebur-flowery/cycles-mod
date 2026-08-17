@@ -56,6 +56,10 @@ public final class FramePerformanceMonitor implements DisplayPerformanceProbe {
     private long lastClientTickNanos = PerformanceSample.UNAVAILABLE;
     private CaptureWindow capture;
     private boolean active;
+    private long reprojectionGpuCount;
+    private long lastReprojectionGpuMicros;
+    private long emaReprojectionGpuMicros;
+    private long maxReprojectionGpuMicros;
 
     public FramePerformanceMonitor(
             CyclesFramePresenter presenter,
@@ -110,6 +114,10 @@ public final class FramePerformanceMonitor implements DisplayPerformanceProbe {
         current = null;
         latestContext = null;
         latestContextFrame = -1L;
+        reprojectionGpuCount = 0L;
+        lastReprojectionGpuMicros = 0L;
+        emaReprojectionGpuMicros = 0L;
+        maxReprojectionGpuMicros = 0L;
         active = true;
         LOGGER.info(
                 "Cycles performance tracing active (GPU queries={}, property={}, environment={}); "
@@ -291,6 +299,24 @@ public final class FramePerformanceMonitor implements DisplayPerformanceProbe {
         endCpuStage(cpuStage, startedNanos);
     }
 
+    @Override
+    public void beginReprojectionGpu() {
+        gpuMarker(PerformanceSample.GpuMarker.REPROJECTION_BEGIN);
+    }
+
+    @Override
+    public void endReprojectionGpu() {
+        gpuMarker(PerformanceSample.GpuMarker.REPROJECTION_END);
+    }
+
+    public ReprojectionGpuTelemetry reprojectionGpuTelemetry() {
+        return new ReprojectionGpuTelemetry(
+                reprojectionGpuCount,
+                lastReprojectionGpuMicros,
+                emaReprojectionGpuMicros,
+                maxReprojectionGpuMicros);
+    }
+
     private boolean isRecording() {
         return active && current != null;
     }
@@ -311,7 +337,9 @@ public final class FramePerformanceMonitor implements DisplayPerformanceProbe {
             case FRAME_BEGIN, FRAME_END -> PerformanceSample.CpuStage.GPU_MARKER_FRAME;
             case CYCLES_BEGIN, CYCLES_END -> PerformanceSample.CpuStage.GPU_MARKER_CYCLES;
             case INTEROP_BEGIN, INTEROP_END -> PerformanceSample.CpuStage.GPU_MARKER_INTEROP;
-            case DISPLAY_BEGIN, DISPLAY_END -> PerformanceSample.CpuStage.GPU_MARKER_DISPLAY;
+            case DISPLAY_BEGIN, DISPLAY_END,
+                    REPROJECTION_BEGIN, REPROJECTION_END ->
+                PerformanceSample.CpuStage.GPU_MARKER_DISPLAY;
         };
     }
 
@@ -428,6 +456,15 @@ public final class FramePerformanceMonitor implements DisplayPerformanceProbe {
         if (sample.frameId() == frameId) {
             sample.setGpu(stage, elapsedNanos);
         }
+        if (stage == PerformanceSample.GpuStage.REPROJECTION) {
+            long micros = Math.max(0L, (elapsedNanos + 999L) / 1_000L);
+            lastReprojectionGpuMicros = micros;
+            emaReprojectionGpuMicros = emaReprojectionGpuMicros == 0L
+                    ? micros
+                    : (emaReprojectionGpuMicros * 7L + micros) / 8L;
+            maxReprojectionGpuMicros = Math.max(maxReprojectionGpuMicros, micros);
+            reprojectionGpuCount++;
+        }
     }
 
     private void acceptGpuComplete(long frameId) {
@@ -484,5 +521,12 @@ public final class FramePerformanceMonitor implements DisplayPerformanceProbe {
             this.endFrame = endFrame;
             this.maximumEndFrame = maximumEndFrame;
         }
+    }
+
+    public record ReprojectionGpuTelemetry(
+            long count,
+            long lastMicros,
+            long emaMicros,
+            long maxMicros) {
     }
 }

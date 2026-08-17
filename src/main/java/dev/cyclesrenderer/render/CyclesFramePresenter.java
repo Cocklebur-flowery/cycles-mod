@@ -162,6 +162,7 @@ public final class CyclesFramePresenter {
                 false,
                 null,
                 null,
+                0L,
                 performanceProbe);
     }
 
@@ -175,17 +176,29 @@ public final class CyclesFramePresenter {
             boolean reprojectionRequested,
             NativeBridge.ReprojectionMetadata sourceMetadata,
             NativeBridge.CameraInput targetCamera,
+            long targetCameraRevision,
             DisplayPerformanceProbe performanceProbe) {
         RenderSystem.assertOnRenderThread();
-        DepthReprojectionStage.Result reprojection = depthReprojection.apply(
-                reprojectionRequested,
-                Objects.requireNonNull(source),
-                Objects.requireNonNull(depth),
-                sourceMetadata,
-                targetCamera,
-                settings,
-                output.width,
-                output.height);
+        DepthReprojectionStage.Result reprojection;
+        if (reprojectionRequested) {
+            performanceProbe.beginReprojectionGpu();
+        }
+        try {
+            reprojection = depthReprojection.apply(
+                    reprojectionRequested,
+                    Objects.requireNonNull(source),
+                    Objects.requireNonNull(depth),
+                    sourceMetadata,
+                    targetCamera,
+                    targetCameraRevision,
+                    settings,
+                    output.width,
+                    output.height);
+        } finally {
+            if (reprojectionRequested) {
+                performanceProbe.endReprojectionGpu();
+            }
+        }
         presentTexture(
                 output,
                 settings,
@@ -289,6 +302,21 @@ public final class CyclesFramePresenter {
 
     public AutomaticExposureStage.Telemetry automaticExposureTelemetry() {
         return automaticExposure.telemetry();
+    }
+
+    public ReprojectionTelemetry reprojectionTelemetry() {
+        DepthReprojectionStage.Telemetry telemetry = depthReprojection.telemetry();
+        return new ReprojectionTelemetry(
+                telemetry.requested(), telemetry.actual(),
+                telemetry.executionCount(), telemetry.bypassCount(),
+                telemetry.coverageMeasurementCount(),
+                telemetry.droppedCoverageReadbacks(),
+                telemetry.pendingCoverageReadbacks(),
+                telemetry.sourceGeneration(), telemetry.sourceCameraRevision(),
+                telemetry.currentCameraRevision(), telemetry.sourceAgeMicros(),
+                telemetry.sourceWidth(), telemetry.sourceHeight(),
+                telemetry.depthWidth(), telemetry.depthHeight(),
+                telemetry.invalidCoverage(), telemetry.lastBypassReason());
     }
 
     public void reset() {
@@ -577,5 +605,25 @@ public final class CyclesFramePresenter {
             long emaColorLutUploadMicros,
             long maxColorLutUploadMicros,
             int colorLutViewTransform) {
+    }
+
+    public record ReprojectionTelemetry(
+            boolean requested,
+            boolean actual,
+            long executionCount,
+            long bypassCount,
+            long coverageMeasurementCount,
+            long droppedCoverageReadbacks,
+            int pendingCoverageReadbacks,
+            long sourceGeneration,
+            long sourceCameraRevision,
+            long currentCameraRevision,
+            long sourceAgeMicros,
+            int sourceWidth,
+            int sourceHeight,
+            int depthWidth,
+            int depthHeight,
+            float invalidCoverage,
+            String lastBypassReason) {
     }
 }

@@ -193,7 +193,8 @@ final class CyclesRendererController {
             performanceMonitor.endCpuStage(
                     PerformanceSample.CpuStage.CAMERA_FFI, cameraTraceStart);
 
-            if (pollAndPresentInteropFrame(mainTarget, renderSettings, cameraInput)) {
+            if (pollAndPresentInteropFrame(
+                    mainTarget, renderSettings, cameraInput, frameId)) {
                 return;
             }
             acquireAndPresentCpuFrame(mainTarget, renderSettings, cameraInput, update);
@@ -364,7 +365,8 @@ final class CyclesRendererController {
     private boolean pollAndPresentInteropFrame(
             RenderTarget mainTarget,
             CyclesRenderSettings renderSettings,
-            NativeBridge.CameraInput cameraInput) {
+            NativeBridge.CameraInput cameraInput,
+            long cameraRevision) {
         long interopStart = performanceMonitor.beginCpuStage();
         performanceMonitor.gpuMarker(PerformanceSample.GpuMarker.INTEROP_BEGIN);
         interopBuffer.pollCompletedFrame();
@@ -388,6 +390,7 @@ final class CyclesRendererController {
                     interopBuffer.reprojectionInputsRequested(),
                     interopBuffer.reprojectionMetadata().orElse(null),
                     cameraInput,
+                    cameraRevision,
                     performanceMonitor);
         } else {
             framePresenter.presentExternal(
@@ -535,6 +538,7 @@ final class CyclesRendererController {
     private void extractDebugOverlay(
             GuiGraphicsExtractor graphics,
             Minecraft minecraft) {
+        var reprojectionGpu = performanceMonitor.reprojectionGpuTelemetry();
         CyclesDebugOverlay.extract(
                 graphics,
                 minecraft,
@@ -555,6 +559,10 @@ final class CyclesRendererController {
                         lastCameraCallMicros,
                         emaCameraCallMicros,
                         maxCameraCallMicros,
-                        skippedFrameDeliveryCount));
+                        skippedFrameDeliveryCount,
+                        reprojectionGpu.count(),
+                        reprojectionGpu.lastMicros(),
+                        reprojectionGpu.emaMicros(),
+                        reprojectionGpu.maxMicros()));
     }
 }
