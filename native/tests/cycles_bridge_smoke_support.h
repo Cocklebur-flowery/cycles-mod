@@ -97,6 +97,7 @@ bool verify_progressive_sampling(
 bool run_bridge_contract_scenarios(SmokeContext& context);
 bool run_color_contract_scenarios(SmokeContext& context);
 bool run_render_scenarios(SmokeContext& context);
+bool run_pbr_material_scenarios(SmokeContext& context);
 bool run_denoiser_scenarios(SmokeContext& context);
 bool run_scene_lifecycle_scenarios(SmokeContext& context);
 

@@ -14,6 +14,7 @@ enum class SmokeSuite {
     Contract,
     Color,
     Render,
+    Pbr,
     Denoiser,
     SceneLifecycle,
 };
@@ -30,7 +31,7 @@ struct SmokeStage {
     ScenarioRunner run;
 };
 
-constexpr std::array<SmokeStage, 5> kSmokeStages{{
+constexpr std::array<SmokeStage, 6> kSmokeStages{{
     {SmokeSuite::Contract,
      "contract",
      cyclesrenderer::smoke::run_bridge_contract_scenarios},
@@ -40,6 +41,9 @@ constexpr std::array<SmokeStage, 5> kSmokeStages{{
     {SmokeSuite::Render,
      "render",
      cyclesrenderer::smoke::run_render_scenarios},
+    {SmokeSuite::Pbr,
+     "pbr",
+     cyclesrenderer::smoke::run_pbr_material_scenarios},
     {SmokeSuite::Denoiser,
      "denoiser",
      cyclesrenderer::smoke::run_denoiser_scenarios},
@@ -74,7 +78,7 @@ void print_usage(const char* executable) {
     std::cerr
         << "Usage: " << executable
         << " [--require-optix]"
-        << " [--suite contract|color|render|denoiser|scene-lifecycle]\n";
+        << " [--suite contract|color|render|pbr|denoiser|scene-lifecycle]\n";
 }
 
 SmokeOutcome run_suite(SmokeSuite suite, SmokeContext& context) {
