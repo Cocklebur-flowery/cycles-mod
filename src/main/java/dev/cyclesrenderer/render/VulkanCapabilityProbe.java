@@ -43,8 +43,15 @@ public final class VulkanCapabilityProbe {
             "cyclesrenderer.experimentalHdrSwapchain";
     private static final String HDR_SWAPCHAIN_ENVIRONMENT =
             "CYCLESRENDERER_EXPERIMENTAL_HDR_SWAPCHAIN";
+    private static final int FORMAT_RGBA8_UNORM = 37;
+    private static final int FORMAT_BGRA8_UNORM = 44;
+    private static final int FORMAT_A2B10G10R10_UNORM = 64;
     private static final int FORMAT_RGBA16_SFLOAT = 97;
+    private static final int COLOR_SPACE_SRGB_NONLINEAR = 0;
     private static final int COLOR_SPACE_EXTENDED_SRGB_LINEAR = 1_000_104_002;
+    private static final int COLOR_SPACE_BT2020_LINEAR = 1_000_104_007;
+    private static final int COLOR_SPACE_HDR10_PQ = 1_000_104_008;
+    private static final int COLOR_SPACE_HDR10_HLG = 1_000_104_010;
     private static final String INTEROP_PROPERTY =
             "cyclesrenderer.experimentalVulkanInterop";
     private static final String INTEROP_ENVIRONMENT =
@@ -515,10 +522,10 @@ public final class VulkanCapabilityProbe {
 
     public record SurfaceFormat(int format, int colorSpace) {
         public boolean hdrCandidate() {
-            return colorSpace == 1_000_104_002
-                    || colorSpace == 1_000_104_007
-                    || colorSpace == 1_000_104_008
-                    || colorSpace == 1_000_104_010;
+            return colorSpace == COLOR_SPACE_EXTENDED_SRGB_LINEAR
+                    || colorSpace == COLOR_SPACE_BT2020_LINEAR
+                    || colorSpace == COLOR_SPACE_HDR10_PQ
+                    || colorSpace == COLOR_SPACE_HDR10_HLG;
         }
 
         public String summary() {
@@ -527,21 +534,21 @@ public final class VulkanCapabilityProbe {
 
         private static String formatName(int value) {
             return switch (value) {
-                case 37 -> "RGBA8_UNORM";
-                case 44 -> "BGRA8_UNORM";
-                case 64 -> "A2B10G10R10_UNORM";
-                case 97 -> "RGBA16_SFLOAT";
+                case FORMAT_RGBA8_UNORM -> "RGBA8_UNORM";
+                case FORMAT_BGRA8_UNORM -> "BGRA8_UNORM";
+                case FORMAT_A2B10G10R10_UNORM -> "A2B10G10R10_UNORM";
+                case FORMAT_RGBA16_SFLOAT -> "RGBA16_SFLOAT";
                 default -> "format-" + value;
             };
         }
 
         private static String colorSpaceName(int value) {
             return switch (value) {
-                case 0 -> "sRGB-nonlinear";
-                case 1_000_104_002 -> "extended-sRGB-linear";
-                case 1_000_104_007 -> "BT2020-linear";
-                case 1_000_104_008 -> "HDR10-PQ";
-                case 1_000_104_010 -> "HDR10-HLG";
+                case COLOR_SPACE_SRGB_NONLINEAR -> "sRGB-nonlinear";
+                case COLOR_SPACE_EXTENDED_SRGB_LINEAR -> "extended-sRGB-linear";
+                case COLOR_SPACE_BT2020_LINEAR -> "BT2020-linear";
+                case COLOR_SPACE_HDR10_PQ -> "HDR10-PQ";
+                case COLOR_SPACE_HDR10_HLG -> "HDR10-HLG";
                 default -> "colorspace-" + value;
             };
         }

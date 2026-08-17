@@ -1,6 +1,6 @@
 # Cycles Renderer 代码级质量优化路线图
 
-状态：`Q0 / Q0C / Q1a DONE`；`Q1b PENDING`（2026-08-17）
+状态：`Q0 / Q0C / Q1 DONE`；`Q2 PENDING`（2026-08-17）
 
 检查基线：`019d7ec`
 
@@ -100,7 +100,7 @@ Vulkan 数值做了全量启发式扫描，再按所有者与稳定契约人工�
 | --- | --- | --- |
 | `CyclesRendererController` bridge 失效状态 | `Q1a CLEANUP` | 五个关闭路径表达同一私有状态转换；收口为 `invalidateNativeBridgeState()`，保持每处 `NativeBridge.close()`、interop drain/close、日志和条件顺序。 |
 | Controller 2 秒 scene stats 间隔 | `Q1a CLEANUP` | 属于本类明确诊断策略，命名为带单位的 `STATS_LOG_INTERVAL_NANOS`；数值不变。 |
-| `VulkanCapabilityProbe` color-space 数值 | `Q1b CLEANUP` | 同一类已经命名 scRGB color space，却在候选判断和名称映射中重复四个原始 Vulkan 数值；应在独立阶段只做同值常量替换。 |
+| `VulkanCapabilityProbe` surface format/color-space 数值 | `Q1b CLEANUP` | 同一类已经命名 RGBA16F 与 scRGB，却在候选判断和名称映射中重复其余 Vulkan 数值；独立阶段只做同值常量替换。 |
 | 配置 ID 与 dependency option ID | `Q4a TEST-FIRST` | ID 是稳定 UI/config contract；先由可见性 characterization test 锁定规则，不在 Q1 搬移字符串。 |
 | Java/C++ 的 3840×2160、ABI size/offset/flag | `KEEP` | 属于跨语言配置和 ABI contract，已有 range/layout/contract 检查；下一次真实 ABI 变化前不扩大生成器或批量迁移。 |
 | AE/AF、GPU readback 的同值 50 ms | `KEEP` | 分属对焦采样和曝光 readback 两个独立生命周期，只是当前数值相同，不是共享策略。 |
@@ -117,6 +117,13 @@ Q1a 自动门禁在首轮全部通过：`compileJava test jar --rerun-tasks` 执
 rebuild、关闭恢复原版、再次启用首帧与正常退出均无异常。现存 Java deprecation 与
 Gradle 10 compatibility warning 未在 Q1a 混修，继续属于 Q5。
 
+Q1b 只把现有 Vulkan surface format 与 color-space 数值命名为本类私有常量，数值、
+候选顺序和展示名称均未改变。Java 门禁与默认完整门禁通过；首次 DLSS 完整门禁为
+5/6，通过域之外仅 `cyclesrenderer_smoke_scene_lifecycle` 缺失一次 scene timing
+telemetry（`commits=3; deltas=1; starts=66`）。紧随其后的单域定向测试在 24.08 秒内
+通过。该 native CTest 不加载本次修改的 Java 类，因此保留为 Q5 的已知间歇红项，
+不以定向复核通过覆盖首次失败证据。
+
 ## 5. 后续阶段顺序
 
 Q0C 依据二次独立复核补齐当前事实同步、测试可靠性和算法前实机基线；后续仍按
@@ -126,7 +133,7 @@ Q0C 依据二次独立复核补齐当前事实同步、测试可靠性和算法�
 Q0   函数与控制流热点审计                         DONE
 Q0C  Q0 文档与当前工程基线同步                    DONE
   -> Q1a Controller 状态失效与局部策略             DONE
-  -> Q1b Vulkan color-space 常量                    PENDING
+  -> Q1b Vulkan surface format/color-space 常量     DONE
   -> Q2  私有函数与内部实现整理                   PENDING
   -> Q3  内部 API、参数与 DTO 边界复核             PENDING
   -> Q4a 设置可见性 characterization test         PENDING
