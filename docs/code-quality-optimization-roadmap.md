@@ -1,6 +1,6 @@
 # Cycles Renderer 代码级质量优化路线图
 
-状态：`Q0 / Q0C / Q1 / Q2 / Q3 DONE`；`Q4a PENDING`（2026-08-17）
+状态：`Q0 / Q0C / Q1 / Q2 / Q3 / Q4a DONE`（2026-08-17）
 
 检查基线：`019d7ec`
 
@@ -157,6 +157,26 @@ Q3 对跨 package 方法、参数较多的方法、telemetry/result record、nat
 刚在 Q2 首次通过的 Java/default/DLSS 门禁。Q4a 将从测试侧建立设置可见性 seam，不以
 Q3 的参数数量审计为理由提前改动配置契约。
 
+### 4.7 Q4a 设置可见性 characterization boundary
+
+Q4a 将 `CyclesSettingsList` 中约百行的 option dependency 条件链迁入 package-private
+`SettingsVisibilityPolicy`。policy 只接收 option ID 与值 lookup，不依赖 Minecraft
+Widget、NeoForge 配置生命周期或持久化对象；列表仍拥有 draft、控件刷新和 choice
+filtering。设置 ID、判断顺序和启用语义保持不变。
+
+新增 5 个 focused tests：四组锁定 AE/AF、adaptive sampling、动态分辨率、相机投影、
+DoF、安全区、denoiser、PBR 与白平衡组合；一组遍历真实 option catalog，并让未知依赖
+ID 直接失败。测试同时保留既有 `camera.fisheyeLens` 只依据 panorama type 的行为，
+不在 characterization 阶段顺手修正规则。
+
+focused test 在接入 UI 前和接线后均通过；`compileJava test jar --rerun-tasks` 执行
+10 个 task，默认 `verifyProject --rerun-tasks` 通过全部 6 个 native CTest 域。首次
+DLSS 完整门禁为 5/6，仅已知的 `cyclesrenderer_smoke_scene_lifecycle` 再次缺失一次
+scene timing telemetry（`commits=3; deltas=1; starts=67`）；紧随其后的单域有界复核
+在 24.00 秒内通过。该 native 测试不加载本阶段 Java UI 类，首次失败证据继续归 Q5，
+不以复核通过覆盖。逐阶段 F9 人工抽查按当前串行执行约定合并到 V0 实机矩阵，不作为
+Q4a 自动化提交的阻塞项。
+
 ## 5. 后续阶段顺序
 
 Q0C 依据二次独立复核补齐当前事实同步、测试可靠性和算法前实机基线；后续仍按
@@ -169,7 +189,7 @@ Q0C  Q0 文档与当前工程基线同步                    DONE
   -> Q1b Vulkan surface format/color-space 常量     DONE
   -> Q2  私有函数与内部实现整理                   DONE
   -> Q3  内部 API、参数与 DTO 边界复核             DONE
-  -> Q4a 设置可见性 characterization test         PENDING
+  -> Q4a 设置可见性 characterization test         DONE
   -> Q4b geometry decode characterization test    PENDING
   -> Q4c scene resource characterization boundary PENDING
   -> Q5  编译警告与双变体门禁可靠性复核           PENDING

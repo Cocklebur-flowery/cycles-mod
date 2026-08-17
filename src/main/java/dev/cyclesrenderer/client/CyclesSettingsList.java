@@ -2,7 +2,6 @@ package dev.cyclesrenderer.client;
 
 import dev.cyclesrenderer.config.CyclesClientConfig;
 import dev.cyclesrenderer.config.CyclesRenderSettings;
-import dev.cyclesrenderer.config.CameraAutomationSettings;
 import dev.cyclesrenderer.config.SettingsDraft;
 import dev.cyclesrenderer.config.SettingsOption;
 import dev.cyclesrenderer.nativebridge.NativeBridge;
@@ -90,127 +89,7 @@ final class CyclesSettingsList
     }
 
     private boolean isEnabled(SettingsOption<?> option) {
-        String id = option.id();
-        if (id.startsWith("color.autoExposure.") && !booleanValue("color.autoExposure")) {
-            return false;
-        }
-        if (id.startsWith("camera.autofocus.") && !id.equals("camera.autofocus.mode")
-                && enumValue("camera.autofocus.mode")
-                    == CameraAutomationSettings.AutofocusMode.OFF) {
-            return false;
-        }
-        if ((id.equals("sampling.minimumSamples") || id.equals("sampling.noiseThreshold"))
-                && !booleanValue("sampling.adaptive")) {
-            return false;
-        }
-        if (id.equals("output.interactivePercentage")
-                && !booleanValue("output.dynamicResolution")) {
-            return false;
-        }
-        CyclesRenderSettings.CameraType cameraType = enumValue("camera.type");
-        CyclesRenderSettings.PanoramaType panoramaType = enumValue("camera.panoramaType");
-        if (id.equals("camera.projection")
-                && cameraType != CyclesRenderSettings.CameraType.PERSPECTIVE) {
-            return false;
-        }
-        if (id.equals("camera.panoramaType")
-                && cameraType != CyclesRenderSettings.CameraType.PANORAMA) {
-            return false;
-        }
-        if (id.equals("camera.focalLength")
-                && !booleanValue("camera.depthOfField")
-                && (cameraType != CyclesRenderSettings.CameraType.PERSPECTIVE
-                    || enumValue("camera.projection")
-                        != CyclesRenderSettings.ProjectionMode.PHYSICAL_LENS)) {
-            return false;
-        }
-        if (id.equals("camera.sensorWidth")
-                && !usesSensorWidth(cameraType, panoramaType,
-                    enumValue("camera.projection"))) {
-            return false;
-        }
-        if (id.equals("camera.fisheyeFov")
-                && !usesFisheye(panoramaType, cameraType)) {
-            return false;
-        }
-        if (id.equals("camera.fisheyeLens")
-                && panoramaType != CyclesRenderSettings.PanoramaType.FISHEYE_EQUISOLID) {
-            return false;
-        }
-        if ((id.startsWith("camera.latitude") || id.startsWith("camera.longitude"))
-                && (cameraType != CyclesRenderSettings.CameraType.PANORAMA
-                    || panoramaType != CyclesRenderSettings.PanoramaType.EQUIRECTANGULAR)) {
-            return false;
-        }
-        if (id.startsWith("camera.polynomial")
-                && (cameraType != CyclesRenderSettings.CameraType.PANORAMA
-                    || panoramaType
-                        != CyclesRenderSettings.PanoramaType.FISHEYE_LENS_POLYNOMIAL)) {
-            return false;
-        }
-        if (id.startsWith("camera.cylindrical")
-                && (cameraType != CyclesRenderSettings.CameraType.PANORAMA
-                    || panoramaType != CyclesRenderSettings.PanoramaType.CENTRAL_CYLINDRICAL)) {
-            return false;
-        }
-        if (id.startsWith("camera.")
-                && Set.of("camera.depthOfFieldMode", "camera.focusDistance", "camera.fStop",
-                        "camera.apertureCircular",
-                        "camera.apertureBlades", "camera.apertureRotation", "camera.apertureRatio")
-                .contains(id)
-                && !booleanValue("camera.depthOfField")) {
-            return false;
-        }
-        if (id.equals("camera.apertureBlades") && booleanValue("camera.apertureCircular")) {
-            return false;
-        }
-        if ((id.startsWith("camera.titleSafe") || id.startsWith("camera.actionSafe")
-                || id.equals("camera.centerCutSafeAreas"))
-                && !booleanValue("camera.safeAreas")) {
-            return false;
-        }
-        if ((id.startsWith("camera.centerTitleSafe") || id.startsWith("camera.centerActionSafe"))
-                && (!booleanValue("camera.safeAreas")
-                    || !booleanValue("camera.centerCutSafeAreas"))) {
-            return false;
-        }
-        if (id.startsWith("denoise.") && !id.equals("denoise.mode")
-                && enumValue("denoise.mode") == CyclesRenderSettings.DenoiserMode.OFF) {
-            return false;
-        }
-        if (id.equals("denoise.dlssMode")
-                && enumValue("denoise.mode") != CyclesRenderSettings.DenoiserMode.DLSS_EXPERIMENTAL) {
-            return false;
-        }
-        if (id.startsWith("materials.") && !id.equals("materials.pbrMode")
-                && enumValue("materials.pbrMode") == CyclesRenderSettings.PbrMode.OFF) {
-            return false;
-        }
-        return !(id.equals("color.temperature") || id.equals("color.tint"))
-                || booleanValue("color.whiteBalance");
-    }
-
-    private static boolean usesSensorWidth(
-            CyclesRenderSettings.CameraType cameraType,
-            CyclesRenderSettings.PanoramaType panoramaType,
-            CyclesRenderSettings.ProjectionMode projectionMode) {
-        if (cameraType == CyclesRenderSettings.CameraType.PERSPECTIVE) {
-            return projectionMode == CyclesRenderSettings.ProjectionMode.PHYSICAL_LENS;
-        }
-        return panoramaType == CyclesRenderSettings.PanoramaType.FISHEYE_EQUISOLID
-                || panoramaType
-                    == CyclesRenderSettings.PanoramaType.FISHEYE_LENS_POLYNOMIAL;
-    }
-
-    private static boolean usesFisheye(
-            CyclesRenderSettings.PanoramaType panoramaType,
-            CyclesRenderSettings.CameraType cameraType) {
-        return cameraType == CyclesRenderSettings.CameraType.PANORAMA
-                && switch (panoramaType) {
-                    case FISHEYE_EQUIDISTANT, FISHEYE_EQUISOLID,
-                            FISHEYE_LENS_POLYNOMIAL -> true;
-                    default -> false;
-                };
+        return SettingsVisibilityPolicy.isEnabled(option.id(), this::value);
     }
 
     private List<?> effectiveChoices(SettingsOption<?> option) {
