@@ -26,6 +26,7 @@ import org.slf4j.Logger;
 
 final class CyclesRendererController {
     private static final long FRAME_DELIVERY_INTERVAL_NANOS = 1_000_000_000L / 120L;
+    private static final long STATS_LOG_INTERVAL_NANOS = 2_000_000_000L;
 
     private final Logger logger;
     private final SectionSceneManager sceneManager = new SectionSceneManager();
@@ -264,7 +265,7 @@ final class CyclesRendererController {
             now = System.nanoTime();
             if (framePolled
                     && (update.reset() || update.committed())
-                    && now - lastStatsLogNanos >= 2_000_000_000L) {
+                    && now - lastStatsLogNanos >= STATS_LOG_INTERVAL_NANOS) {
                 lastStatsLogNanos = now;
                 logger.info(
                         "Cycles streamed scene: sections={}, vertices={}, triangles={}, "
@@ -286,8 +287,7 @@ final class CyclesRendererController {
             logger.error("Native frame rendering failed; restoring the vanilla renderer", error);
             disableExperimentalRenderer();
             NativeBridge.close();
-            nativeBridgeReady = false;
-            appliedSettingsRevision = -1L;
+            invalidateNativeBridgeState();
         } finally {
             performanceMonitor.gpuMarker(PerformanceSample.GpuMarker.CYCLES_END);
             performanceMonitor.endCpuStage(
@@ -306,8 +306,7 @@ final class CyclesRendererController {
         interopBuffer.drainPendingCopy();
         if (interopBuffer.telemetry().nativeBound() && NativeBridge.isReady()) {
             NativeBridge.close();
-            nativeBridgeReady = false;
-            appliedSettingsRevision = -1L;
+            invalidateNativeBridgeState();
         }
         interopBuffer.close();
     }
@@ -372,8 +371,7 @@ final class CyclesRendererController {
                 disableExperimentalRenderer();
             }
             NativeBridge.close();
-            nativeBridgeReady = false;
-            appliedSettingsRevision = -1L;
+            invalidateNativeBridgeState();
         }
     }
 
@@ -389,8 +387,7 @@ final class CyclesRendererController {
 
         interopBuffer.drainPendingCopy();
         NativeBridge.close();
-        nativeBridgeReady = false;
-        appliedSettingsRevision = -1L;
+        invalidateNativeBridgeState();
         interopBuffer.close();
 
         NativeBridge.ProbeResult probe = NativeBridge.probe();
@@ -448,6 +445,11 @@ final class CyclesRendererController {
         return settings != null ? settings : CyclesClientConfig.snapshot();
     }
 
+    private void invalidateNativeBridgeState() {
+        nativeBridgeReady = false;
+        appliedSettingsRevision = -1L;
+    }
+
     private void recordAcceptedSettings(CyclesRenderSettings settings) {
         CyclesRenderSettings previous = appliedSettings;
         appliedSettings = settings;
@@ -495,8 +497,7 @@ final class CyclesRendererController {
                 && NativeBridge.vulkanInteropState().sessionAttached();
         if (interopAttached) {
             NativeBridge.close();
-            nativeBridgeReady = false;
-            appliedSettingsRevision = -1L;
+            invalidateNativeBridgeState();
         }
         interopBuffer.close();
         logger.info("Experimental renderer suspended; native bridge kept warm");

@@ -1,6 +1,6 @@
 # Cycles Renderer 代码级质量优化路线图
 
-状态：`Q0 / Q0C DONE`（2026-08-17）
+状态：`Q0 / Q0C / Q1a DONE`；`Q1b PENDING`（2026-08-17）
 
 检查基线：`019d7ec`
 
@@ -90,6 +90,33 @@ Q0 没有发现新的职责或生命周期拆分红项。既有大型文件仍�
 | `labpbr::connect_parallax_uv()` | `KEEP` | 单一 shader graph 算法；节点数量不是第二职责证据。 |
 | `CyclesDebugOverlay.writeFixedCapabilities()` / `writePerformance()` | `KEEP` | `019d7ec` 后各自只格式化一个诊断分区；行数来自固定展示字段，`extract()` 已收口为状态采集和有序调度。 |
 
+### 4.4 Q1 共享策略与硬编码复核
+
+Q1 对生产 Java/C++ 的时间、容量、尺寸、资源/配置 ID、ABI offset、shader socket 和
+Vulkan 数值做了全量启发式扫描，再按所有者与稳定契约人工复核。重复文本或数值本身
+不是集中化依据，当前结论如下：
+
+| 对象 | 判定 | 原因 |
+| --- | --- | --- |
+| `CyclesRendererController` bridge 失效状态 | `Q1a CLEANUP` | 五个关闭路径表达同一私有状态转换；收口为 `invalidateNativeBridgeState()`，保持每处 `NativeBridge.close()`、interop drain/close、日志和条件顺序。 |
+| Controller 2 秒 scene stats 间隔 | `Q1a CLEANUP` | 属于本类明确诊断策略，命名为带单位的 `STATS_LOG_INTERVAL_NANOS`；数值不变。 |
+| `VulkanCapabilityProbe` color-space 数值 | `Q1b CLEANUP` | 同一类已经命名 scRGB color space，却在候选判断和名称映射中重复四个原始 Vulkan 数值；应在独立阶段只做同值常量替换。 |
+| 配置 ID 与 dependency option ID | `Q4a TEST-FIRST` | ID 是稳定 UI/config contract；先由可见性 characterization test 锁定规则，不在 Q1 搬移字符串。 |
+| Java/C++ 的 3840×2160、ABI size/offset/flag | `KEEP` | 属于跨语言配置和 ABI contract，已有 range/layout/contract 检查；下一次真实 ABI 变化前不扩大生成器或批量迁移。 |
+| AE/AF、GPU readback 的同值 50 ms | `KEEP` | 分属对焦采样和曝光 readback 两个独立生命周期，只是当前数值相同，不是共享策略。 |
+| telemetry EMA、纳秒/微秒换算字面量 | `KEEP` | 各 owner 的局部数学实现清晰；提取公共工具会制造反向依赖而不减少 contract 漂移。 |
+| shader socket 名、Mixin injection token、Cycles include 名 | `KEEP` | 是各自外部 API 的局部绑定符号，集中到项目常量不会产生共同所有者。 |
+| Scene 内部 LabPBR texture namespace | `KEEP` | 三个 ID 在同一资源数组中定义；直接依赖 client entrypoint 的 `MOD_ID` 会反转 scene→entrypoint 依赖，当前局部显式值更清晰。 |
+
+Q1a 与 Q1b 必须分开验证和提交。Q1a 不改变 bridge 是否关闭，只统一 Java 对关闭结果的
+本地记账；Q1b 不改变 Vulkan 枚举数值或选择顺序。
+
+Q1a 自动门禁在首轮全部通过：`compileJava test jar --rerun-tasks` 执行 10 个 task；
+默认与 DLSS `verifyProject --rerun-tasks` 各执行 Java build 和 6 个 native CTest 域，
+没有失败或 Skipped。用户随后使用 DLSS 客户端确认 F8 启用首帧、interop capacity
+rebuild、关闭恢复原版、再次启用首帧与正常退出均无异常。现存 Java deprecation 与
+Gradle 10 compatibility warning 未在 Q1a 混修，继续属于 Q5。
+
 ## 5. 后续阶段顺序
 
 Q0C 依据二次独立复核补齐当前事实同步、测试可靠性和算法前实机基线；后续仍按
@@ -98,7 +125,8 @@ Q0C 依据二次独立复核补齐当前事实同步、测试可靠性和算法�
 ```text
 Q0   函数与控制流热点审计                         DONE
 Q0C  Q0 文档与当前工程基线同步                    DONE
-  -> Q1  共享策略、硬编码和重复状态失效审计       PENDING
+  -> Q1a Controller 状态失效与局部策略             DONE
+  -> Q1b Vulkan color-space 常量                    PENDING
   -> Q2  私有函数与内部实现整理                   PENDING
   -> Q3  内部 API、参数与 DTO 边界复核             PENDING
   -> Q4a 设置可见性 characterization test         PENDING
