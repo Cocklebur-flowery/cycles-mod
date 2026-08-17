@@ -236,6 +236,11 @@
     "commit_footer": "Refs",
     "pull_request_reference": "Refs",
     "pull_request_closure": "Closes",
+    "pull_request_checks": {
+      "reviewed_attempts": "I reviewed the linked Issue's Failed attempts ledger.",
+      "commit_refs": "Relevant commits use Refs for the existing Issue.",
+      "resolution_criteria": "The linked Issue's Resolution criteria are satisfied."
+    },
     "closing_keywords": [
       "close",
       "closes",

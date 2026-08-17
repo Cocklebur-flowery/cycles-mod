@@ -1,0 +1,31 @@
+name: Pull request policy
+
+on:
+  pull_request:
+    types:
+      - opened
+      - edited
+      - synchronize
+      - reopened
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  validate-issue-linkage:
+    name: Validate conditional Issue linkage
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out policy sources
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      - name: Validate linked Issue context
+        run: >-
+          python scripts/validate-pull-request.py
+          --event-file "$GITHUB_EVENT_PATH"
