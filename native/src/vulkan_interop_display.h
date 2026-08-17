@@ -142,6 +142,7 @@ struct VulkanInteropSlot {
     std::uint32_t depth_height = 0U;
     std::uint32_t sample_count = 0U;
     std::uint64_t release_wait_value = 0U;
+    CyclesBridgeReprojectionMetadata reprojection_metadata{};
 };
 
 using VulkanInteropSlots = std::array<VulkanInteropSlot, 3>;
@@ -227,6 +228,9 @@ class VulkanInteropBinding final {
         state_.height = descriptor.height;
         state_.slot_count = descriptor.slot_count;
         slots_ = {};
+        configured_reprojection_metadata_ = {};
+        configured_camera_revision_ = 0U;
+        produced_camera_revision_ = 0U;
         return true;
     }
 
@@ -253,6 +257,9 @@ class VulkanInteropBinding final {
         descriptor_ = {};
         state_ = {};
         slots_ = {};
+        configured_reprojection_metadata_ = {};
+        configured_camera_revision_ = 0U;
+        produced_camera_revision_ = 0U;
         return true;
     }
 
@@ -366,9 +373,11 @@ class VulkanInteropBinding final {
         state_.flags |= CYCLES_BRIDGE_VULKAN_INTEROP_SESSION_ATTACHED;
     }
 
-    void set_configured_camera_revision(std::uint64_t revision) {
+    void set_configured_reprojection_metadata(
+        const CyclesBridgeReprojectionMetadata& metadata) {
         std::lock_guard lock(mutex_);
-        configured_camera_revision_ = revision;
+        configured_reprojection_metadata_ = metadata;
+        configured_camera_revision_ = metadata.camera_revision;
     }
 
     [[nodiscard]] std::uint64_t produced_camera_revision(
@@ -397,6 +406,7 @@ class VulkanInteropBinding final {
     CyclesBridgeVulkanInteropBuffer descriptor_{};
     CyclesBridgeVulkanInteropState state_{};
     VulkanInteropSlots slots_{};
+    CyclesBridgeReprojectionMetadata configured_reprojection_metadata_{};
     std::uint64_t configured_camera_revision_ = 0;
     std::uint64_t produced_camera_revision_ = 0;
 };
@@ -418,6 +428,7 @@ class VulkanInteropDisplayDriver final : public ccl::DisplayDriver {
           state_changed_(binding.changed_),
           worker_changed_(worker_changed),
           stopping_(binding.stopping_),
+          configured_reprojection_metadata_(binding.configured_reprojection_metadata_),
           configured_camera_revision_(binding.configured_camera_revision_),
           produced_camera_revision_(binding.produced_camera_revision_),
           export_depth_(export_depth),
@@ -567,6 +578,22 @@ class VulkanInteropDisplayDriver final : public ccl::DisplayDriver {
             slot.depth_width = current_depth_width_;
             slot.depth_height = current_depth_height_;
             slot.sample_count = state_.sample_count;
+            slot.reprojection_metadata = configured_reprojection_metadata_;
+            slot.reprojection_metadata.struct_size = sizeof(slot.reprojection_metadata);
+            slot.reprojection_metadata.struct_version = 1U;
+            slot.reprojection_metadata.generation = state_.generation;
+            slot.reprojection_metadata.slot_index = static_cast<std::uint32_t>(current_slot_);
+            slot.reprojection_metadata.color_width = current_width_;
+            slot.reprojection_metadata.color_height = current_height_;
+            slot.reprojection_metadata.depth_width = current_depth_width_;
+            slot.reprojection_metadata.depth_height = current_depth_height_;
+            slot.reprojection_metadata.production_time_nanos =
+                static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
+                    std::chrono::steady_clock::now().time_since_epoch()).count());
+            if (current_depth_width_ != current_width_
+                || current_depth_height_ != current_height_) {
+                slot.reprojection_metadata.flags = 0U;
+            }
             state_.slot_index = static_cast<std::uint32_t>(current_slot_);
             state_.ready_slot_count = static_cast<std::uint32_t>(std::count_if(
                 slots_.begin(),
@@ -665,6 +692,7 @@ class VulkanInteropDisplayDriver final : public ccl::DisplayDriver {
     std::condition_variable& state_changed_;
     std::condition_variable& worker_changed_;
     bool& stopping_;
+    CyclesBridgeReprojectionMetadata& configured_reprojection_metadata_;
     std::uint64_t& configured_camera_revision_;
     std::uint64_t& produced_camera_revision_;
     bool export_depth_ = false;

@@ -107,6 +107,60 @@ using SceneResourcesData = cyclesrenderer::scene::ResourcesData;
 using SceneRequest = cyclesrenderer::scene::SceneSnapshot;
 using SceneUpdate = cyclesrenderer::scene::SceneUpdate;
 
+CyclesBridgeReprojectionMetadata make_reprojection_metadata(
+    const CameraRequest& camera_request,
+    std::uint64_t scene_revision,
+    const CyclesBridgeRenderSettings& settings) {
+    CyclesBridgeReprojectionMetadata metadata{};
+    metadata.struct_size = sizeof(metadata);
+    metadata.struct_version = 1U;
+    const bool perspective = settings.camera_type == CYCLES_BRIDGE_CAMERA_PERSPECTIVE
+        && settings.projection_mode == CYCLES_BRIDGE_PROJECTION_MINECRAFT_FOV;
+    const bool physical_depth_of_field = settings.depth_of_field != 0U
+        && settings.depth_of_field_mode == CYCLES_BRIDGE_DEPTH_OF_FIELD_PHYSICAL;
+    metadata.flags = perspective && !physical_depth_of_field
+        ? CYCLES_BRIDGE_REPROJECTION_METADATA_VALID : 0U;
+    metadata.projection = CYCLES_BRIDGE_REPROJECTION_PROJECTION_PERSPECTIVE;
+    metadata.depth_semantic = CYCLES_BRIDGE_REPROJECTION_DEPTH_AXIAL_CAMERA_Z;
+    metadata.color_width = camera_request.render_width;
+    metadata.color_height = camera_request.render_height;
+    metadata.frame_revision = camera_request.camera.frame_id;
+    metadata.camera_revision = camera_request.revision;
+    metadata.scene_revision = scene_revision;
+    metadata.position_x = camera_request.camera.position_x;
+    metadata.position_y = camera_request.camera.position_y;
+    metadata.position_z = camera_request.camera.position_z;
+    double qx = camera_request.camera.rotation_x;
+    double qy = camera_request.camera.rotation_y;
+    double qz = camera_request.camera.rotation_z;
+    double qw = camera_request.camera.rotation_w;
+    const double quaternion_length = std::sqrt(qx * qx + qy * qy + qz * qz + qw * qw);
+    if (quaternion_length <= 1.0e-12 || !std::isfinite(quaternion_length)) {
+        qx = qy = qz = 0.0;
+        qw = 1.0;
+    } else {
+        qx /= quaternion_length;
+        qy /= quaternion_length;
+        qz /= quaternion_length;
+        qw /= quaternion_length;
+    }
+    metadata.rotation_x = static_cast<float>(qx);
+    metadata.rotation_y = static_cast<float>(qy);
+    metadata.rotation_z = static_cast<float>(qz);
+    metadata.rotation_w = static_cast<float>(qw);
+    metadata.vertical_fov_radians = camera_request.camera.vertical_fov_radians;
+    metadata.aspect = static_cast<float>(camera_request.render_width)
+        / static_cast<float>(std::max(1U, camera_request.render_height));
+    metadata.shift_x = settings.camera_shift_x;
+    metadata.shift_y = settings.camera_shift_y;
+    metadata.near_clip = settings.camera_clip_near;
+    metadata.far_clip = std::max(
+        settings.camera_clip_near + 0.001F,
+        settings.camera_clip_far > 0.0F
+            ? settings.camera_clip_far : camera_request.camera.depth_far);
+    return metadata;
+}
+
 std::string wide_to_utf8(const std::wstring& value) {
     if (value.empty()) {
         return {};
@@ -1065,7 +1119,8 @@ class CyclesEngine::Impl final {
             session.reset(render_params, buffer);
             reset_end = std::chrono::steady_clock::now();
             reset_wait_micros = elapsed_micros(reset_start, reset_end);
-            interop_.set_configured_camera_revision(camera_request.revision);
+            interop_.set_configured_reprojection_metadata(make_reprojection_metadata(
+                camera_request, scene_revision, settings));
             frames_.configure(
                 settings,
                 camera_request.camera.depth_far,
@@ -1456,7 +1511,6 @@ class CyclesEngine::Impl final {
                         frames_.invalidate_pass_cache();
                     }
                     render_camera_revision = requested_camera->revision;
-                    interop_.set_configured_camera_revision(render_camera_revision);
                     start_render(
                         *session,
                         session_params,
