@@ -1,6 +1,6 @@
 # Cycles Renderer 代码级质量优化路线图
 
-状态：`Q0 / Q0C / Q1 / Q2 / Q3 / Q4a / Q4b / Q4c / Q5 DONE`（2026-08-17）
+状态：`Q0 / Q0C / Q1 / Q2 / Q3 / Q4a / Q4b / Q4c / Q5 / V0 DONE`（2026-08-17）
 
 检查基线：`019d7ec`
 
@@ -236,6 +236,19 @@ Gradle 10 兼容的赋值语法，`--warning-mode all` 下项目 Java 与 Gradle
 74.37 秒和 82.87 秒。native 构建仍会输出来自 `.deps` 中 Cycles/OpenImageIO 的 MSVC
 第三方警告，Q5 不修改或掩盖第三方源码。逐阶段实机检查继续合并到 V0。
 
+### 4.11 V0 算法修改前实机基线
+
+Q0-Q5 自动化阶段全部收口后，用户在 `60e43dc` 基线上按合并矩阵完成 Minecraft 实机
+验收，并确认未发现异常。验收覆盖 default 与 DLSS 客户端启动、F8 启用到首帧、移动
+加载区块、关闭与再次启用；覆盖方块、玻璃、水、植被及 LabPBR 资源呈现；覆盖窗口
+resize、动态分辨率、Physical/Post Process/关闭景深切换，以及移动/静止降噪。当前
+硬件可用的 SDR/HDR 与
+截图路径、退出世界和关闭客户端亦未报告异常。
+
+该结论是当前提交基线上的人工集成证据，不替代像素 golden、跨 GPU/驱动矩阵或性能
+基准，也不向尚未执行的 A0/A1 算法工作外推。后续若改变可见算法、采样、材质、降噪、
+相机或色彩语义，仍须按对应门禁建立独立数值 oracle 和同场景对照。
+
 ## 5. 后续阶段顺序
 
 Q0C 依据二次独立复核补齐当前事实同步、测试可靠性和算法前实机基线；后续仍按
@@ -252,7 +265,7 @@ Q0C  Q0 文档与当前工程基线同步                    DONE
   -> Q4b geometry decode characterization test    DONE
   -> Q4c scene resource characterization boundary DONE
   -> Q5  编译警告与双变体门禁可靠性复核           DONE
-  -> V0  算法修改前实机基线                       PENDING
+  -> V0  算法修改前实机基线                       DONE
   -> A0  单一算法、单一指标与正确性 oracle 选择    PENDING
   -> A1  经独立确认后的单算法优化                  PENDING
 ```
@@ -262,10 +275,10 @@ controller 的重复 bridge 失效状态。Q2 才根据 Q0/Q1 证据整理私有
 函数引入无所有权的 `Utils`、大参数对象或第二套状态。Q4a、Q4b 和 Q4c 分别处理
 设置策略、compiled geometry 与 scene resource 三种不同测试边界，不合并为一个大提交。
 
-Q5 必须核对 `SectionSceneManager` deprecated API、Gradle 10 compatibility 警告和
-DLSS scene-lifecycle 曾出现的首轮失败；在确认失败域与复现条件前，不把复跑成功写成
-“从未失败”。V0 只关闭或明确保留当前工程基线中的 `NOT RUN` 实机矩阵；发现产品 bug
-时另立修复阶段，不带病进入 A0。
+Q5 已核对 `SectionSceneManager` deprecated API、Gradle 10 compatibility 警告和
+DLSS scene-lifecycle 曾出现的首轮失败，并保留了历史失败证据；V0 随后关闭当前工程
+基线的合并实机矩阵。A0 仍只负责选择一个算法、一个指标和一个正确性 oracle，不因
+当前自动化与人工基线绿色而直接修改算法。
 
 ABI schema 不在 Q1-Q4 队列中。下一次真实 ABI 新增或字段迁移前，另立契约阶段定义
 pointer、array、float/double、padding 和 alignment 语义，并一次只迁移一个结构。
