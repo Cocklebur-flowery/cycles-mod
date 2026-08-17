@@ -22,6 +22,8 @@ import org.lwjgl.vulkan.VkDependencyInfo;
 import org.lwjgl.vulkan.VkImageSubresourceLayers;
 import org.lwjgl.vulkan.VkMemoryBarrier2;
 
+import java.util.Optional;
+
 public final class VulkanFrameInterop implements AutoCloseable {
     public static final int BYTES_PER_PIXEL = 8;
     private static final int DEPTH_BYTES_PER_PIXEL = 4;
@@ -43,12 +45,14 @@ public final class VulkanFrameInterop implements AutoCloseable {
     private int pendingDepthWidth;
     private int pendingDepthHeight;
     private int pendingSlotIndex;
+    private NativeBridge.ReprojectionMetadata pendingReprojectionMetadata;
     private long displayedGeneration;
     private int displayedWidth;
     private int displayedHeight;
     private int displayedDepthWidth;
     private int displayedDepthHeight;
     private int displayedSlotIndex;
+    private NativeBridge.ReprojectionMetadata displayedReprojectionMetadata;
     private long copyCount;
     private long generationGaps;
     private long lastCopyMicros;
@@ -112,8 +116,9 @@ public final class VulkanFrameInterop implements AutoCloseable {
                 || !NativeBridge.isReady()) {
             return;
         }
-        NativeBridge.VulkanInteropState state =
-                NativeBridge.acquireVulkanInteropFrame(displayedGeneration);
+        NativeBridge.VulkanInteropFrame acquired =
+                NativeBridge.acquireVulkanReprojectionFrame(displayedGeneration);
+        NativeBridge.VulkanInteropState state = acquired.state();
         nativeActive = state.active();
         if (!state.frameAcquired() || state.generation() <= displayedGeneration) {
             return;
@@ -124,6 +129,7 @@ public final class VulkanFrameInterop implements AutoCloseable {
         pendingDepthWidth = state.depthWidth();
         pendingDepthHeight = state.depthHeight();
         pendingSlotIndex = state.slotIndex();
+        pendingReprojectionMetadata = acquired.reprojectionMetadata();
         try {
             validateFrame(
                     pendingWidth,
@@ -160,6 +166,7 @@ public final class VulkanFrameInterop implements AutoCloseable {
             pendingDepthWidth = 0;
             pendingDepthHeight = 0;
             pendingSlotIndex = 0;
+            pendingReprojectionMetadata = null;
             throw error;
         }
     }
@@ -213,6 +220,10 @@ public final class VulkanFrameInterop implements AutoCloseable {
 
     public long generation() {
         return displayedGeneration;
+    }
+
+    public Optional<NativeBridge.ReprojectionMetadata> reprojectionMetadata() {
+        return Optional.ofNullable(displayedReprojectionMetadata);
     }
 
     public CopyTelemetry copyTelemetry() {
@@ -462,12 +473,14 @@ public final class VulkanFrameInterop implements AutoCloseable {
         displayedDepthWidth = pendingDepthWidth;
         displayedDepthHeight = pendingDepthHeight;
         displayedSlotIndex = pendingSlotIndex;
+        displayedReprojectionMetadata = pendingReprojectionMetadata;
         pendingGeneration = 0L;
         pendingWidth = 0;
         pendingHeight = 0;
         pendingDepthWidth = 0;
         pendingDepthHeight = 0;
         pendingSlotIndex = 0;
+        pendingReprojectionMetadata = null;
         copyCount++;
     }
 
@@ -503,11 +516,13 @@ public final class VulkanFrameInterop implements AutoCloseable {
         displayedDepthWidth = 0;
         displayedDepthHeight = 0;
         displayedSlotIndex = 0;
+        displayedReprojectionMetadata = null;
         pendingGeneration = 0L;
         pendingWidth = 0;
         pendingHeight = 0;
         pendingDepthWidth = 0;
         pendingDepthHeight = 0;
+        pendingReprojectionMetadata = null;
         nativeActive = false;
         copyCount = 0L;
         generationGaps = 0L;

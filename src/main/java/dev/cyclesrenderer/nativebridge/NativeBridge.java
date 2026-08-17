@@ -9,7 +9,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 
 public final class NativeBridge {
-    public static final int ABI_VERSION = 43;
+    public static final int ABI_VERSION = 45;
     public static final int DEVICE_UPDATE_PHASE_COUNT = 8;
     public static final int PIXEL_FORMAT_RGBA16_FLOAT = 2;
     public static final int PIXEL_FORMAT_RGBA32_FLOAT = 3;
@@ -239,6 +239,19 @@ public final class NativeBridge {
             rethrowFatalError(error);
             throw new IllegalStateException(
                     "native Vulkan interop frame acquire failed: "
+                            + describe(error), error);
+        }
+    }
+
+    public static VulkanInteropFrame acquireVulkanReprojectionFrame(
+            long previousGeneration) {
+        NativeBridgeSession state = requireState();
+        try {
+            return state.acquireVulkanReprojectionFrame(previousGeneration);
+        } catch (Throwable error) {
+            rethrowFatalError(error);
+            throw new IllegalStateException(
+                    "native Vulkan reprojection frame acquire failed: "
                             + describe(error), error);
         }
     }
@@ -593,6 +606,39 @@ public final class NativeBridge {
 
         public boolean timelineSync() {
             return (flags & 64) != 0;
+        }
+    }
+
+    public record ReprojectionMetadata(
+            long generation,
+            long frameRevision,
+            long cameraRevision,
+            long sceneRevision,
+            long productionTimeNanos,
+            int slotIndex,
+            int width,
+            int height,
+            double positionX,
+            double positionY,
+            double positionZ,
+            float rotationX,
+            float rotationY,
+            float rotationZ,
+            float rotationW,
+            float verticalFovRadians,
+            float aspect,
+            float shiftX,
+            float shiftY,
+            float nearClip,
+            float farClip) {
+    }
+
+    public record VulkanInteropFrame(
+            VulkanInteropState state,
+            ReprojectionMetadata reprojectionMetadata,
+            String rejectionReason) {
+        public boolean hasReprojectionMetadata() {
+            return reprojectionMetadata != null;
         }
     }
 

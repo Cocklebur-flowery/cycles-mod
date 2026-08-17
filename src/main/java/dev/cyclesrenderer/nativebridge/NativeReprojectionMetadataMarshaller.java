@@ -17,6 +17,13 @@ final class NativeReprojectionMetadataMarshaller {
     private NativeReprojectionMetadataMarshaller() {
     }
 
+    static void prepare(MemorySegment target) {
+        target.fill((byte) 0);
+        target.set(JAVA_INT, ReprojectionMetadataAbi.STRUCT_SIZE_OFFSET,
+                Math.toIntExact(ReprojectionMetadataAbi.BYTE_SIZE));
+        target.set(JAVA_INT, ReprojectionMetadataAbi.STRUCT_VERSION_OFFSET, STRUCT_VERSION);
+    }
+
     static DecodeResult decode(MemorySegment source) {
         if (source == null || source.byteSize() < ReprojectionMetadataAbi.BYTE_SIZE) {
             return DecodeResult.rejected("buffer-too-small");
@@ -90,7 +97,7 @@ final class NativeReprojectionMetadataMarshaller {
             return DecodeResult.rejected("camera");
         }
 
-        return DecodeResult.accepted(new Metadata(
+        return DecodeResult.accepted(new NativeBridge.ReprojectionMetadata(
                 generation, frameRevision, cameraRevision, sceneRevision,
                 productionTimeNanos, slotIndex, colorWidth, colorHeight,
                 positionX, positionY, positionZ,
@@ -107,32 +114,8 @@ final class NativeReprojectionMetadataMarshaller {
         return true;
     }
 
-    record Metadata(
-            long generation,
-            long frameRevision,
-            long cameraRevision,
-            long sceneRevision,
-            long productionTimeNanos,
-            int slotIndex,
-            int width,
-            int height,
-            double positionX,
-            double positionY,
-            double positionZ,
-            float rotationX,
-            float rotationY,
-            float rotationZ,
-            float rotationW,
-            float verticalFovRadians,
-            float aspect,
-            float shiftX,
-            float shiftY,
-            float nearClip,
-            float farClip) {
-    }
-
-    record DecodeResult(Metadata metadata, String rejectionReason) {
-        static DecodeResult accepted(Metadata metadata) {
+    record DecodeResult(NativeBridge.ReprojectionMetadata metadata, String rejectionReason) {
+        static DecodeResult accepted(NativeBridge.ReprojectionMetadata metadata) {
             return new DecodeResult(metadata, "");
         }
 

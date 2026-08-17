@@ -83,7 +83,7 @@ bool run_bridge_contract_scenarios(SmokeContext& context) {
     CyclesBridgeCapabilities& capabilities = context.capabilities;
     CyclesBridgeRenderSettings& settings = context.settings;
     std::cerr << "[smoke] ABI check\n";
-    if (cycles_bridge_abi_version() != 43U) {
+    if (cycles_bridge_abi_version() != 45U) {
         std::cerr << "unexpected native ABI " << cycles_bridge_abi_version() << '\n';
         return false;
     }

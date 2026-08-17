@@ -36,6 +36,7 @@ final class NativeBridgeSession implements AutoCloseable {
     private final MemorySegment capabilitiesSegment;
     private final MemorySegment diagnosticsSegment;
     private final MemorySegment vulkanInteropStateSegment;
+    private final MemorySegment reprojectionMetadataSegment;
     private final MemorySegment framePixelsSegment;
     private final ByteBuffer framePixels;
     private final String buildInfo;
@@ -60,6 +61,7 @@ final class NativeBridgeSession implements AutoCloseable {
         this.capabilitiesSegment = library.arena.allocate(CAPABILITIES_LAYOUT);
         this.diagnosticsSegment = library.arena.allocate(DIAGNOSTICS_LAYOUT);
         this.vulkanInteropStateSegment = library.arena.allocate(VulkanInteropStateAbi.LAYOUT);
+        this.reprojectionMetadataSegment = library.arena.allocate(ReprojectionMetadataAbi.LAYOUT);
         this.framePixelsSegment = library.arena.allocate(MAX_NATIVE_FRAME_BYTES, 16);
         this.framePixels = framePixelsSegment.asByteBuffer();
         this.buildInfo = buildInfo;
@@ -186,6 +188,40 @@ final class NativeBridgeSession implements AutoCloseable {
         return queryVulkanInteropState((rendererHandle, state) ->
                 (int) library.acquireVulkanInteropFrame.invokeExact(
                         rendererHandle, previousGeneration, state));
+    }
+
+    NativeBridge.VulkanInteropFrame acquireVulkanReprojectionFrame(long previousGeneration)
+            throws Throwable {
+        NativeVulkanInteropMarshaller.prepareState(vulkanInteropStateSegment, STRUCT_VERSION);
+        NativeReprojectionMetadataMarshaller.prepare(reprojectionMetadataSegment);
+        checkRendererStatus(
+                (int) library.acquireVulkanReprojectionFrame.invokeExact(
+                        renderer,
+                        previousGeneration,
+                        vulkanInteropStateSegment,
+                        reprojectionMetadataSegment),
+                "Vulkan reprojection frame acquire");
+        NativeBridge.VulkanInteropState state =
+                NativeVulkanInteropMarshaller.decodeState(vulkanInteropStateSegment);
+        if (!state.frameAcquired()) {
+            return new NativeBridge.VulkanInteropFrame(state, null, "no-frame");
+        }
+        NativeReprojectionMetadataMarshaller.DecodeResult decoded =
+                NativeReprojectionMetadataMarshaller.decode(reprojectionMetadataSegment);
+        if (!decoded.accepted()) {
+            return new NativeBridge.VulkanInteropFrame(
+                    state, null, decoded.rejectionReason());
+        }
+        NativeBridge.ReprojectionMetadata metadata = decoded.metadata();
+        if (metadata.generation() != state.generation()
+                || metadata.slotIndex() != state.slotIndex()
+                || metadata.width() != state.width()
+                || metadata.height() != state.height()
+                || metadata.width() != state.depthWidth()
+                || metadata.height() != state.depthHeight()) {
+            return new NativeBridge.VulkanInteropFrame(state, null, "frame-mismatch");
+        }
+        return new NativeBridge.VulkanInteropFrame(state, metadata, "");
     }
 
     void releaseVulkanInteropFrame(long frameGeneration) throws Throwable {

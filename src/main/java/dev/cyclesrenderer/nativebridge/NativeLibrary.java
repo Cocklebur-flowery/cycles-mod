@@ -30,6 +30,7 @@ final class NativeLibrary implements AutoCloseable {
     final MethodHandle unbindVulkanInteropBuffer;
     final MethodHandle queryVulkanInteropState;
     final MethodHandle acquireVulkanInteropFrame;
+    final MethodHandle acquireVulkanReprojectionFrame;
     final MethodHandle releaseVulkanInteropFrame;
     final MethodHandle closeWin32Handle;
     final MethodHandle resetScene;
@@ -65,6 +66,8 @@ final class NativeLibrary implements AutoCloseable {
                 linker, symbols, Symbol.QUERY_VULKAN_INTEROP_STATE);
         acquireVulkanInteropFrame = downcall(
                 linker, symbols, Symbol.ACQUIRE_VULKAN_INTEROP_FRAME);
+        acquireVulkanReprojectionFrame = downcall(
+                linker, symbols, Symbol.ACQUIRE_VULKAN_REPROJECTION_FRAME);
         releaseVulkanInteropFrame = downcall(
                 linker, symbols, Symbol.RELEASE_VULKAN_INTEROP_FRAME);
         closeWin32Handle = downcall(linker, symbols, Symbol.CLOSE_WIN32_HANDLE);
@@ -153,6 +156,10 @@ final class NativeLibrary implements AutoCloseable {
         ACQUIRE_VULKAN_INTEROP_FRAME(
                 "cycles_bridge_acquire_vulkan_interop_frame",
                 FunctionDescriptor.of(JAVA_INT, ADDRESS, JAVA_LONG, ADDRESS)),
+        ACQUIRE_VULKAN_REPROJECTION_FRAME(
+                "cycles_bridge_acquire_vulkan_reprojection_frame",
+                FunctionDescriptor.of(
+                        JAVA_INT, ADDRESS, JAVA_LONG, ADDRESS, ADDRESS)),
         RELEASE_VULKAN_INTEROP_FRAME(
                 "cycles_bridge_release_vulkan_interop_frame",
                 FunctionDescriptor.of(JAVA_INT, ADDRESS, JAVA_LONG)),
