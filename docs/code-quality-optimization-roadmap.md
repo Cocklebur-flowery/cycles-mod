@@ -1,6 +1,6 @@
 # Cycles Renderer 代码级质量优化路线图
 
-状态：`Q0 / Q0C / Q1 / Q2 / Q3 / Q4a DONE`（2026-08-17）
+状态：`Q0 / Q0C / Q1 / Q2 / Q3 / Q4a / Q4b DONE`（2026-08-17）
 
 检查基线：`019d7ec`
 
@@ -177,6 +177,25 @@ scene timing telemetry（`commits=3; deltas=1; starts=67`）；紧随其后的�
 不以复核通过覆盖。逐阶段 F9 人工抽查按当前串行执行约定合并到 V0 实机矩阵，不作为
 Q4a 自动化提交的阻塞项。
 
+### 4.8 Q4b compiled geometry decode characterization boundary
+
+Q4b 将 `SectionGeometryCollector` 内纯 buffer 解码、quad normal、triangle/material 写入和
+后续 overlay/foliage 处理迁入 package-private `SectionGeometryDecoder`。Collector 仍拥有
+Minecraft compile hook、level 校验、capture telemetry、pending queue 与 `MeshData`/vertex
+format 适配；新 decoder 不拥有这些生命周期，也没有扩大公开 API。
+
+新增 4 个 focused tests，锁定单 quad 的顶点顺序、颜色、UV、法线、三角形 winding 与
+material index；锁定多层输入顺序和非零 buffer position；锁定退化 quad 的向上 fallback
+normal；锁定空层输入生成 metadata 完整的空 snapshot。`SectionGeometrySnapshot` 的 stride、
+material 数值、payload 数组和 sequence/origin 语义均未改变。
+
+在性能阶段 `5839586` 成为新 HEAD 后，focused test、`compileJava`、完整 Java tests 与 jar
+重新执行并通过。Q4b 初次默认 `verifyProject` 通过 6/6；初次 DLSS 完整门禁在 contract 与
+color 域通过后，于 `smoke_render` 无新增输出地运行约 707 秒，因此被有界终止并保留为
+Q5 的门禁可靠性红项。该 native executable 不加载本阶段 Java decoder，不能作为 Q4b
+characterization 的通过或失败证据；性能提交自身随后记录了当前 HEAD 的 default/DLSS
+focused native 4/4 通过。逐阶段 Minecraft geometry 抽查合并到 V0。
+
 ## 5. 后续阶段顺序
 
 Q0C 依据二次独立复核补齐当前事实同步、测试可靠性和算法前实机基线；后续仍按
@@ -190,7 +209,7 @@ Q0C  Q0 文档与当前工程基线同步                    DONE
   -> Q2  私有函数与内部实现整理                   DONE
   -> Q3  内部 API、参数与 DTO 边界复核             DONE
   -> Q4a 设置可见性 characterization test         DONE
-  -> Q4b geometry decode characterization test    PENDING
+  -> Q4b geometry decode characterization test    DONE
   -> Q4c scene resource characterization boundary PENDING
   -> Q5  编译警告与双变体门禁可靠性复核           PENDING
   -> V0  算法修改前实机基线                       PENDING

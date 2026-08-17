@@ -19,8 +19,6 @@ import net.minecraft.world.level.material.FluidState;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.nio.ByteBuffer;
-import java.nio.ByteOrder;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -30,7 +28,6 @@ import java.util.concurrent.atomic.AtomicLong;
 
 public final class SectionGeometryCollector {
     private static final Logger LOGGER = LoggerFactory.getLogger(SectionGeometryCollector.class);
-    private static final int[] QUAD_TRIANGLES = {0, 1, 2, 0, 2, 3};
     private static final ConcurrentHashMap<Long, SectionGeometrySnapshot> PENDING =
             new ConcurrentHashMap<>();
     private static final ConcurrentLinkedQueue<Long> COMPLETED =
@@ -186,27 +183,7 @@ public final class SectionGeometryCollector {
             SectionCompiler.Results results,
             long sequence,
             SectionMaterialCapture materialColors) {
-        int vertexCount = 0;
-        int quadCount = 0;
-        for (Map.Entry<ChunkSectionLayer, MeshData> entry : results.renderedLayers.entrySet()) {
-            MeshData.DrawState draw = entry.getValue().drawState();
-            if (draw.primitiveTopology() != PrimitiveTopology.QUADS) {
-                continue;
-            }
-            vertexCount = Math.addExact(vertexCount, draw.vertexCount());
-            quadCount = Math.addExact(quadCount, draw.vertexCount() / 4);
-        }
-
-        float[] vertices = new float[Math.multiplyExact(
-                vertexCount, SectionGeometrySnapshot.VERTEX_FLOAT_STRIDE)];
-        int[] colors = new int[vertexCount];
-        int[] triangles = new int[Math.multiplyExact(
-                Math.multiplyExact(quadCount, 2),
-                SectionGeometrySnapshot.TRIANGLE_INT_STRIDE)];
-        int outputVertex = 0;
-        int outputTriangle = 0;
-        List<FoliageSolidifier.Quad> foliageQuads = new ArrayList<>();
-
+        List<SectionGeometryDecoder.LayerInput> layers = new ArrayList<>();
         for (Map.Entry<ChunkSectionLayer, MeshData> entry : results.renderedLayers.entrySet()) {
             ChunkSectionLayer layer = entry.getKey();
             MeshData mesh = entry.getValue();
@@ -214,80 +191,28 @@ public final class SectionGeometryCollector {
             if (draw.primitiveTopology() != PrimitiveTopology.QUADS) {
                 continue;
             }
-
             VertexFormat format = draw.format();
             VertexFormatElement position = requiredElement(format, "Position");
             VertexFormatElement color = requiredElement(format, "Color");
             VertexFormatElement uv = requiredElement(format, "UV0");
-            int stride = format.getVertexSize();
-            ByteBuffer source = mesh.vertexBuffer().duplicate().order(ByteOrder.nativeOrder());
-            int sourceStart = source.position();
-            int layerVertexBase = outputVertex;
-
-            for (int index = 0; index < draw.vertexCount(); index++) {
-                int sourceBase = Math.addExact(sourceStart, Math.multiplyExact(index, stride));
-                int targetBase = outputVertex * SectionGeometrySnapshot.VERTEX_FLOAT_STRIDE;
-                int positionOffset = sourceBase + position.offset();
-                int colorOffset = sourceBase + color.offset();
-                int uvOffset = sourceBase + uv.offset();
-                vertices[targetBase] = source.getFloat(positionOffset);
-                vertices[targetBase + 1] = source.getFloat(positionOffset + 4);
-                vertices[targetBase + 2] = source.getFloat(positionOffset + 8);
-                vertices[targetBase + 6] = source.getFloat(uvOffset);
-                vertices[targetBase + 7] = source.getFloat(uvOffset + 4);
-                colors[outputVertex] = source.getInt(colorOffset);
-                outputVertex++;
-            }
-
-            int layerMaterialIndex = materialIndex(layer);
-            int layerQuadCount = draw.vertexCount() / 4;
-            for (int quad = 0; quad < layerQuadCount; quad++) {
-                int vertexBase = layerVertexBase + quad * 4;
-                int materialIndex = layerMaterialIndex;
-                FoliageSolidifier.Silhouette silhouette = null;
-                if (materialColors != null) {
-                    SectionMaterialCapture.DecodedQuad decoded = materialColors.decodeQuad(
-                            layer, vertices, vertexBase, materialIndex);
-                    if (decoded.colors() != null) {
-                        System.arraycopy(
-                                decoded.colors(), 0, colors, vertexBase, decoded.colors().length);
-                    }
-                    materialIndex = decoded.materialIndex();
-                    silhouette = decoded.silhouette();
-                }
-                writeQuadNormal(vertices, vertexBase);
-                if (silhouette != null
-                        && FoliageSolidifier.coversSprite(vertices, vertexBase, silhouette)) {
-                    foliageQuads.add(new FoliageSolidifier.Quad(
-                            vertexBase, materialIndex, silhouette));
-                }
-                for (int triangle = 0; triangle < 2; triangle++) {
-                    int target = outputTriangle * SectionGeometrySnapshot.TRIANGLE_INT_STRIDE;
-                    int indices = triangle * 3;
-                    triangles[target] = vertexBase + QUAD_TRIANGLES[indices];
-                    triangles[target + 1] = vertexBase + QUAD_TRIANGLES[indices + 1];
-                    triangles[target + 2] = vertexBase + QUAD_TRIANGLES[indices + 2];
-                    triangles[target + 3] = materialIndex;
-                    outputTriangle++;
-                }
-            }
+            layers.add(new SectionGeometryDecoder.LayerInput(
+                    layer,
+                    mesh.vertexBuffer(),
+                    draw.vertexCount(),
+                    format.getVertexSize(),
+                    position.offset(),
+                    color.offset(),
+                    uv.offset(),
+                    materialIndex(layer)));
         }
-
-        CoplanarOverlayResolver.separate(vertices, triangles, quadCount);
-
-        FoliageSolidifier.Result solidified = FoliageSolidifier.apply(
-                vertices, colors, triangles, foliageQuads);
-
-        return new SectionGeometrySnapshot(
+        return SectionGeometryDecoder.decode(
                 sectionPos.asLong(),
                 sectionPos.minBlockX(),
                 sectionPos.minBlockY(),
                 sectionPos.minBlockZ(),
-                solidified.vertices(),
-                solidified.colors(),
-                solidified.triangles(),
-                Math.addExact(quadCount, solidified.addedQuads()),
-                sequence);
+                sequence,
+                layers,
+                materialColors);
     }
 
     private static VertexFormatElement requiredElement(VertexFormat format, String name) {
@@ -304,37 +229,6 @@ public final class SectionGeometryCollector {
             case CUTOUT -> SectionGeometrySnapshot.MATERIAL_CUTOUT;
             case TRANSLUCENT -> SectionGeometrySnapshot.MATERIAL_TRANSLUCENT;
         };
-    }
-
-    private static void writeQuadNormal(float[] vertices, int vertexBase) {
-        int first = vertexBase * SectionGeometrySnapshot.VERTEX_FLOAT_STRIDE;
-        int second = (vertexBase + 1) * SectionGeometrySnapshot.VERTEX_FLOAT_STRIDE;
-        int third = (vertexBase + 2) * SectionGeometrySnapshot.VERTEX_FLOAT_STRIDE;
-        float edge1X = vertices[second] - vertices[first];
-        float edge1Y = vertices[second + 1] - vertices[first + 1];
-        float edge1Z = vertices[second + 2] - vertices[first + 2];
-        float edge2X = vertices[third] - vertices[first];
-        float edge2Y = vertices[third + 1] - vertices[first + 1];
-        float edge2Z = vertices[third + 2] - vertices[first + 2];
-        float normalX = edge1Y * edge2Z - edge1Z * edge2Y;
-        float normalY = edge1Z * edge2X - edge1X * edge2Z;
-        float normalZ = edge1X * edge2Y - edge1Y * edge2X;
-        float length = (float) Math.sqrt(normalX * normalX + normalY * normalY + normalZ * normalZ);
-        if (length <= 1.0e-8F || !Float.isFinite(length)) {
-            normalX = 0.0F;
-            normalY = 1.0F;
-            normalZ = 0.0F;
-        } else {
-            normalX /= length;
-            normalY /= length;
-            normalZ /= length;
-        }
-        for (int corner = 0; corner < 4; corner++) {
-            int target = (vertexBase + corner) * SectionGeometrySnapshot.VERTEX_FLOAT_STRIDE;
-            vertices[target + 3] = normalX;
-            vertices[target + 4] = normalY;
-            vertices[target + 5] = normalZ;
-        }
     }
 
     public record Telemetry(
