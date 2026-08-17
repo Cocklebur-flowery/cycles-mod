@@ -198,6 +198,7 @@ Minecraft SectionCompiler
 详细设计、稳定契约和阶段验收记录位于 [`docs/`](docs/)：
 
 - [`docs/commit-conventions.md`](docs/commit-conventions.md)：提交标题、正文、ABI/生命周期契约和验证矩阵规范。
+- [`docs/issue-conventions.md`](docs/issue-conventions.md)：Issue 生命周期、Severity、失败尝试账本和 Issue/Commit/PR/Test 关系规范。
 - [`docs/render-bridge-and-settings-plan.md`](docs/render-bridge-and-settings-plan.md)：场景桥与设置系统总览。
 - [`docs/stages/performance-tracing.md`](docs/stages/performance-tracing.md)：CPU/GPU 卡顿追踪与 JSON 字段。
 - [`docs/stages/hdr-and-vulkan-interop.md`](docs/stages/hdr-and-vulkan-interop.md)：FP16、HDR 与 CUDA/Vulkan 互操作。

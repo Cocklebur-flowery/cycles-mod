@@ -1,0 +1,243 @@
+{
+  "schema_version": 1,
+  "title_max_length": 96,
+  "issue_types": {
+    "bug": {
+      "title_prefix": "bug",
+      "label": "type:bug",
+      "form": "bug.yml",
+      "intake_required_sections": [
+        "Summary",
+        "Current behavior",
+        "Expected behavior",
+        "Reproduction",
+        "Reproducibility",
+        "Submission checks"
+      ],
+      "managed_required_sections": [
+        "Summary",
+        "Current behavior",
+        "Expected behavior",
+        "Reproduction",
+        "Reproducibility",
+        "Environment",
+        "Variant",
+        "Render device",
+        "Presentation path",
+        "Evidence",
+        "Impact",
+        "Confirmed boundaries",
+        "Investigation hypotheses",
+        "Failed attempts",
+        "Workaround",
+        "Resolution criteria",
+        "Related",
+        "中文概要",
+        "Submission checks"
+      ]
+    },
+    "performance": {
+      "title_prefix": "perf",
+      "label": "type:performance",
+      "form": "performance.yml",
+      "intake_required_sections": [
+        "Summary",
+        "Current measurement",
+        "Workload",
+        "Environment",
+        "Submission checks"
+      ],
+      "managed_required_sections": [
+        "Summary",
+        "Current measurement",
+        "Baseline measurement",
+        "Measurement method",
+        "Workload",
+        "Environment",
+        "Variant",
+        "Render device",
+        "Presentation path",
+        "Evidence",
+        "Impact",
+        "Semantic invariants",
+        "Failed attempts",
+        "Workaround",
+        "Resolution criteria",
+        "Related",
+        "中文概要",
+        "Submission checks"
+      ]
+    },
+    "investigation": {
+      "title_prefix": "investigation",
+      "label": "type:investigation",
+      "form": "investigation.yml",
+      "intake_required_sections": [
+        "Summary",
+        "Investigation question",
+        "Why this matters",
+        "Confirmed facts",
+        "Unknowns",
+        "Exit criteria",
+        "Submission checks"
+      ],
+      "managed_required_sections": [
+        "Summary",
+        "Investigation question",
+        "Why this matters",
+        "Confirmed facts",
+        "Unknowns",
+        "Evidence",
+        "Confirmed boundaries",
+        "Environment",
+        "Failed attempts",
+        "Exit criteria",
+        "Related",
+        "中文概要",
+        "Submission checks"
+      ]
+    }
+  },
+  "scopes": [
+    "render",
+    "presentation",
+    "scene",
+    "native",
+    "abi",
+    "interop",
+    "vulkan",
+    "camera",
+    "sampling",
+    "denoiser",
+    "color",
+    "hdr",
+    "pbr",
+    "material",
+    "texture",
+    "config",
+    "ui",
+    "mixin",
+    "runtime",
+    "diagnostics",
+    "cycles",
+    "offline",
+    "build",
+    "patch",
+    "repo",
+    "docs"
+  ],
+  "statuses": [
+    "needs-triage",
+    "confirmed",
+    "in-progress",
+    "blocked",
+    "deferred",
+    "verification"
+  ],
+  "managed_statuses": [
+    "confirmed",
+    "in-progress",
+    "blocked",
+    "deferred",
+    "verification"
+  ],
+  "severities": [
+    "S1-critical",
+    "S2-major",
+    "S3-moderate",
+    "S4-minor"
+  ],
+  "reproducibility": [
+    "Always",
+    "Intermittent",
+    "Not reliably reproducible",
+    "Unknown"
+  ],
+  "variants": [
+    "default",
+    "experimental-dlss",
+    "unknown"
+  ],
+  "render_devices": [
+    "optix",
+    "cuda",
+    "cpu",
+    "unknown"
+  ],
+  "presentation_paths": [
+    "vulkan-interop",
+    "cpu-upload",
+    "unknown"
+  ],
+  "dispositions": [
+    "reverted",
+    "retained-partial",
+    "rejected",
+    "inconclusive"
+  ],
+  "dropdown_sections": {
+    "Reproducibility": "reproducibility",
+    "Variant": "variants",
+    "Render device": "render_devices",
+    "Presentation path": "presentation_paths"
+  },
+  "environment_required_fields": [
+    "Commit",
+    "Working tree / artifact identity",
+    "Minecraft",
+    "NeoForge",
+    "ABI",
+    "GPU / driver",
+    "OS",
+    "Resolution",
+    "Relevant configuration"
+  ],
+  "deferred_required_fields": [
+    "Deferred reason",
+    "Last evaluated",
+    "Resume trigger"
+  ],
+  "attempt_required_fields": [
+    "Date",
+    "Hypothesis tested",
+    "Change / configuration",
+    "Commit / diff",
+    "Evidence",
+    "Observed result",
+    "Why it did not resolve the Issue",
+    "Disposition"
+  ],
+  "chinese_summary_required_markers": [
+    "本节用于快速理解和上下文恢复，不是工程事实的规范来源",
+    "如与上方英文正文存在差异，以英文正文为准",
+    "问题",
+    "当前结论",
+    "已失败 / 无效方向",
+    "当前规避方案",
+    "以后重新处理时先看",
+    "最重要的证据",
+    "不要重复尝试",
+    "恢复工作的触发条件",
+    "关闭前必须验证"
+  ],
+  "forbidden_sections": [
+    "Proposed solution",
+    "Implementation plan",
+    "Recommended fix",
+    "Files to change",
+    "Work breakdown",
+    "Preferred algorithm"
+  ],
+  "policy_labels": {
+    "complete": "policy:complete",
+    "incomplete": "policy:incomplete"
+  },
+  "vague_title_summaries": [
+    "fix everything",
+    "renderer issue",
+    "performance problem",
+    "misc",
+    "final",
+    "updates"
+  ]
+}
