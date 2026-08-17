@@ -25,6 +25,8 @@ import org.lwjgl.vulkan.VkMemoryBarrier2;
 import java.util.Optional;
 
 public final class VulkanFrameInterop implements AutoCloseable {
+    static final String DEVELOPMENT_REPROJECTION_PROPERTY =
+            "cyclesrenderer.reprojection.development";
     public static final int BYTES_PER_PIXEL = 8;
     private static final int DEPTH_BYTES_PER_PIXEL = 4;
     private static final int SLOT_BYTES_PER_PIXEL =
@@ -78,7 +80,7 @@ public final class VulkanFrameInterop implements AutoCloseable {
                 logicalBytes,
                 SLOT_COUNT,
                 slotStrideBytes,
-                false);
+                Boolean.getBoolean(DEVELOPMENT_REPROJECTION_PROPERTY));
         if (initialization.nativeBound()) {
             telemetry = new Telemetry(
                     true, true, true,

@@ -115,7 +115,8 @@ CyclesBridgeReprojectionMetadata make_reprojection_metadata(
     metadata.struct_size = sizeof(metadata);
     metadata.struct_version = 1U;
     const bool perspective = settings.camera_type == CYCLES_BRIDGE_CAMERA_PERSPECTIVE
-        && settings.projection_mode == CYCLES_BRIDGE_PROJECTION_MINECRAFT_FOV;
+        && settings.projection_mode == CYCLES_BRIDGE_PROJECTION_MINECRAFT_FOV
+        && settings.active_pass == CYCLES_BRIDGE_PASS_COMBINED;
     const bool physical_depth_of_field = settings.depth_of_field != 0U
         && settings.depth_of_field_mode == CYCLES_BRIDGE_DEPTH_OF_FIELD_PHYSICAL;
     metadata.flags = perspective && !physical_depth_of_field
@@ -946,7 +947,11 @@ class CyclesEngine::Impl final {
         VulkanInteropSnapshot interop_snapshot =
             interop_.snapshot(query_cuda_device_uuid(device));
         const bool use_graphics_interop = interop_snapshot.memory_handle != nullptr;
-        const bool export_depth = uses_post_process_depth_of_field(settings);
+        const bool reprojection_inputs = use_graphics_interop
+            && (interop_snapshot.descriptor.flags
+                & CYCLES_BRIDGE_VULKAN_INTEROP_REPROJECTION_INPUTS) != 0U;
+        const bool export_depth = uses_post_process_depth_of_field(settings)
+            || reprojection_inputs;
         const float depth_resolution_divider =
             interop_depth_resolution_divider(device, settings);
         session_params = make_session_params(device, use_graphics_interop);
@@ -981,7 +986,8 @@ class CyclesEngine::Impl final {
         }
         create_output_passes(
             session->scene.get(),
-            registered_pass_mask | required_output_pass_mask(settings));
+            registered_pass_mask | required_output_pass_mask(settings)
+                | (reprojection_inputs ? 1ULL << CYCLES_BRIDGE_PASS_DEPTH : 0ULL));
         build_scene(session->scene.get(), scene_request, settings, runtime);
         const DenoiserSchedule denoiser_schedule = configure_scene_settings(
             session->scene.get(), device, settings,

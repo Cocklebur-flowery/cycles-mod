@@ -130,7 +130,8 @@ bool run_bridge_contract_scenarios(SmokeContext& context) {
     interop.width = 480U;
     interop.height = 270U;
     interop.pixel_format = CYCLES_BRIDGE_PIXEL_FORMAT_RGBA16_FLOAT;
-    interop.flags = CYCLES_BRIDGE_VULKAN_INTEROP_OWNERSHIP_TRANSFER;
+    interop.flags = CYCLES_BRIDGE_VULKAN_INTEROP_OWNERSHIP_TRANSFER
+        | CYCLES_BRIDGE_VULKAN_INTEROP_REPROJECTION_INPUTS;
     interop.allocation_byte_count = 480ULL * 270ULL * 8ULL * 3ULL;
     interop.slot_count = 3U;
     interop.slot_stride_bytes = 480U * 270U * 8U;
