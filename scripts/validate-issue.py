@@ -408,6 +408,7 @@ def validate_issue(
         "issue_type": issue_type,
         "status": status,
         "desired_policy_label": desired_policy_label,
+        "policy_labels": list(policy["policy_labels"].values()),
         "errors": errors,
         "report": _format_report(
             errors=errors,

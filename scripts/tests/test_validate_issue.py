@@ -225,6 +225,9 @@ Commit: bc36e9c
         self.assertTrue(result["valid"], result["errors"])
         self.assertEqual("intake", result["mode"])
         self.assertEqual("policy:complete", result["desired_policy_label"])
+        self.assertEqual(
+            ["policy:complete", "policy:incomplete"], result["policy_labels"]
+        )
 
     def test_accepts_complete_managed_bug(self) -> None:
         result = self.validate(
@@ -400,6 +403,23 @@ Commit: bc36e9c
                 loaded["presentation_paths"],
                 self.dropdown_options(form, "presentation-path"),
             )
+
+    def test_workflow_never_changes_issue_open_state(self) -> None:
+        workflow_path = (
+            REPOSITORY_ROOT / ".github" / "workflows" / "issue-policy.yml"
+        )
+        workflow = workflow_path.read_text(encoding="utf-8")
+        self.assertNotIn("issues.update({", workflow)
+        self.assertNotIn("state: open", workflow)
+        self.assertNotIn("gh issue reopen", workflow)
+        self.assertIn("issues.addLabels", workflow)
+        self.assertIn("issues.removeLabel", workflow)
+        self.assertIn("issues.listComments", workflow)
+        self.assertIn("issues.createComment", workflow)
+        self.assertIn("issues.updateComment", workflow)
+        self.assertIn("result.policy_labels", workflow)
+        self.assertNotIn("policy:complete", workflow)
+        self.assertNotIn("policy:incomplete", workflow)
 
 
 if __name__ == "__main__":
