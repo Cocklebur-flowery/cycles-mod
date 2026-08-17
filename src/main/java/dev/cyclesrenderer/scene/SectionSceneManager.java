@@ -8,13 +8,14 @@ import net.minecraft.client.renderer.texture.TextureAtlasSprite;
 import net.minecraft.core.SectionPos;
 import net.minecraft.resources.Identifier;
 import net.minecraft.server.level.ChunkTrackingView;
-import net.minecraft.util.ARGB;
 import net.minecraft.util.Mth;
 import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.phys.Vec3;
 
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.Iterator;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentLinkedQueue;
 
@@ -453,169 +454,33 @@ public final class SectionSceneManager {
                     settings.pbrMode() == CyclesRenderSettings.PbrMode.LAB_PBR_1_3);
         }
 
-        int atlasWidth = 0;
-        int atlasHeight = 0;
+        List<SectionSceneResourceBuilder.SpriteInput> spriteInputs =
+                new ArrayList<>(sprites.size());
         for (TextureAtlasSprite sprite : sprites.values()) {
-            float widthFraction = sprite.getU1() - sprite.getU0();
-            float heightFraction = sprite.getV1() - sprite.getV0();
-            if (widthFraction > 0.0F) {
-                atlasWidth = Math.max(
-                        atlasWidth,
-                        Math.round(sprite.contents().width() / widthFraction));
-            }
-            if (heightFraction > 0.0F) {
-                atlasHeight = Math.max(
-                        atlasHeight,
-                        Math.round(sprite.contents().height() / heightFraction));
-            }
+            int imageFrame = LabPbrAnimationFrames.currentImageFrame(sprite);
+            spriteInputs.add(new SectionSceneResourceBuilder.SpriteInput(
+                    sprite.getU0(),
+                    sprite.getV0(),
+                    sprite.getU1(),
+                    sprite.getV1(),
+                    sprite.contents().width(),
+                    sprite.contents().height(),
+                    (x, y) -> sprite.getPixelRGBA(imageFrame, x, y)));
         }
-        if (atlasWidth <= 0 || atlasHeight <= 0) {
-            throw new IllegalStateException("invalid Minecraft block atlas dimensions");
-        }
+        SectionSceneResourceBuilder.AtlasLayout atlasLayout =
+                SectionSceneResourceBuilder.measure(spriteInputs);
 
         pbrAtlases = LabPbrAtlasBuilder.build(
                 minecraft.getResourceManager(),
                 sprites,
                 pbrDiscovery,
-                atlasWidth,
-                atlasHeight,
+                atlasLayout.width(),
+                atlasLayout.height(),
                 settings.pbrFallbackRoughness(),
                 settings.pbrFallbackF0());
-
-        byte[] pixels = new byte[Math.multiplyExact(Math.multiplyExact(atlasWidth, atlasHeight), 4)];
-        for (TextureAtlasSprite sprite : sprites.values()) {
-            int startX = Math.round(sprite.getU0() * atlasWidth);
-            int startY = Math.round(sprite.getV0() * atlasHeight);
-            int width = sprite.contents().width();
-            int height = sprite.contents().height();
-            int imageFrame = LabPbrAnimationFrames.currentImageFrame(sprite);
-            for (int y = 0; y < height; y++) {
-                int targetY = startY + y;
-                if (targetY < 0 || targetY >= atlasHeight) {
-                    continue;
-                }
-                for (int x = 0; x < width; x++) {
-                    int targetX = startX + x;
-                    if (targetX < 0 || targetX >= atlasWidth) {
-                        continue;
-                    }
-                    int argb = sprite.getPixelRGBA(imageFrame, x, y);
-                    int output = (targetY * atlasWidth + targetX) * 4;
-                    pixels[output] = (byte) ARGB.red(argb);
-                    pixels[output + 1] = (byte) ARGB.green(argb);
-                    pixels[output + 2] = (byte) ARGB.blue(argb);
-                    pixels[output + 3] = (byte) ARGB.alpha(argb);
-                }
-            }
-        }
-
-        boolean hasPbrAtlases = pbrAtlases.width() == atlasWidth
-                && pbrAtlases.height() == atlasHeight;
-        int normalTextureIndex = hasPbrAtlases
-                ? 1
-                : SectionGeometrySnapshot.TEXTURE_INDEX_INVALID;
-        int materialTextureIndex = hasPbrAtlases
-                ? 2
-                : SectionGeometrySnapshot.TEXTURE_INDEX_INVALID;
-        int auxiliaryTextureIndex = hasPbrAtlases
-                ? 3
-                : SectionGeometrySnapshot.TEXTURE_INDEX_INVALID;
-        int pbrFormat = hasPbrAtlases
-                ? SectionGeometrySnapshot.PBR_FORMAT_LAB_1_3
-                : SectionGeometrySnapshot.PBR_FORMAT_NONE;
-        SectionGeometrySnapshot.MaterialData[] materials = {
-                new SectionGeometrySnapshot.MaterialData(
-                        0, 0, 0.0F, 0.0F,
-                        normalTextureIndex, materialTextureIndex, pbrFormat,
-                        auxiliaryTextureIndex),
-                new SectionGeometrySnapshot.MaterialData(
-                        0,
-                        SectionGeometrySnapshot.MATERIAL_FLAG_CUTOUT,
-                        0.0F,
-                        0.5F,
-                        normalTextureIndex,
-                        materialTextureIndex,
-                        pbrFormat,
-                        auxiliaryTextureIndex),
-                new SectionGeometrySnapshot.MaterialData(
-                        0,
-                        SectionGeometrySnapshot.MATERIAL_FLAG_BLEND,
-                        0.0F,
-                        0.0F,
-                        normalTextureIndex,
-                        materialTextureIndex,
-                        pbrFormat,
-                        auxiliaryTextureIndex),
-                new SectionGeometrySnapshot.MaterialData(
-                        0,
-                        SectionGeometrySnapshot.MATERIAL_FLAG_TRANSMISSION,
-                        0.0F,
-                        0.0F,
-                        normalTextureIndex,
-                        materialTextureIndex,
-                        pbrFormat,
-                        auxiliaryTextureIndex),
-                new SectionGeometrySnapshot.MaterialData(
-                        0,
-                        SectionGeometrySnapshot.MATERIAL_FLAG_TRANSMISSION
-                                | SectionGeometrySnapshot.MATERIAL_FLAG_WATER,
-                        0.0F,
-                        0.0F,
-                        normalTextureIndex,
-                        materialTextureIndex,
-                        pbrFormat,
-                        auxiliaryTextureIndex),
-                new SectionGeometrySnapshot.MaterialData(
-                        0,
-                        SectionGeometrySnapshot.MATERIAL_FLAG_CUTOUT
-                                | SectionGeometrySnapshot.MATERIAL_FLAG_FOLIAGE,
-                        0.0F,
-                        0.5F,
-                        normalTextureIndex,
-                        materialTextureIndex,
-                        pbrFormat,
-                        auxiliaryTextureIndex)
-        };
-        SectionGeometrySnapshot.TextureData[] textures = hasPbrAtlases
-                ? new SectionGeometrySnapshot.TextureData[] {
-                    new SectionGeometrySnapshot.TextureData(
-                            TextureAtlas.LOCATION_BLOCKS,
-                            atlasWidth,
-                            atlasHeight,
-                            pixels,
-                            SectionGeometrySnapshot.TEXTURE_ROLE_COLOR_SRGB),
-                    new SectionGeometrySnapshot.TextureData(
-                            Identifier.fromNamespaceAndPath(
-                                    "cyclesrenderer", "blocks_normal"),
-                            atlasWidth,
-                            atlasHeight,
-                            pbrAtlases.normalPixels(),
-                            SectionGeometrySnapshot.TEXTURE_ROLE_DATA_LINEAR),
-                    new SectionGeometrySnapshot.TextureData(
-                            Identifier.fromNamespaceAndPath(
-                                    "cyclesrenderer", "blocks_material"),
-                            atlasWidth,
-                            atlasHeight,
-                            pbrAtlases.materialPixels(),
-                            SectionGeometrySnapshot.TEXTURE_ROLE_DATA_LINEAR),
-                    new SectionGeometrySnapshot.TextureData(
-                            Identifier.fromNamespaceAndPath(
-                                    "cyclesrenderer", "blocks_labpbr_auxiliary"),
-                            atlasWidth,
-                            atlasHeight,
-                            pbrAtlases.auxiliaryPixels(),
-                            SectionGeometrySnapshot.TEXTURE_ROLE_DATA_LINEAR)
-                }
-                : new SectionGeometrySnapshot.TextureData[] {
-                    new SectionGeometrySnapshot.TextureData(
-                            TextureAtlas.LOCATION_BLOCKS,
-                            atlasWidth,
-                            atlasHeight,
-                            pixels,
-                            SectionGeometrySnapshot.TEXTURE_ROLE_COLOR_SRGB)
-                };
-        return new SectionGeometrySnapshot.SceneResources(
-                originX, originY, originZ, materials, textures);
+        byte[] pixels = SectionSceneResourceBuilder.copyRgba(atlasLayout, spriteInputs);
+        return SectionSceneResourceBuilder.build(
+                originX, originY, originZ, atlasLayout, pixels, pbrAtlases);
     }
 
     public record UpdateResult(

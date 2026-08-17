@@ -1,6 +1,6 @@
 # Cycles Renderer 代码级质量优化路线图
 
-状态：`Q0 / Q0C / Q1 / Q2 / Q3 / Q4a / Q4b DONE`（2026-08-17）
+状态：`Q0 / Q0C / Q1 / Q2 / Q3 / Q4a / Q4b / Q4c DONE`（2026-08-17）
 
 检查基线：`019d7ec`
 
@@ -196,6 +196,24 @@ Q5 的门禁可靠性红项。该 native executable 不加载本阶段 Java deco
 characterization 的通过或失败证据；性能提交自身随后记录了当前 HEAD 的 default/DLSS
 focused native 4/4 通过。逐阶段 Minecraft geometry 抽查合并到 V0。
 
+### 4.9 Q4c scene resource characterization boundary
+
+Q4c 将 block atlas 尺寸推导、当前帧像素的 ARGB→RGBA 复制，以及固定 native
+material/texture descriptor 构建迁入 package-private `SectionSceneResourceBuilder`。
+`SectionSceneManager` 仍拥有 Minecraft texture/resource discovery、LabPBR companion
+discovery、PBR atlas 生成、scene reset 和 native upload queue 生命周期；builder 只消费
+不可变 sprite 输入描述并返回现有 `SceneResources`。
+
+新增 5 个 focused tests，锁定 normalized UV 推导的 atlas 尺寸、非零位置的 RGBA channel
+顺序、无效尺寸拒绝、color-only fallback 的六个 material descriptor、LabPBR 固定 texture
+slot/ID/role，以及 PBR atlas 尺寸不匹配时的 fallback。生产中的 atlas ID、material flags、
+alpha cutoff、texture index、PBR format、origin 和像素数组所有权均保持原值。
+
+focused suite 5/5 通过；`compileJava test jar --rerun-tasks` 执行 10 个 task 并通过。
+首轮 focused 编译曾因新局部变量与既有 `TextureAtlas atlas` 重名而失败，改名后重新完整
+执行通过，没有绕过编译门禁。生产与测试编译仍报告 deprecation 概要，具体 owner 留给
+Q5 使用 `-Xlint:deprecation` 定位；逐阶段 Minecraft atlas/PBR 抽查合并到 V0。
+
 ## 5. 后续阶段顺序
 
 Q0C 依据二次独立复核补齐当前事实同步、测试可靠性和算法前实机基线；后续仍按
@@ -210,7 +228,7 @@ Q0C  Q0 文档与当前工程基线同步                    DONE
   -> Q3  内部 API、参数与 DTO 边界复核             DONE
   -> Q4a 设置可见性 characterization test         DONE
   -> Q4b geometry decode characterization test    DONE
-  -> Q4c scene resource characterization boundary PENDING
+  -> Q4c scene resource characterization boundary DONE
   -> Q5  编译警告与双变体门禁可靠性复核           PENDING
   -> V0  算法修改前实机基线                       PENDING
   -> A0  单一算法、单一指标与正确性 oracle 选择    PENDING
