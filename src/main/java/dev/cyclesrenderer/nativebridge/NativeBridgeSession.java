@@ -139,7 +139,8 @@ final class NativeBridgeSession implements AutoCloseable {
             long releaseSemaphoreHandle,
             String deviceUuid,
             int slotCount,
-            int slotStrideBytes) throws Throwable {
+            int slotStrideBytes,
+            boolean reprojectionInputs) throws Throwable {
         boolean nativeCalled = false;
         try (Arena arena = Arena.ofConfined()) {
             MemorySegment descriptor = NativeVulkanInteropMarshaller.writeBufferDescriptor(
@@ -154,7 +155,8 @@ final class NativeBridgeSession implements AutoCloseable {
                     releaseSemaphoreHandle,
                     deviceUuid,
                     slotCount,
-                    slotStrideBytes);
+                    slotStrideBytes,
+                    reprojectionInputs);
             nativeCalled = true;
             int status = (int) library.bindVulkanInteropBuffer.invokeExact(renderer, descriptor);
             checkRendererStatus(status, "Vulkan interop buffer bind");

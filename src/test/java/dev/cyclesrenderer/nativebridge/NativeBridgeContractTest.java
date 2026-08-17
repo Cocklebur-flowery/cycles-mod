@@ -41,7 +41,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 
 class NativeBridgeContractTest {
     private static final String EXPECTED_PUBLIC_SURFACE_SHA256 =
-            "f0bc2c3d779b58cb7d63afd1452ad0b08d804d557df66530e6c87dfc07e7b239";
+            "8084d91c9f33913fb2394789e8e21d9d63dbd50234f8d9cef413ba7c737dae22";
     private static final String EXPECTED_LAYOUT_SHA256 =
             "d578c93283f841b1f794e406c537094858e397ebed6d9e520654dcda0b97a16f";
     private static final String EXPECTED_SYMBOL_TABLE_SHA256 =
@@ -266,7 +266,8 @@ class NativeBridgeContractTest {
                             0x3132333435363738L,
                             "00112233445566778899aabbccddeeff",
                             3,
-                            24883200);
+                            24883200,
+                            false);
             MemorySegment state = arena.allocate(VulkanInteropStateAbi.LAYOUT);
             state.fill((byte) 0x5a);
             NativeVulkanInteropMarshaller.prepareState(state, 1);
@@ -275,11 +276,28 @@ class NativeBridgeContractTest {
             assertEquals(EXPECTED_VULKAN_REQUEST_BYTES_SHA256, fingerprint,
                     "Native Vulkan request bytes changed: " + fingerprint);
 
+            MemorySegment reprojectionDescriptor =
+                    NativeVulkanInteropMarshaller.writeBufferDescriptor(
+                            arena,
+                            1,
+                            NativeBridge.PIXEL_FORMAT_RGBA16_FLOAT,
+                            1920,
+                            1080,
+                            0x0102030405060708L,
+                            0x1112131415161718L,
+                            0x2122232425262728L,
+                            0x3132333435363738L,
+                            "00112233445566778899aabbccddeeff",
+                            3,
+                            24883200,
+                            true);
+            assertEquals(3, reprojectionDescriptor.get(JAVA_INT, 20L));
+
             IllegalArgumentException invalidDescriptor = assertThrows(
                     IllegalArgumentException.class,
                     () -> NativeVulkanInteropMarshaller.writeBufferDescriptor(
                             arena, 1, 2, 0, 1080, 1L, 1L, 2L, 3L,
-                            "00112233445566778899aabbccddeeff", 3, 8));
+                            "00112233445566778899aabbccddeeff", 3, 8, false));
             assertEquals(
                     "invalid Vulkan interop buffer descriptor",
                     invalidDescriptor.getMessage());
@@ -288,7 +306,7 @@ class NativeBridgeContractTest {
                     IllegalArgumentException.class,
                     () -> NativeVulkanInteropMarshaller.writeBufferDescriptor(
                             arena, 1, 2, 1920, 1080, 1L, 1L, 2L, 3L,
-                            "bad", 3, 8));
+                            "bad", 3, 8, false));
             assertEquals("invalid Vulkan device UUID: bad", invalidUuid.getMessage());
         }
     }

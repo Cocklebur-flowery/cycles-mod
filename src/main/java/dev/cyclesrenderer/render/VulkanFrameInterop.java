@@ -77,7 +77,8 @@ public final class VulkanFrameInterop implements AutoCloseable {
                 capacityHeight,
                 logicalBytes,
                 SLOT_COUNT,
-                slotStrideBytes);
+                slotStrideBytes,
+                false);
         if (initialization.nativeBound()) {
             telemetry = new Telemetry(
                     true, true, true,

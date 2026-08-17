@@ -464,11 +464,15 @@ class OwnedWin32Handle final {
 
 bool valid_vulkan_interop_buffer(
     const CyclesBridgeVulkanInteropBuffer& descriptor) {
+    constexpr std::uint32_t supported_flags =
+        CYCLES_BRIDGE_VULKAN_INTEROP_OWNERSHIP_TRANSFER
+        | CYCLES_BRIDGE_VULKAN_INTEROP_REPROJECTION_INPUTS;
     if (descriptor.struct_size < sizeof(CyclesBridgeVulkanInteropBuffer)
         || descriptor.struct_version != kStructVersion
         || descriptor.width == 0U || descriptor.height == 0U
         || descriptor.pixel_format != CYCLES_BRIDGE_PIXEL_FORMAT_RGBA16_FLOAT
-        || descriptor.flags != CYCLES_BRIDGE_VULKAN_INTEROP_OWNERSHIP_TRANSFER
+        || (descriptor.flags & CYCLES_BRIDGE_VULKAN_INTEROP_OWNERSHIP_TRANSFER) == 0U
+        || (descriptor.flags & ~supported_flags) != 0U
         || descriptor.memory_handle == 0U
         || descriptor.ready_semaphore_handle == 0U
         || descriptor.release_semaphore_handle == 0U

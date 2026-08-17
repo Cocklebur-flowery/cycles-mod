@@ -57,7 +57,8 @@ final class VulkanSharedAllocation implements AutoCloseable {
             int capacityHeight,
             long logicalBytes,
             int slotCount,
-            int slotStrideBytes) {
+            int slotStrideBytes,
+            boolean reprojectionInputs) {
         VulkanCapabilityProbe.InteropBootstrap bootstrap =
                 VulkanCapabilityProbe.interopBootstrap();
         if (!bootstrap.extensionsRequested()) {
@@ -95,7 +96,8 @@ final class VulkanSharedAllocation implements AutoCloseable {
                         releaseHandle,
                         capabilities.physicalDeviceUuid(),
                         slotCount,
-                        slotStrideBytes);
+                        slotStrideBytes,
+                        reprojectionInputs);
             } finally {
                 // The NativeBridge call owns all three handles on every return path.
                 exportedHandle = 0L;

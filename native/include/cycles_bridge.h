@@ -282,6 +282,7 @@ enum CyclesBridgePanoramaType : std::uint32_t {
 
 enum CyclesBridgeVulkanInteropFlags : std::uint32_t {
     CYCLES_BRIDGE_VULKAN_INTEROP_OWNERSHIP_TRANSFER = 1U << 0U,
+    CYCLES_BRIDGE_VULKAN_INTEROP_REPROJECTION_INPUTS = 1U << 1U,
 };
 
 enum CyclesBridgeVulkanInteropStateFlags : std::uint32_t {

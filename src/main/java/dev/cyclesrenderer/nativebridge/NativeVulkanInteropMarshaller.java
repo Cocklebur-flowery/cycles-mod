@@ -25,7 +25,8 @@ final class NativeVulkanInteropMarshaller {
             long releaseSemaphoreHandle,
             String deviceUuid,
             int slotCount,
-            int slotStrideBytes) {
+            int slotStrideBytes,
+            boolean reprojectionInputs) {
         if (width <= 0 || height <= 0 || allocationBytes <= 0L
                 || memoryHandle == 0L || readySemaphoreHandle == 0L
                 || releaseSemaphoreHandle == 0L || slotCount <= 0
@@ -40,7 +41,7 @@ final class NativeVulkanInteropMarshaller {
         descriptor.set(JAVA_INT, 8L, width);
         descriptor.set(JAVA_INT, 12L, height);
         descriptor.set(JAVA_INT, 16L, pixelFormat);
-        descriptor.set(JAVA_INT, 20L, 1);
+        descriptor.set(JAVA_INT, 20L, reprojectionInputs ? 3 : 1);
         descriptor.set(JAVA_LONG, 24L, allocationBytes);
         descriptor.set(JAVA_LONG, 32L, memoryHandle);
         for (int index = 0; index < uuid.length; index++) {

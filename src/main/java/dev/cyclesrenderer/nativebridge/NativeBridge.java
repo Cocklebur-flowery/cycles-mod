@@ -187,13 +187,14 @@ public final class NativeBridge {
             long releaseSemaphoreHandle,
             String deviceUuid,
             int slotCount,
-            int slotStrideBytes) {
+            int slotStrideBytes,
+            boolean reprojectionInputs) {
         NativeBridgeSession state = requireState();
         try {
             state.bindVulkanInteropBuffer(
                     width, height, allocationBytes, memoryHandle,
-                    readySemaphoreHandle, releaseSemaphoreHandle, deviceUuid,
-                    slotCount, slotStrideBytes);
+                        readySemaphoreHandle, releaseSemaphoreHandle, deviceUuid,
+                        slotCount, slotStrideBytes, reprojectionInputs);
         } catch (Throwable error) {
             rethrowFatalError(error);
             throw new IllegalStateException(
