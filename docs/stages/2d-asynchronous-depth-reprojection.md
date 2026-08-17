@@ -1,6 +1,6 @@
 # 2D 异步深度重投影
 
-状态：`2D-R0 DESIGN FROZEN`；`2D-R1`～`2D-R6` 未实现
+状态：`2D-R0`、`2D-R1` 完成；`2D-R2`～`2D-R6` 未实现
 设计基线：`337d3bf`
 生产基线：ABI43、单 Cycles Session、现有 Vulkan 三槽 interop
 
@@ -71,6 +71,24 @@ interop transport state。新结构必须有 `struct_size`、`struct_version`、
 
 `2D-R1` 必须先从当前 Cycles Depth pass 和 Post DoF 消费路径确认实际深度语义，禁止先假定
 它是 clip depth、view-space Z 或 ray distance。契约冻结后才允许进入 ABI 阶段。
+
+R1 源码审计冻结以下事实：
+
+- 普通 `PASS_DEPTH` 写入 `camera_z_depth(kg, sd->P)`；透视相机返回 Cycles
+  `worldtocamera` 的 Z，不是归一化设备/clip depth，也不是从相机到命中点的射线长度。
+- 当前 Native 相机矩阵把 Minecraft 本地 `-Z` 前方翻转为 Cycles 相机 `+Z`，因此 Java
+  侧契约中的正深度是 `-Minecraft local Z`，即轴向深度。
+- 无命中时 pass accessor 把零值转换为 `1e10`。Oracle 不依赖该哨兵常量，而是统一拒绝
+  非有限、非正以及超出源 near/far 的值。
+- 离轴像素必须按轴向深度反投影：先构造本地透视方向，再以
+  `axialDepth / -direction.z` 求射线距离。把 R32F 数值直接当射线长度是错误语义。
+- Post Process DoF 的 focus distance 同样使用透视轴向距离，所以重投影输出的目标深度
+  继续保持 `-targetLocal.z`，无需改变现有 DoF 单位。
+
+`DepthReprojectionMath` 是 R1 的 CPU reference oracle：使用现有 viewplane 的 FOV、aspect、
+shift 公式，按 Minecraft quaternion 的 local-to-world 顺序重建世界点，再按目标相机的逆旋转
+投影。它以 nearest-depth forward splat 规定遮挡胜者；没有获胜源样本的目标像素保持 invalid，
+不在 oracle 中填洞。GPU 实现必须与此数值契约交叉验证。
 
 第一版只支持普通透视相机，并要求：
 
