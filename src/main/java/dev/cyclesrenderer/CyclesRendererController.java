@@ -1,5 +1,6 @@
 package dev.cyclesrenderer;
 
+import com.mojang.blaze3d.pipeline.RenderTarget;
 import dev.cyclesrenderer.camera.AutofocusStage;
 import dev.cyclesrenderer.client.CameraSafeAreaOverlay;
 import dev.cyclesrenderer.config.CyclesClientConfig;
@@ -192,97 +193,10 @@ final class CyclesRendererController {
             performanceMonitor.endCpuStage(
                     PerformanceSample.CpuStage.CAMERA_FFI, cameraTraceStart);
 
-            long interopStart = performanceMonitor.beginCpuStage();
-            performanceMonitor.gpuMarker(PerformanceSample.GpuMarker.INTEROP_BEGIN);
-            interopBuffer.pollCompletedFrame();
-            performanceMonitor.gpuMarker(PerformanceSample.GpuMarker.INTEROP_END);
-            performanceMonitor.endCpuStage(
-                    PerformanceSample.CpuStage.INTEROP_POLL, interopStart);
-            if (interopBuffer.hasActiveFrame()) {
-                long displayStart = performanceMonitor.beginCpuStage();
-                performanceMonitor.gpuMarker(PerformanceSample.GpuMarker.DISPLAY_BEGIN);
-                if (interopBuffer.hasDepthFrame()) {
-                    framePresenter.presentExternal(
-                            mainTarget,
-                            renderSettings,
-                            cameraInput.depthFar(),
-                            cameraInput.focusDistance(),
-                            interopBuffer.frameTextureView(),
-                            interopBuffer.depthTextureView(),
-                            performanceMonitor);
-                } else {
-                    framePresenter.presentExternal(
-                            mainTarget,
-                            renderSettings,
-                            cameraInput.depthFar(),
-                            interopBuffer.frameTextureView(),
-                            performanceMonitor);
-                }
-                performanceMonitor.gpuMarker(PerformanceSample.GpuMarker.DISPLAY_END);
-                performanceMonitor.endCpuStage(
-                        PerformanceSample.CpuStage.DISPLAY_SUBMIT, displayStart);
+            if (pollAndPresentInteropFrame(mainTarget, renderSettings, cameraInput)) {
                 return;
             }
-
-            long now = System.nanoTime();
-            int deliveredWidth = 0;
-            int deliveredHeight = 0;
-            int deliveredSamples = 0;
-            boolean framePolled = false;
-            if (!framePresenter.hasFrame()
-                    || now - lastFrameDeliveryNanos >= FRAME_DELIVERY_INTERVAL_NANOS) {
-                long bridgeStart = System.nanoTime();
-                long acquireStart = performanceMonitor.beginCpuStage();
-                try (NativeBridge.AcquiredFrame frame = NativeBridge.acquireFrame(
-                        framePresenter.generation())) {
-                    recordBridgeCall(System.nanoTime() - bridgeStart);
-                    performanceMonitor.endCpuStage(
-                            PerformanceSample.CpuStage.FRAME_ACQUIRE, acquireStart);
-                    framePolled = true;
-                    deliveredWidth = frame.width();
-                    deliveredHeight = frame.height();
-                    deliveredSamples = frame.sampleCount();
-                    long uploadStart = performanceMonitor.beginCpuStage();
-                    framePresenter.update(frame);
-                    performanceMonitor.endCpuStage(
-                            PerformanceSample.CpuStage.FRAME_UPLOAD, uploadStart);
-                }
-                lastFrameDeliveryNanos = System.nanoTime();
-            } else {
-                skippedFrameDeliveryCount++;
-            }
-            long displayStart = performanceMonitor.beginCpuStage();
-            performanceMonitor.gpuMarker(PerformanceSample.GpuMarker.DISPLAY_BEGIN);
-            framePresenter.present(
-                    mainTarget,
-                    renderSettings,
-                    cameraInput.depthFar(),
-                    performanceMonitor);
-            performanceMonitor.gpuMarker(PerformanceSample.GpuMarker.DISPLAY_END);
-            performanceMonitor.endCpuStage(
-                    PerformanceSample.CpuStage.DISPLAY_SUBMIT, displayStart);
-
-            now = System.nanoTime();
-            if (framePolled
-                    && (update.reset() || update.committed())
-                    && now - lastStatsLogNanos >= STATS_LOG_INTERVAL_NANOS) {
-                lastStatsLogNanos = now;
-                logger.info(
-                        "Cycles streamed scene: sections={}, vertices={}, triangles={}, "
-                                + "viewDistance={}, accepted={}, uploaded={}, removed={}, "
-                                + "frame={}x{}@{} sample(s); {}",
-                        update.activeSections(),
-                        update.vertices(),
-                        update.triangles(),
-                        update.viewDistance(),
-                        update.acceptedSections(),
-                        update.uploadedSections(),
-                        update.removedSections(),
-                        deliveredWidth,
-                        deliveredHeight,
-                        deliveredSamples,
-                        NativeBridge.rendererInfo());
-            }
+            acquireAndPresentCpuFrame(mainTarget, renderSettings, cameraInput, update);
         } catch (RuntimeException error) {
             logger.error("Native frame rendering failed; restoring the vanilla renderer", error);
             disableExperimentalRenderer();
@@ -438,6 +352,111 @@ final class CyclesRendererController {
                 Math.max(camera.depthFar, 1.0F),
                 focusDistance,
                 NativeBridge.CAMERA_FOCUS_DISTANCE_VALID);
+    }
+
+    private boolean pollAndPresentInteropFrame(
+            RenderTarget mainTarget,
+            CyclesRenderSettings renderSettings,
+            NativeBridge.CameraInput cameraInput) {
+        long interopStart = performanceMonitor.beginCpuStage();
+        performanceMonitor.gpuMarker(PerformanceSample.GpuMarker.INTEROP_BEGIN);
+        interopBuffer.pollCompletedFrame();
+        performanceMonitor.gpuMarker(PerformanceSample.GpuMarker.INTEROP_END);
+        performanceMonitor.endCpuStage(
+                PerformanceSample.CpuStage.INTEROP_POLL, interopStart);
+        if (!interopBuffer.hasActiveFrame()) {
+            return false;
+        }
+
+        long displayStart = performanceMonitor.beginCpuStage();
+        performanceMonitor.gpuMarker(PerformanceSample.GpuMarker.DISPLAY_BEGIN);
+        if (interopBuffer.hasDepthFrame()) {
+            framePresenter.presentExternal(
+                    mainTarget,
+                    renderSettings,
+                    cameraInput.depthFar(),
+                    cameraInput.focusDistance(),
+                    interopBuffer.frameTextureView(),
+                    interopBuffer.depthTextureView(),
+                    performanceMonitor);
+        } else {
+            framePresenter.presentExternal(
+                    mainTarget,
+                    renderSettings,
+                    cameraInput.depthFar(),
+                    interopBuffer.frameTextureView(),
+                    performanceMonitor);
+        }
+        performanceMonitor.gpuMarker(PerformanceSample.GpuMarker.DISPLAY_END);
+        performanceMonitor.endCpuStage(
+                PerformanceSample.CpuStage.DISPLAY_SUBMIT, displayStart);
+        return true;
+    }
+
+    private void acquireAndPresentCpuFrame(
+            RenderTarget mainTarget,
+            CyclesRenderSettings renderSettings,
+            NativeBridge.CameraInput cameraInput,
+            SectionSceneManager.UpdateResult update) {
+        long now = System.nanoTime();
+        int deliveredWidth = 0;
+        int deliveredHeight = 0;
+        int deliveredSamples = 0;
+        boolean framePolled = false;
+        if (!framePresenter.hasFrame()
+                || now - lastFrameDeliveryNanos >= FRAME_DELIVERY_INTERVAL_NANOS) {
+            long bridgeStart = System.nanoTime();
+            long acquireStart = performanceMonitor.beginCpuStage();
+            try (NativeBridge.AcquiredFrame frame = NativeBridge.acquireFrame(
+                    framePresenter.generation())) {
+                recordBridgeCall(System.nanoTime() - bridgeStart);
+                performanceMonitor.endCpuStage(
+                        PerformanceSample.CpuStage.FRAME_ACQUIRE, acquireStart);
+                framePolled = true;
+                deliveredWidth = frame.width();
+                deliveredHeight = frame.height();
+                deliveredSamples = frame.sampleCount();
+                long uploadStart = performanceMonitor.beginCpuStage();
+                framePresenter.update(frame);
+                performanceMonitor.endCpuStage(
+                        PerformanceSample.CpuStage.FRAME_UPLOAD, uploadStart);
+            }
+            lastFrameDeliveryNanos = System.nanoTime();
+        } else {
+            skippedFrameDeliveryCount++;
+        }
+        long displayStart = performanceMonitor.beginCpuStage();
+        performanceMonitor.gpuMarker(PerformanceSample.GpuMarker.DISPLAY_BEGIN);
+        framePresenter.present(
+                mainTarget,
+                renderSettings,
+                cameraInput.depthFar(),
+                performanceMonitor);
+        performanceMonitor.gpuMarker(PerformanceSample.GpuMarker.DISPLAY_END);
+        performanceMonitor.endCpuStage(
+                PerformanceSample.CpuStage.DISPLAY_SUBMIT, displayStart);
+
+        now = System.nanoTime();
+        if (framePolled
+                && (update.reset() || update.committed())
+                && now - lastStatsLogNanos >= STATS_LOG_INTERVAL_NANOS) {
+            lastStatsLogNanos = now;
+            logger.info(
+                    "Cycles streamed scene: sections={}, vertices={}, triangles={}, "
+                            + "viewDistance={}, accepted={}, uploaded={}, removed={}, "
+                            + "frame={}x{}@{} sample(s); {}",
+                    update.activeSections(),
+                    update.vertices(),
+                    update.triangles(),
+                    update.viewDistance(),
+                    update.acceptedSections(),
+                    update.uploadedSections(),
+                    update.removedSections(),
+                    deliveredWidth,
+                    deliveredHeight,
+                    deliveredSamples,
+                    NativeBridge.rendererInfo());
+        }
     }
 
     private CyclesRenderSettings activeRenderSettings() {

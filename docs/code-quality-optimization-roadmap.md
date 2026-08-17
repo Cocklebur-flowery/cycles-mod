@@ -1,6 +1,6 @@
 # Cycles Renderer 代码级质量优化路线图
 
-状态：`Q0 / Q0C / Q1 DONE`；`Q2 PENDING`（2026-08-17）
+状态：`Q0 / Q0C / Q1 / Q2 DONE`；`Q3 PENDING`（2026-08-17）
 
 检查基线：`019d7ec`
 
@@ -124,6 +124,18 @@ telemetry（`commits=3; deltas=1; starts=66`）。紧随其后的单域定向测
 通过。该 native CTest 不加载本次修改的 Java 类，因此保留为 Q5 的已知间歇红项，
 不以定向复核通过覆盖首次失败证据。
 
+### 4.5 Q2 私有帧阶段整理
+
+Q2 将 `CyclesRendererController.onRenderLevelAfterLevel()` 中已经存在的两条呈现路径
+分别命名为私有的 interop 轮询/呈现阶段和 CPU fallback 获取/呈现阶段。帧级回调仍负责
+scene、camera、呈现路径选择、失败恢复和最终 marker；没有增加 DTO、公开 API 或第二套
+状态。原有 marker、计时、轮询间隔、早返回、日志条件/文本与异常传播顺序保持不变。
+
+自动门禁首次全部通过：`compileJava test jar --rerun-tasks` 执行 10 个 task，默认与
+DLSS `verifyProject --rerun-tasks` 各通过全部 6 个 native CTest 域。由于本阶段修改每帧
+renderer callback，用户随后完成 Minecraft F8 启用、首帧、关闭、再启用和退出流程，
+确认运行正常。
+
 ## 5. 后续阶段顺序
 
 Q0C 依据二次独立复核补齐当前事实同步、测试可靠性和算法前实机基线；后续仍按
@@ -134,7 +146,7 @@ Q0   函数与控制流热点审计                         DONE
 Q0C  Q0 文档与当前工程基线同步                    DONE
   -> Q1a Controller 状态失效与局部策略             DONE
   -> Q1b Vulkan surface format/color-space 常量     DONE
-  -> Q2  私有函数与内部实现整理                   PENDING
+  -> Q2  私有函数与内部实现整理                   DONE
   -> Q3  内部 API、参数与 DTO 边界复核             PENDING
   -> Q4a 设置可见性 characterization test         PENDING
   -> Q4b geometry decode characterization test    PENDING
