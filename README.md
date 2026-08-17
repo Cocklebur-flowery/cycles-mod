@@ -11,6 +11,20 @@ Cycles Renderer 是一个面向 Minecraft 26.2 / NeoForge 26.2 的实验性客�
 > [!WARNING]
 > 本项目仍处于原型开发阶段，尚不适合作为普通整合包中的即装即用 MOD。当前主要开发平台是 Windows x64 与 NVIDIA RTX；接口、画面和性能仍可能快速变化。
 
+## 画面展示
+
+以下画面来自实验客户端中的 Blender Cycles 5.2 实时路径追踪输出。截图保留了性能与调试叠加层，用于展示当前原型的实际运行效果。
+
+![Cycles 实时路径追踪下的樱花林](docs/images/showcase/cherry-grove-overview.jpg)
+
+| 景深与近距离材质细节 | 低机位樱花林画面 |
+| --- | --- |
+| ![樱花与草地的景深效果](docs/images/showcase/cherry-blossom-depth-of-field.jpg) | ![低机位观察樱花林](docs/images/showcase/cherry-grove-low-angle.jpg) |
+
+| 花瓣近景与焦外 | 林下光照与焦外过渡 |
+| --- | --- |
+| ![樱花花瓣近景](docs/images/showcase/cherry-blossom-close-up.jpg) | ![樱花林下的焦外效果](docs/images/showcase/cherry-grove-bokeh.jpg) |
+
 ## Ultra Vibe Coded：许愿机编程宣言
 
 嘻嘻。欢迎来到全新黄金时代——许愿机编程！只要还有梦，一切皆有可能实现。
