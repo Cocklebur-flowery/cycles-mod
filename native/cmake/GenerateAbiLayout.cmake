@@ -59,6 +59,12 @@ foreach(field_index RANGE 0 ${abi_field_last})
     elseif(field_type STREQUAL "uint64")
         set(field_size 8)
         set(java_layout_type "JAVA_LONG")
+    elseif(field_type STREQUAL "float32")
+        set(field_size 4)
+        set(java_layout_type "JAVA_FLOAT")
+    elseif(field_type STREQUAL "float64")
+        set(field_size 8)
+        set(java_layout_type "JAVA_DOUBLE")
     else()
         message(FATAL_ERROR "Unsupported ABI field type: ${field_type}")
     endif()
@@ -105,6 +111,8 @@ if(DEFINED ABI_JAVA_OUTPUT)
     string(CONCAT java_source
         "package ${abi_java_package};\n\n"
         "import java.lang.foreign.MemoryLayout;\n\n"
+        "import static java.lang.foreign.ValueLayout.JAVA_DOUBLE;\n"
+        "import static java.lang.foreign.ValueLayout.JAVA_FLOAT;\n"
         "import static java.lang.foreign.ValueLayout.JAVA_INT;\n"
         "import static java.lang.foreign.ValueLayout.JAVA_LONG;\n\n"
         "final class ${abi_java_class} {\n"

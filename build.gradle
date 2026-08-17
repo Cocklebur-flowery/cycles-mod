@@ -38,6 +38,8 @@ base {
 def nativeSourceDirectory = layout.projectDirectory.dir('native')
 def abiSchemaFile = layout.projectDirectory.file(
         'abi/cycles_bridge_vulkan_interop_state.json').asFile
+def reprojectionAbiSchemaFile = layout.projectDirectory.file(
+        'abi/cycles_bridge_reprojection_metadata.json').asFile
 def abiGeneratorScript = layout.projectDirectory.file(
         'native/cmake/GenerateAbiLayout.cmake').asFile
 def generatedAbiJavaDirectory = layout.buildDirectory.dir(
@@ -45,6 +47,9 @@ def generatedAbiJavaDirectory = layout.buildDirectory.dir(
 def generatedAbiJavaFile = new File(
         generatedAbiJavaDirectory,
         'dev/cyclesrenderer/nativebridge/VulkanInteropStateAbi.java')
+def generatedReprojectionAbiJavaFile = new File(
+        generatedAbiJavaDirectory,
+        'dev/cyclesrenderer/nativebridge/ReprojectionMetadataAbi.java')
 def experimentalDlss = providers.gradleProperty('experimentalDlss')
         .map { it.toBoolean() }
         .getOrElse(false)
@@ -193,8 +198,20 @@ tasks.register('generateAbiLayouts', Exec) {
             '-P', abiGeneratorScript.absolutePath
 }
 
+tasks.register('generateReprojectionAbiLayout', Exec) {
+    group = 'build setup'
+    description = 'Generates the Java reprojection metadata ABI layout.'
+    inputs.file(reprojectionAbiSchemaFile)
+    inputs.file(abiGeneratorScript)
+    outputs.file(generatedReprojectionAbiJavaFile)
+    commandLine 'cmake',
+            "-DABI_SCHEMA_FILE=${reprojectionAbiSchemaFile.absolutePath}",
+            "-DABI_JAVA_OUTPUT=${generatedReprojectionAbiJavaFile.absolutePath}",
+            '-P', abiGeneratorScript.absolutePath
+}
+
 tasks.named('compileJava').configure {
-    dependsOn 'generateAbiLayouts'
+    dependsOn 'generateAbiLayouts', 'generateReprojectionAbiLayout'
 }
 
 tasks.register('configureNative', Exec) {
@@ -202,6 +219,7 @@ tasks.register('configureNative', Exec) {
     description = 'Configures the Windows x64 native renderer bridge.'
     inputs.dir(nativeSourceDirectory)
     inputs.file(abiSchemaFile)
+    inputs.file(reprojectionAbiSchemaFile)
     outputs.file(new File(nativeBuildDirectory, 'CMakeCache.txt'))
     commandLine 'cmake',
             '-S', nativeSourceDirectory.asFile.absolutePath,

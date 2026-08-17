@@ -294,6 +294,18 @@ enum CyclesBridgeVulkanInteropStateFlags : std::uint32_t {
     CYCLES_BRIDGE_VULKAN_INTEROP_TIMELINE_SYNC = 1U << 6U,
 };
 
+enum CyclesBridgeReprojectionMetadataFlags : std::uint32_t {
+    CYCLES_BRIDGE_REPROJECTION_METADATA_VALID = 1U << 0U,
+};
+
+enum CyclesBridgeReprojectionProjection : std::uint32_t {
+    CYCLES_BRIDGE_REPROJECTION_PROJECTION_PERSPECTIVE = 1,
+};
+
+enum CyclesBridgeReprojectionDepthSemantic : std::uint32_t {
+    CYCLES_BRIDGE_REPROJECTION_DEPTH_AXIAL_CAMERA_Z = 1,
+};
+
 struct CyclesBridgeCamera {
     std::uint32_t struct_size;
     std::uint32_t struct_version;
@@ -690,6 +702,37 @@ struct CyclesBridgeVulkanInteropState {
     std::uint64_t producer_wait_count;
     std::uint32_t depth_width;
     std::uint32_t depth_height;
+};
+
+struct CyclesBridgeReprojectionMetadata {
+    std::uint32_t struct_size;
+    std::uint32_t struct_version;
+    std::uint32_t flags;
+    std::uint32_t projection;
+    std::uint32_t depth_semantic;
+    std::uint32_t slot_index;
+    std::uint32_t color_width;
+    std::uint32_t color_height;
+    std::uint32_t depth_width;
+    std::uint32_t depth_height;
+    std::uint64_t generation;
+    std::uint64_t frame_revision;
+    std::uint64_t camera_revision;
+    std::uint64_t scene_revision;
+    std::uint64_t production_time_nanos;
+    double position_x;
+    double position_y;
+    double position_z;
+    float rotation_x;
+    float rotation_y;
+    float rotation_z;
+    float rotation_w;
+    float vertical_fov_radians;
+    float aspect;
+    float shift_x;
+    float shift_y;
+    float near_clip;
+    float far_clip;
 };
 
 struct CyclesBridgeVertex {

@@ -1,6 +1,7 @@
 #include "cycles_bridge.h"
 
 #include "cycles_engine.h"
+#include "cycles_bridge_reprojection_metadata_asserts.h"
 #include "cycles_bridge_vulkan_interop_state_asserts.h"
 
 #include <Windows.h>
