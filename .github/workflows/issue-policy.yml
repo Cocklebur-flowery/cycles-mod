@@ -14,6 +14,10 @@ permissions:
   contents: read
   issues: write
 
+concurrency:
+  group: issue-policy-${{ github.event.issue.number }}
+  cancel-in-progress: false
+
 jobs:
   validate-issue:
     name: Validate Issue lifecycle record
@@ -27,13 +31,33 @@ jobs:
         with:
           python-version: '3.x'
 
+      - name: Capture current Issue state
+        uses: actions/github-script@v7
+        env:
+          CURRENT_ISSUE_PATH: issue-policy-event.json
+        with:
+          retries: 3
+          retry-exempt-status-codes: 400,401,403,404,422
+          script: |
+            const fs = require('fs');
+            const current = await github.rest.issues.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.payload.issue.number,
+            });
+            fs.writeFileSync(
+              process.env.CURRENT_ISSUE_PATH,
+              JSON.stringify({ issue: current.data }),
+              'utf8'
+            );
+
       - name: Evaluate repository Issue policy
         id: issue-policy
         shell: bash
         run: |
           set +e
           python scripts/validate-issue.py \
-            --event-file "$GITHUB_EVENT_PATH" \
+            --event-file issue-policy-event.json \
             --json-output issue-policy-result.json
           validator_exit=$?
           set -e
@@ -48,6 +72,8 @@ jobs:
         env:
           POLICY_RESULT_PATH: issue-policy-result.json
         with:
+          retries: 3
+          retry-exempt-status-codes: 400,401,403,404,422
           script: |
             const fs = require('fs');
             const result = JSON.parse(
@@ -56,8 +82,13 @@ jobs:
             const owner = context.repo.owner;
             const repo = context.repo.repo;
             const issue_number = context.payload.issue.number;
+            const currentIssue = await github.rest.issues.get({
+              owner,
+              repo,
+              issue_number,
+            });
             const currentLabels = new Set(
-              context.payload.issue.labels.map((label) =>
+              currentIssue.data.labels.map((label) =>
                 typeof label === 'string' ? label : label.name
               )
             );
