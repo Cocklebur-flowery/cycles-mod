@@ -1,6 +1,6 @@
 # Cycles Renderer 代码级质量优化路线图
 
-状态：`Q0 / Q0C / Q1 / Q2 DONE`；`Q3 PENDING`（2026-08-17）
+状态：`Q0 / Q0C / Q1 / Q2 / Q3 DONE`；`Q4a PENDING`（2026-08-17）
 
 检查基线：`019d7ec`
 
@@ -136,6 +136,27 @@ DLSS `verifyProject --rerun-tasks` 各通过全部 6 个 native CTest 域。由�
 renderer callback，用户随后完成 Minecraft F8 启用、首帧、关闭、再启用和退出流程，
 确认运行正常。
 
+### 4.6 Q3 内部 API、参数与 DTO 边界复核
+
+Q3 对跨 package 方法、参数较多的方法、telemetry/result record、native marshalling
+载体和当前仓库无调用的 public 方法做了调用方复核。没有发现应在本阶段修改的生产
+边界：减少参数数量不能凌驾于所有权、兼容性和稳定契约。
+
+| 对象 | 判定 | 原因 |
+| --- | --- | --- |
+| `CyclesDebugOverlay.extract()` | `KEEP` | 只有一个 controller 调用方，但参数明确暴露 presenter、autofocus、interop、scene 与 requested/accepted settings 等不同 owner；把它们塞入一个大 `Inputs` record 只会形成参数包并隐藏依赖。 |
+| `CyclesDebugOverlay.RuntimeStats` | `KEEP` | 九个字段全部属于 controller 的同一组 bridge/camera/frame-delivery 运行统计；该不可变快照避免 overlay 反向依赖 controller。 |
+| Q2 两个私有 presentation 阶段 | `KEEP` | 三至四个参数分别是该帧的 target、settings、camera 与 scene update；创建 DTO 不减少所有者，也不会改善生命周期。 |
+| `SectionSceneManager.UpdateResult` 与各 Telemetry record | `KEEP` | 是跨 package 的不可变观察快照；调用方消费多个字段，直接返回 owner 内部对象反而会泄漏可变状态。 |
+| `SectionGeometrySnapshot` 与 `NativeBridge` records | `KEEP` | 是 Java/native marshalling、ABI 或测试契约；字段数量来源于线性 payload，不按普通 DTO 清理。 |
+| `NativeSceneMarshaller.*Segments` | `KEEP` | 聚合一次 Arena 生命周期内共同返回的 memory segment，表达明确的 native call ownership。 |
+| `FoliageSolidifier` 输入/结果 records | `KEEP` | 是单一几何算法的显式数组和中间数据；未来修改须经过 Q4b characterization 或算法门禁。 |
+| 当前仓库无调用的 public facade / Presenter overload | `DEFER` | 删除会缩小公开二进制表面；没有兼容性或弃用策略时，不能仅凭仓库内无调用判定安全。 |
+
+本阶段仅更新审计文档，没有修改源码、API、ABI、资源、配置或构建图，因此不重复运行
+刚在 Q2 首次通过的 Java/default/DLSS 门禁。Q4a 将从测试侧建立设置可见性 seam，不以
+Q3 的参数数量审计为理由提前改动配置契约。
+
 ## 5. 后续阶段顺序
 
 Q0C 依据二次独立复核补齐当前事实同步、测试可靠性和算法前实机基线；后续仍按
@@ -147,7 +168,7 @@ Q0C  Q0 文档与当前工程基线同步                    DONE
   -> Q1a Controller 状态失效与局部策略             DONE
   -> Q1b Vulkan surface format/color-space 常量     DONE
   -> Q2  私有函数与内部实现整理                   DONE
-  -> Q3  内部 API、参数与 DTO 边界复核             PENDING
+  -> Q3  内部 API、参数与 DTO 边界复核             DONE
   -> Q4a 设置可见性 characterization test         PENDING
   -> Q4b geometry decode characterization test    PENDING
   -> Q4c scene resource characterization boundary PENDING
