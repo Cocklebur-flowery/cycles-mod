@@ -95,7 +95,7 @@ public final class LabPbrAtlasBuilder {
                 0, 0, 0, 0);
     }
 
-    private static void fillDefaults(
+    static void fillDefaults(
             byte[] normalPixels,
             byte[] materialPixels,
             byte[] auxiliaryPixels,
@@ -137,7 +137,8 @@ public final class LabPbrAtlasBuilder {
 
         try (InputStream input = resource.orElseThrow().open();
                 NativeImage image = NativeImage.read(input)) {
-            if (!hasCompatibleFrames(image, frameWidth, frameHeight)) {
+            if (!hasCompatibleFrames(
+                    image.getWidth(), image.getHeight(), frameWidth, frameHeight)) {
                 return DecodeResult.SIZE_MISMATCH;
             }
             consumer.copy(image);
@@ -147,16 +148,17 @@ public final class LabPbrAtlasBuilder {
         }
     }
 
-    private static boolean hasCompatibleFrames(
-            NativeImage image,
+    static boolean hasCompatibleFrames(
+            int imageWidth,
+            int imageHeight,
             int frameWidth,
             int frameHeight) {
         return frameWidth > 0
                 && frameHeight > 0
-                && image.getWidth() >= frameWidth
-                && image.getHeight() >= frameHeight
-                && image.getWidth() % frameWidth == 0
-                && image.getHeight() % frameHeight == 0;
+                && imageWidth >= frameWidth
+                && imageHeight >= frameHeight
+                && imageWidth % frameWidth == 0
+                && imageHeight % frameHeight == 0;
     }
 
     private static void copyNormal(
@@ -170,8 +172,10 @@ public final class LabPbrAtlasBuilder {
             int width,
             int height,
             int imageFrame) {
-        int sourceStartX = frameStartX(source, width, height, imageFrame);
-        int sourceStartY = frameStartY(source, width, height, imageFrame);
+        int sourceStartX = frameStartX(
+                source.getWidth(), source.getHeight(), width, height, imageFrame);
+        int sourceStartY = frameStartY(
+                source.getWidth(), source.getHeight(), width, height, imageFrame);
         for (int y = 0; y < height; y++) {
             int targetY = startY + y;
             if (targetY < 0 || targetY >= atlasHeight) {
@@ -183,17 +187,8 @@ public final class LabPbrAtlasBuilder {
                     continue;
                 }
                 int argb = source.getPixel(sourceStartX + x, sourceStartY + y);
-                float normalX = ARGB.red(argb) / 127.5F - 1.0F;
-                float normalY = ARGB.green(argb) / 127.5F - 1.0F;
-                float normalZ = (float) Math.sqrt(Math.max(
-                        0.0F, 1.0F - normalX * normalX - normalY * normalY));
                 int output = (targetY * atlasWidth + targetX) * 4;
-                target[output] = (byte) ARGB.red(argb);
-                target[output + 1] = (byte) ARGB.green(argb);
-                target[output + 2] = (byte) toUnorm8(normalZ);
-                target[output + 3] = (byte) ARGB.alpha(argb);
-                auxiliary[output] = (byte) ARGB.blue(argb);
-                auxiliary[output + 1] = (byte) ARGB.alpha(argb);
+                decodeNormalPixel(argb, target, auxiliary, output);
             }
         }
     }
@@ -210,8 +205,10 @@ public final class LabPbrAtlasBuilder {
             int height,
             int imageFrame,
             float fallbackF0) {
-        int sourceStartX = frameStartX(source, width, height, imageFrame);
-        int sourceStartY = frameStartY(source, width, height, imageFrame);
+        int sourceStartX = frameStartX(
+                source.getWidth(), source.getHeight(), width, height, imageFrame);
+        int sourceStartY = frameStartY(
+                source.getWidth(), source.getHeight(), width, height, imageFrame);
         for (int y = 0; y < height; y++) {
             int targetY = startY + y;
             if (targetY < 0 || targetY >= atlasHeight) {
@@ -223,48 +220,76 @@ public final class LabPbrAtlasBuilder {
                     continue;
                 }
                 int argb = source.getPixel(sourceStartX + x, sourceStartY + y);
-                int smoothness = ARGB.red(argb);
-                int encodedF0OrMetal = ARGB.green(argb);
-                int emission = ARGB.alpha(argb);
                 int output = (targetY * atlasWidth + targetX) * 4;
-                float perceptualSmoothness = smoothness / 255.0F;
-                // LabPBR defines GGX alpha as (1 - smoothness)^2, while the Cycles
-                // Principled Roughness socket expects the unsquared perceptual value
-                // and performs that square internally. Supplying alpha here would
-                // square it twice and make ordinary blocks unnaturally mirror-like.
-                float cyclesPerceptualRoughness = 1.0F - perceptualSmoothness;
-                target[output] = (byte) toUnorm8(cyclesPerceptualRoughness);
-                target[output + 1] = (byte) (encodedF0OrMetal >= 230 ? 255 : 0);
-                target[output + 2] = (byte) (encodedF0OrMetal >= 230
-                        ? toUnorm8(fallbackF0)
-                        : encodedF0OrMetal);
-                target[output + 3] = (byte) (emission == 255
-                        ? 0
-                        : Math.round(emission * 255.0F / 254.0F));
-                auxiliary[output + 2] = (byte) encodedF0OrMetal;
-                auxiliary[output + 3] = (byte) ARGB.blue(argb);
+                decodeMaterialPixel(argb, fallbackF0, target, auxiliary, output);
             }
         }
     }
 
-    private static int frameStartX(
-            NativeImage image,
+    static void decodeNormalPixel(
+            int argb,
+            byte[] target,
+            byte[] auxiliary,
+            int output) {
+        float normalX = ARGB.red(argb) / 127.5F - 1.0F;
+        float normalY = ARGB.green(argb) / 127.5F - 1.0F;
+        float normalZ = (float) Math.sqrt(Math.max(
+                0.0F, 1.0F - normalX * normalX - normalY * normalY));
+        target[output] = (byte) ARGB.red(argb);
+        target[output + 1] = (byte) ARGB.green(argb);
+        target[output + 2] = (byte) toUnorm8(normalZ);
+        target[output + 3] = (byte) ARGB.alpha(argb);
+        auxiliary[output] = (byte) ARGB.blue(argb);
+        auxiliary[output + 1] = (byte) ARGB.alpha(argb);
+    }
+
+    static void decodeMaterialPixel(
+            int argb,
+            float fallbackF0,
+            byte[] target,
+            byte[] auxiliary,
+            int output) {
+        int smoothness = ARGB.red(argb);
+        int encodedF0OrMetal = ARGB.green(argb);
+        int emission = ARGB.alpha(argb);
+        float perceptualSmoothness = smoothness / 255.0F;
+        // LabPBR defines GGX alpha as (1 - smoothness)^2, while the Cycles
+        // Principled Roughness socket expects the unsquared perceptual value
+        // and performs that square internally. Supplying alpha here would
+        // square it twice and make ordinary blocks unnaturally mirror-like.
+        float cyclesPerceptualRoughness = 1.0F - perceptualSmoothness;
+        target[output] = (byte) toUnorm8(cyclesPerceptualRoughness);
+        target[output + 1] = (byte) (encodedF0OrMetal >= 230 ? 255 : 0);
+        target[output + 2] = (byte) (encodedF0OrMetal >= 230
+                ? toUnorm8(fallbackF0)
+                : encodedF0OrMetal);
+        target[output + 3] = (byte) (emission == 255
+                ? 0
+                : Math.round(emission * 255.0F / 254.0F));
+        auxiliary[output + 2] = (byte) encodedF0OrMetal;
+        auxiliary[output + 3] = (byte) ARGB.blue(argb);
+    }
+
+    static int frameStartX(
+            int imageWidth,
+            int imageHeight,
             int frameWidth,
             int frameHeight,
             int imageFrame) {
-        int columns = image.getWidth() / frameWidth;
-        int rows = image.getHeight() / frameHeight;
+        int columns = imageWidth / frameWidth;
+        int rows = imageHeight / frameHeight;
         int frame = Math.floorMod(imageFrame, Math.multiplyExact(columns, rows));
         return frame % columns * frameWidth;
     }
 
-    private static int frameStartY(
-            NativeImage image,
+    static int frameStartY(
+            int imageWidth,
+            int imageHeight,
             int frameWidth,
             int frameHeight,
             int imageFrame) {
-        int columns = image.getWidth() / frameWidth;
-        int rows = image.getHeight() / frameHeight;
+        int columns = imageWidth / frameWidth;
+        int rows = imageHeight / frameHeight;
         int frame = Math.floorMod(imageFrame, Math.multiplyExact(columns, rows));
         return frame / columns * frameHeight;
     }
