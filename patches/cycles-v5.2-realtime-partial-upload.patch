@@ -1,0 +1,371 @@
+diff --git a/src/device/memory.h b/src/device/memory.h
+--- a/src/device/memory.h
++++ b/src/device/memory.h
+@@ -286,10 +286,11 @@ class device_memory {
+   void *host_alloc(const size_t size);
+ 
+   /* Device memory allocation and copying. */
+   void device_alloc();
+   void device_copy_to();
++  void device_copy_to(const size_t offset, const size_t size);
+   void device_move_to_host();
+   void device_copy_from(const size_t y, const size_t w, size_t h, const size_t elem);
+   void device_copy_merged_bitmap_from(const size_t y, const size_t w, size_t h);
+   void device_zero();
+ 
+@@ -302,10 +303,12 @@ class device_memory {
+ 
+   const char *name_;
+   device_ptr original_device_ptr;
+   size_t original_device_size;
+   Device *original_device;
++  size_t copy_offset_;
++  size_t copy_size_;
+   bool need_realloc_;
+   bool modified;
+ };
+ 
+ /* Device Only Memory
+@@ -517,10 +520,111 @@ template<typename T> class device_vector : public device_memory {
+   }
+ 
+   void tag_modified()
+   {
+     modified = true;
++    dirty_range_count_ = 0;
++  }
++
++  void tag_modified(const size_t offset, const size_t count)
++  {
++    if (count == 0) {
++      return;
++    }
++
++    assert(offset <= data_size && count <= data_size - offset);
++
++    /* A modified vector without ranges is already marked for a full upload. */
++    if (modified && dirty_range_count_ == 0) {
++      return;
++    }
++
++    modified = true;
++    size_t range_begin = offset;
++    size_t range_end = offset + count;
++
++    for (size_t i = 0; i < dirty_range_count_;) {
++      const DirtyRange &dirty = dirty_ranges_[i];
++      if (range_end < dirty.begin || range_begin > dirty.end) {
++        i++;
++        continue;
++      }
++
++      range_begin = (range_begin < dirty.begin) ? range_begin : dirty.begin;
++      range_end = (range_end > dirty.end) ? range_end : dirty.end;
++      dirty_ranges_[i] = dirty_ranges_[--dirty_range_count_];
++    }
++
++    if (dirty_range_count_ == MAX_DIRTY_RANGES) {
++      const auto range_gap = [](const size_t first_begin,
++                                const size_t first_end,
++                                const size_t second_begin,
++                                const size_t second_end) {
++        if (first_end < second_begin) {
++          return second_begin - first_end;
++        }
++        if (second_end < first_begin) {
++          return first_begin - second_end;
++        }
++        return size_t(0);
++      };
++
++      size_t smallest_gap = size_t(-1);
++      size_t merge_first = MAX_DIRTY_RANGES;
++      size_t merge_second = MAX_DIRTY_RANGES;
++      bool merge_incoming = false;
++
++      for (size_t i = 0; i < dirty_range_count_; i++) {
++        const size_t gap = range_gap(
++            range_begin, range_end, dirty_ranges_[i].begin, dirty_ranges_[i].end);
++        if (gap < smallest_gap) {
++          smallest_gap = gap;
++          merge_first = i;
++          merge_incoming = true;
++        }
++      }
++
++      for (size_t i = 0; i < dirty_range_count_; i++) {
++        for (size_t j = i + 1; j < dirty_range_count_; j++) {
++          const size_t gap = range_gap(dirty_ranges_[i].begin,
++                                       dirty_ranges_[i].end,
++                                       dirty_ranges_[j].begin,
++                                       dirty_ranges_[j].end);
++          if (gap < smallest_gap) {
++            smallest_gap = gap;
++            merge_first = i;
++            merge_second = j;
++            merge_incoming = false;
++          }
++        }
++      }
++
++      assert(merge_first < dirty_range_count_);
++      if (merge_incoming) {
++        DirtyRange &target = dirty_ranges_[merge_first];
++        target.begin = (range_begin < target.begin) ? range_begin : target.begin;
++        target.end = (range_end > target.end) ? range_end : target.end;
++        return;
++      }
++
++      assert(merge_second < dirty_range_count_);
++      const size_t merged_begin = (dirty_ranges_[merge_first].begin <
++                                   dirty_ranges_[merge_second].begin) ?
++                                      dirty_ranges_[merge_first].begin :
++                                      dirty_ranges_[merge_second].begin;
++      const size_t merged_end = (dirty_ranges_[merge_first].end >
++                                 dirty_ranges_[merge_second].end) ?
++                                    dirty_ranges_[merge_first].end :
++                                    dirty_ranges_[merge_second].end;
++      const size_t last_index = --dirty_range_count_;
++      if (merge_second != last_index) {
++        dirty_ranges_[merge_second] = dirty_ranges_[last_index];
++      }
++      dirty_ranges_[merge_first] = {merged_begin, merged_end};
++    }
++
++    dirty_ranges_[dirty_range_count_++] = {range_begin, range_end};
+   }
+ 
+   void tag_realloc()
+   {
+     need_realloc_ = true;
+@@ -559,17 +663,28 @@ template<typename T> class device_vector : public device_memory {
+   {
+     if (!modified) {
+       return;
+     }
+ 
+-    copy_to_device();
++    const bool can_copy_ranges = dirty_range_count_ != 0 && !need_realloc_ &&
++                                 device_pointer != 0 && device_size == memory_size();
++    if (!can_copy_ranges) {
++      copy_to_device();
++      return;
++    }
++
++    for (size_t i = 0; i < dirty_range_count_; i++) {
++      const DirtyRange &dirty = dirty_ranges_[i];
++      device_copy_to(dirty.begin * sizeof(T), (dirty.end - dirty.begin) * sizeof(T));
++    }
+   }
+ 
+   void clear_modified()
+   {
+     modified = false;
+     need_realloc_ = false;
++    dirty_range_count_ = 0;
+   }
+ 
+   void copy_from_device()
+   {
+     device_copy_from(0, data_width, (data_height == 0) ? 1 : data_height, sizeof(T));
+@@ -590,14 +705,24 @@ template<typename T> class device_vector : public device_memory {
+   {
+     device_zero();
+   }
+ 
+  protected:
++  struct DirtyRange {
++    size_t begin;
++    size_t end;
++  };
++
++  static constexpr size_t MAX_DIRTY_RANGES = 32;
++
+   size_t size(const size_t width, const size_t height)
+   {
+     return width * ((height == 0) ? 1 : height);
+   }
++
++  DirtyRange dirty_ranges_[MAX_DIRTY_RANGES];
++  size_t dirty_range_count_ = 0;
+ };
+ 
+ /* Device Sub Memory
+  *
+  * Pointer into existing memory. It is not allocated separately, but created
+diff --git a/src/device/memory.cpp b/src/device/memory.cpp
+--- a/src/device/memory.cpp
++++ b/src/device/memory.cpp
+@@ -63,10 +63,12 @@ device_memory::device_memory(Device *device, const char *name, MemoryType type)
+       shared_counter(0),
+       name_(name),
+       original_device_ptr(0),
+       original_device_size(0),
+       original_device(nullptr),
++      copy_offset_(0),
++      copy_size_(0),
+       need_realloc_(false),
+       modified(false)
+ {
+ }
+ 
+@@ -139,10 +141,31 @@ void device_memory::device_copy_to()
+   if (host_pointer) {
+     device->mem_copy_to(*this);
+   }
+ }
+ 
++void device_memory::device_copy_to(const size_t offset, const size_t size)
++{
++  assert(offset <= memory_size() && size <= memory_size() - offset);
++  if (!host_pointer || size == 0) {
++    return;
++  }
++
++  copy_offset_ = offset;
++  copy_size_ = size;
++  try {
++    device->mem_copy_to(*this);
++  }
++  catch (...) {
++    copy_offset_ = 0;
++    copy_size_ = 0;
++    throw;
++  }
++  copy_offset_ = 0;
++  copy_size_ = 0;
++}
++
+ void device_memory::device_move_to_host()
+ {
+   if (host_pointer) {
+     device->mem_move_to_host(*this);
+   }
+diff --git a/src/device/device.cpp b/src/device/device.cpp
+--- a/src/device/device.cpp
++++ b/src/device/device.cpp
+@@ -872,15 +872,20 @@ void GPUDevice::generic_copy_to(device_memory &mem)
+ {
+   if (!mem.host_pointer || !mem.device_pointer) {
+     return;
+   }
+ 
+   /* If not host mapped, the current device only uses device memory allocated by backend
+    * device allocation regardless of mem.host_pointer and mem.shared_pointer, and should
+    * copy data from mem.host_pointer. */
+   if (!(mem.is_shared(this) && mem.host_pointer == mem.shared_pointer)) {
+-    copy_host_to_device((void *)mem.device_pointer, mem.host_pointer, mem.memory_size());
++    const size_t copy_offset = (mem.copy_size_ != 0) ? mem.copy_offset_ : 0;
++    const size_t copy_size = (mem.copy_size_ != 0) ? mem.copy_size_ : mem.memory_size();
++    assert(copy_offset <= mem.memory_size() && copy_size <= mem.memory_size() - copy_offset);
++    copy_host_to_device((void *)(mem.device_pointer + copy_offset),
++                        static_cast<char *>(mem.host_pointer) + copy_offset,
++                        copy_size);
+   }
+ }
+ 
+ bool GPUDevice::is_shared(const void *shared_pointer,
+                           const device_ptr device_pointer,
+diff --git a/src/scene/geometry.cpp b/src/scene/geometry.cpp
+--- a/src/scene/geometry.cpp
++++ b/src/scene/geometry.cpp
+@@ -642,62 +642,40 @@ void GeometryManager::device_update_preprocess(Device *device, Scene *scene, Pro
+ 
+   if (device_update_flags & ATTR_FLOAT_NEEDS_REALLOC) {
+     dscene->attributes_map.tag_realloc();
+     dscene->attributes_float.tag_realloc();
+   }
+-  else if (device_update_flags & ATTR_FLOAT_MODIFIED) {
+-    dscene->attributes_float.tag_modified();
+-  }
+ 
+   if (device_update_flags & ATTR_FLOAT2_NEEDS_REALLOC) {
+     dscene->attributes_map.tag_realloc();
+     dscene->attributes_float2.tag_realloc();
+   }
+-  else if (device_update_flags & ATTR_FLOAT2_MODIFIED) {
+-    dscene->attributes_float2.tag_modified();
+-  }
+ 
+   if (device_update_flags & ATTR_FLOAT3_NEEDS_REALLOC) {
+     dscene->attributes_map.tag_realloc();
+     dscene->attributes_float3.tag_realloc();
+     dscene->tri_verts.tag_realloc();
+     dscene->curve_keys.tag_realloc();
+     dscene->points.tag_realloc();
+   }
+-  else if (device_update_flags & ATTR_FLOAT3_MODIFIED) {
+-    dscene->attributes_float3.tag_modified();
+-  }
+ 
+   if (device_update_flags & ATTR_FLOAT4_NEEDS_REALLOC) {
+     dscene->attributes_map.tag_realloc();
+     dscene->attributes_float4.tag_realloc();
+   }
+-  else if (device_update_flags & ATTR_FLOAT4_MODIFIED) {
+-    dscene->attributes_float4.tag_modified();
+-  }
+ 
+   if (device_update_flags & ATTR_UCHAR4_NEEDS_REALLOC) {
+     dscene->attributes_map.tag_realloc();
+     dscene->attributes_uchar4.tag_realloc();
+   }
+-  else if (device_update_flags & ATTR_UCHAR4_MODIFIED) {
+-    dscene->attributes_uchar4.tag_modified();
+-  }
+ 
+   if (device_update_flags & ATTR_NORMAL_NEEDS_REALLOC) {
+     dscene->attributes_map.tag_realloc();
+     dscene->attributes_normal.tag_realloc();
+   }
+-  else if (device_update_flags & ATTR_NORMAL_MODIFIED) {
+-    dscene->attributes_normal.tag_modified();
+-  }
+ 
+-  if (device_update_flags & DEVICE_MESH_DATA_MODIFIED) {
+-    /* if anything else than vertices or shaders are modified, we would need to reallocate, so
+-     * these are the only arrays that can be updated */
+-    dscene->tri_shader.tag_modified();
+-  }
++  /* Stable mesh and attribute updates tag their packed device-vector ranges directly. */
+ 
+   if (device_update_flags & DEVICE_CURVE_DATA_MODIFIED) {
+     dscene->curves.tag_modified();
+     dscene->curve_segments.tag_modified();
+   }
+diff --git a/src/scene/geometry_mesh.cpp b/src/scene/geometry_mesh.cpp
+--- a/src/scene/geometry_mesh.cpp
++++ b/src/scene/geometry_mesh.cpp
+@@ -70,14 +70,16 @@ void GeometryManager::device_update_mesh(Device * /*unused*/,
+ 
+         if (mesh->shader_is_modified() || mesh->smooth_is_modified() ||
+             mesh->triangles_is_modified() || copy_all_data)
+         {
+           mesh->pack_shaders(scene, &tri_shader[mesh->prim_offset]);
++          dscene->tri_shader.tag_modified(mesh->prim_offset, mesh->num_triangles());
+         }
+ 
+         if (mesh->triangles_is_modified() || copy_all_data) {
+           mesh->pack_triangles(&tri_vindex[mesh->prim_offset]);
++          dscene->tri_vindex.tag_modified(mesh->prim_offset, mesh->num_triangles());
+         }
+ 
+         if (progress.get_cancel()) {
+           return;
+         }
+diff --git a/src/scene/geometry_attributes.cpp b/src/scene/geometry_attributes.cpp
+--- a/src/scene/geometry_attributes.cpp
++++ b/src/scene/geometry_attributes.cpp
+@@ -281,11 +281,11 @@ template<typename T> struct AttributeTableEntry {
+     size_t start_offset = offset;
+     if (modified) {
+       for (size_t k = 0; k < attr_size; k++) {
+         data[offset + k] = attr_data[k];
+       }
+-      data.tag_modified();
++      data.tag_modified(start_offset, attr_size);
+     }
+     offset += attr_size;
+     return start_offset;
+   }
+ 
