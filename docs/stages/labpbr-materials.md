@@ -1,6 +1,6 @@
 # LabPBR 1.3 材质桥与 PBR-C 第一里程碑
 
-状态：`F0 / F1 / F2 / F3 DONE`；`F4 PENDING`；`V1 AWAITING USER`
+状态：`F0 / F1 / F2 / F3 / F4 DONE`；`V1 AWAITING USER`
 
 当前检查基线：`8202bb3`（2026-08-18，Asia/Shanghai）
 
@@ -176,12 +176,15 @@ PBR-C 第一里程碑不修改 ABI、结构大小、offset、enum/flag 数值、
 - Java/Native ABI contract 覆盖 PBR texture indexes、roles 和非法组合；
 - Native render smoke 能创建 LabPBR shader 并证明基础纹理出帧。
 
-自动证据缺口：
+PBR-C 新增自动证据：
 
-- 没有逐字节锁定 Normal、Roughness、F0/Metal、Emission、AO、Height、Porosity/SSS；
-- Native render smoke 的活动三角形仍只使用 Cutout，没有真正渲染 Glass/Water；
-- 没有独立 PBR CTest 域；
-- F10 把三张 PBR 数据图集误写成 `x2`。
+- `LabPbrAtlasBuilderTest` 逐字节锁定 Normal、Roughness、F0/Metal、Emission、AO、
+  Height 和 encoded surface；
+- `cyclesrenderer_smoke_pbr` 使用活动三角形分别渲染 Cutout、Glass 和 Water，并锁定
+  Normal、Diffuse、Emission、Roughness、Combined pass 不坍缩；
+- `SectionMaterialCaptureTest` 锁定玻璃板、染色玻璃板、水 sprite、植被类别和
+  solidification 完整 UV 条件；
+- F10 按实际资源拓扑报告三张 PBR 数据图集。
 
 `60e43dc` 上的 V0 综合实机矩阵曾覆盖方块、玻璃、水、植被和 LabPBR 呈现并由用户
 确认未见异常；它不等于逐通道数值或同场景视觉 oracle。当前 PBR-C 完成后由用户执行
@@ -194,7 +197,7 @@ F0  当前事实、ABI 与阶段文档重建                 DONE
 F1  LabPBR atlas 逐字节 characterization          DONE
 F2  独立 Native PBR material smoke               DONE
 F3  Section glass/water/foliage classification    DONE
-F4  F10 PBR 数据图集计数修正                      PENDING
+F4  F10 PBR 数据图集计数修正                      DONE
 V1  用户定向 Minecraft 实机验收                   AWAITING USER
 ```
 

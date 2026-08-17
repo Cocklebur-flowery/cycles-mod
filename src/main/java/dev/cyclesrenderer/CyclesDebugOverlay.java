@@ -471,7 +471,7 @@ final class CyclesDebugOverlay {
                 "decoded normal/specular=" + pbrAtlases.decodedNormals() + "/"
                         + pbrAtlases.decodedSpeculars()
                         + "  atlas=" + pbrAtlases.width() + "x" + pbrAtlases.height()
-                        + " x2  MiB=" + mebibytes(pbrAtlases.byteSize()),
+                        + " x3  MiB=" + mebibytes(pbrAtlases.byteSize()),
                 COLOR_PBR);
         int pbrErrorCount = pbr.discoveryErrors()
                 + pbrAtlases.sizeMismatches() + pbrAtlases.decodeErrors();
