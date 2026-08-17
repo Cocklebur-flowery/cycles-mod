@@ -13,7 +13,7 @@ Cycles Renderer 是一个面向 Minecraft 26.2 / NeoForge 26.2 的实验性客�
 
 ## 画面展示
 
-以下画面来自实验客户端中的 Blender Cycles 5.2 实时路径追踪输出。截图保留了性能与调试叠加层，用于展示当前原型的实际运行效果。
+以下画面来自实验客户端中的 Blender Cycles 5.2 实时路径追踪输出。截图保留了性能与调试叠加层；请注意，叠加层显示的 Vulkan 帧率代表 Minecraft Vulkan 后端的帧率，与 Cycles 的实际输出帧率无关，当前 Cycles 实际输出约为 10–20 FPS。以下演示使用 Patrix 32x 资源包。
 
 ![Cycles 实时路径追踪下的樱花林](docs/images/showcase/cherry-grove-overview.jpg)
 
