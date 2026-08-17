@@ -275,9 +275,33 @@ class VulkanInteropBinding final {
     void acquire_frame(
         std::uint64_t previous_generation,
         CyclesBridgeVulkanInteropState& state) {
+        acquire_frame(previous_generation, state, nullptr);
+    }
+
+    void acquire_reprojection_frame(
+        std::uint64_t previous_generation,
+        CyclesBridgeVulkanInteropState& state,
+        CyclesBridgeReprojectionMetadata& metadata) {
+        acquire_frame(previous_generation, state, &metadata);
+    }
+
+ private:
+    void acquire_frame(
+        std::uint64_t previous_generation,
+        CyclesBridgeVulkanInteropState& state,
+        CyclesBridgeReprojectionMetadata* metadata) {
         bool released_stale_slots = false;
         {
             std::lock_guard lock(mutex_);
+            const std::uint32_t metadata_struct_size = metadata != nullptr
+                ? metadata->struct_size : 0U;
+            const std::uint32_t metadata_struct_version = metadata != nullptr
+                ? metadata->struct_version : 0U;
+            if (metadata != nullptr) {
+                *metadata = {};
+                metadata->struct_size = metadata_struct_size;
+                metadata->struct_version = metadata_struct_version;
+            }
             VulkanInteropSlot* selected = nullptr;
             std::uint32_t selected_index = 0U;
             for (std::uint32_t index = 0; index < descriptor_.slot_count; ++index) {
@@ -309,6 +333,11 @@ class VulkanInteropBinding final {
                 state_.sample_count = selected->sample_count;
                 state_.generation = selected->generation;
                 state_.slot_index = selected_index;
+                if (metadata != nullptr) {
+                    *metadata = selected->reprojection_metadata;
+                    metadata->struct_size = metadata_struct_size;
+                    metadata->struct_version = metadata_struct_version;
+                }
             }
             refresh_vulkan_interop_slot_flags(state_, slots_, descriptor_.slot_count);
             const std::uint32_t struct_size = state.struct_size;
@@ -321,6 +350,8 @@ class VulkanInteropBinding final {
             changed_.notify_all();
         }
     }
+
+ public:
 
     bool release_frame(std::uint64_t generation, std::string& error) {
         {

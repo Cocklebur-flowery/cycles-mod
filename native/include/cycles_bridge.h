@@ -849,6 +849,12 @@ CYCLES_BRIDGE_API std::uint32_t cycles_bridge_acquire_vulkan_interop_frame(
     std::uint64_t previous_generation,
     CyclesBridgeVulkanInteropState* state);
 
+CYCLES_BRIDGE_API std::uint32_t cycles_bridge_acquire_vulkan_reprojection_frame(
+    CyclesBridgeRenderer* renderer,
+    std::uint64_t previous_generation,
+    CyclesBridgeVulkanInteropState* state,
+    CyclesBridgeReprojectionMetadata* metadata);
+
 CYCLES_BRIDGE_API std::uint32_t cycles_bridge_release_vulkan_interop_frame(
     CyclesBridgeRenderer* renderer,
     std::uint64_t generation);

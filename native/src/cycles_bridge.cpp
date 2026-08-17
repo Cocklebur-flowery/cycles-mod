@@ -753,6 +753,23 @@ std::uint32_t cycles_bridge_acquire_vulkan_interop_frame(
     return CYCLES_BRIDGE_STATUS_OK;
 }
 
+std::uint32_t cycles_bridge_acquire_vulkan_reprojection_frame(
+    CyclesBridgeRenderer* renderer,
+    std::uint64_t previous_generation,
+    CyclesBridgeVulkanInteropState* state,
+    CyclesBridgeReprojectionMetadata* metadata) {
+    if (renderer == nullptr || renderer->engine == nullptr || state == nullptr
+        || state->struct_size < sizeof(CyclesBridgeVulkanInteropState)
+        || state->struct_version != kStructVersion || metadata == nullptr
+        || metadata->struct_size < sizeof(CyclesBridgeReprojectionMetadata)
+        || metadata->struct_version != kStructVersion) {
+        return CYCLES_BRIDGE_STATUS_INVALID_ARGUMENT;
+    }
+    renderer->engine->acquire_vulkan_reprojection_frame(
+        previous_generation, *state, *metadata);
+    return CYCLES_BRIDGE_STATUS_OK;
+}
+
 std::uint32_t cycles_bridge_release_vulkan_interop_frame(
     CyclesBridgeRenderer* renderer,
     std::uint64_t generation) {

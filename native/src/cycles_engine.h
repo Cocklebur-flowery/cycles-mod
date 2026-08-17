@@ -76,6 +76,11 @@ class CyclesEngine final {
         std::uint64_t previous_generation,
         CyclesBridgeVulkanInteropState& state);
 
+    void acquire_vulkan_reprojection_frame(
+        std::uint64_t previous_generation,
+        CyclesBridgeVulkanInteropState& state,
+        CyclesBridgeReprojectionMetadata& metadata);
+
     bool release_vulkan_interop_frame(
         std::uint64_t generation,
         std::string& error);

@@ -320,6 +320,13 @@ class CyclesEngine::Impl final {
         interop_.acquire_frame(previous_generation, state);
     }
 
+    void acquire_vulkan_reprojection_frame(
+        std::uint64_t previous_generation,
+        CyclesBridgeVulkanInteropState& state,
+        CyclesBridgeReprojectionMetadata& metadata) {
+        interop_.acquire_reprojection_frame(previous_generation, state, metadata);
+    }
+
     bool release_vulkan_interop_frame(
         std::uint64_t generation,
         std::string& error) {
@@ -1721,6 +1728,13 @@ void CyclesEngine::acquire_vulkan_interop_frame(
     std::uint64_t previous_generation,
     CyclesBridgeVulkanInteropState& state) {
     impl_->acquire_vulkan_interop_frame(previous_generation, state);
+}
+
+void CyclesEngine::acquire_vulkan_reprojection_frame(
+    std::uint64_t previous_generation,
+    CyclesBridgeVulkanInteropState& state,
+    CyclesBridgeReprojectionMetadata& metadata) {
+    impl_->acquire_vulkan_reprojection_frame(previous_generation, state, metadata);
 }
 
 bool CyclesEngine::release_vulkan_interop_frame(

@@ -204,12 +204,21 @@ bool run_bridge_contract_scenarios(SmokeContext& context) {
         CyclesBridgeVulkanInteropState acquired_state{};
         acquired_state.struct_size = sizeof(acquired_state);
         acquired_state.struct_version = 1U;
+        CyclesBridgeReprojectionMetadata acquired_metadata{};
+        acquired_metadata.struct_size = sizeof(acquired_metadata);
+        acquired_metadata.struct_version = 1U;
         if (!require_ok(
-                cycles_bridge_acquire_vulkan_interop_frame(
-                    renderer, 0U, &acquired_state),
-                "empty interop frame acquire")
+                cycles_bridge_acquire_vulkan_reprojection_frame(
+                    renderer, 0U, &acquired_state, &acquired_metadata),
+                "empty reprojection frame acquire")
             || (acquired_state.flags
                 & CYCLES_BRIDGE_VULKAN_INTEROP_FRAME_ACQUIRED) != 0U
+            || acquired_metadata.flags != 0U
+            || acquired_metadata.struct_size != sizeof(acquired_metadata)
+            || acquired_metadata.struct_version != 1U
+            || cycles_bridge_acquire_vulkan_reprojection_frame(
+                    renderer, 0U, &acquired_state, nullptr)
+                != CYCLES_BRIDGE_STATUS_INVALID_ARGUMENT
             || cycles_bridge_release_vulkan_interop_frame(renderer, 1U)
                 != CYCLES_BRIDGE_STATUS_RENDER_ERROR
             || !require_ok(
