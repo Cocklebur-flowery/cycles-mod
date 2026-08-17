@@ -2,11 +2,11 @@
 
 状态：当前事实清单
 
-检查日期：2026-08-17（Asia/Shanghai）
+检查日期：2026-08-18（Asia/Shanghai）
 
-检查对象：C/B/E 职责治理、E6 Minecraft 生命周期验收、R0 独立热点复核
-与 R0A/R0B/R1/R2/R5 收口（R5 基于 `214852e` 的最终 HEAD；E6 实机证据对应
-父提交 `976f15c` 的最终工作树），以及 `019d7ec` 的诊断 overlay 函数级整理
+当前事实检查对象：`8202bb3` 的 ABI、测试入口、Scene/PBR 资源边界和已记录的
+重投影失败状态。第 4 节以后继续保留 2026-08-16 各历史门禁的原始证据，不能把
+当时的 ABI、测试数量或运行结论外推为当前事实。
 
 本文件只描述上述提交附近的当前事实、验证证据和已知红项。它不是历史阶段
 记录，也不替代源码、构建配置、ABI 断言或测试。ABI、稳定契约、验证入口或
@@ -37,19 +37,24 @@
 | 游戏与加载器 | Minecraft 26.2、NeoForge 26.2 客户端 MOD | `gradle.properties`、`build.gradle` |
 | Java 编译目标 | Java 25 toolchain | `build.gradle` |
 | Native 后端 | Blender Cycles 5.2 bridge；默认和 experimental DLSS 两种构建变体 | `build.gradle`、`native/CMakeLists.txt` |
-| 当前 C ABI | ABI 43 | `NativeBridge.ABI_VERSION`、`cycles_bridge_abi_version()`、native build info |
+| 当前 C ABI | ABI 45 | `NativeBridge.ABI_VERSION`、`cycles_bridge_abi_version()`、native smoke contract |
 | 设置结构 | `CyclesBridgeRenderSettings` 为 392 bytes | Java layout 检查、C++ `static_assert` |
 | 诊断结构 | `CyclesBridgeDiagnostics` 为 672 bytes | Java layout 检查、C++ `static_assert` |
-| Vulkan interop | buffer/state 均为 80 bytes；state 的 depth dimensions 位于尾部 | `cycles_bridge_vulkan_interop_state.json`、生成的 Java layout、生成的 C++ `static_assert` |
-| Java 测试 | camera 自动曝光/对焦/射线/直方图与 LabPBR 资源测试 | `src/test/java` |
+| Vulkan interop | buffer/state 均为 80 bytes；另有 144-byte reprojection metadata | 两份 ABI schema、生成的 Java layout、生成的 C++ `static_assert` |
+| Java 测试 | camera、config、reprojection、native contract、geometry、scene resource 与 LabPBR 测试 | `src/test/java` |
 | 项目验证入口 | Gradle `verifyProject` 先执行 Java `build`，再运行所选 native 变体的全部 CTest | `build.gradle` |
 | Native 测试入口 | CTest 注册 5 个独立 smoke 能力域与 `cyclesrenderer_scene_update` | `native/CMakeLists.txt` |
 | Native smoke 结构 | 无参数入口保留完整顺序；CTest 通过 `--suite` 独立报告 contract、color、render、denoiser 与 scene-lifecycle；render 与 scene-lifecycle 已有各自的物理源文件 | `native/tests/cycles_bridge_smoke*.cpp` |
 
-S5 仅将 `CyclesBridgeVulkanInteropState` 作为最小原型：单一 JSON schema 生成
-Java `MemoryLayout`/offset 常量和 C++ 全字段 size/offset 断言。公开 C 头中的结构
-声明保持不变，其他 ABI 结构仍由 C 头、C++ 断言、Java layout 和 smoke contract
-多处人工维护。因此这不是全量 ABI 生成链，也没有改变 ABI 43 或结构布局。
+S5 最初只为 `CyclesBridgeVulkanInteropState` 建立最小生成原型；后续 reprojection
+阶段为 `CyclesBridgeReprojectionMetadata` 增加了第二份 schema，并把当前公共 ABI
+推进到 45。公开 C 头、未生成的 ABI 结构、Java layout 和 smoke contract 仍有人工
+维护部分，因此当前仍不是全量 ABI 生成链。
+
+`bc36e9c` 上默认与 experimental DLSS 的完整 `verifyProject` 均通过 6 个 CTest 域。
+随后用户实机确认重投影会激活但产生严重的全画面相机移动抖动；`8202bb3` 将该视觉
+验收记录为 `FAIL / DEFERRED`，当前安全 workaround 是关闭重投影。这个已知红项与
+PBR-C 第一里程碑无代码依赖，但后续 Minecraft 验收不得把它误报为已修复。
 
 ## 3. 已收口的启动故障
 

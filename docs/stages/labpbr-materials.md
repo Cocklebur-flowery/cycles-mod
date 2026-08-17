@@ -1,227 +1,219 @@
-# LabPBR 1.3 材质桥（PBR-0）
+# LabPBR 1.3 材质桥与 PBR-C 第一里程碑
 
-状态：PBR-0 至 PBR-8 已完成；PBR-9 已完成 Bump/POM，真实位移与细分延期；PBR-10 等待原生 ABI 窗口；PBR-11a 与 PBR-12a 已完成
+状态：`F0 DONE`；`F1 / F2 / F3 / F4 PENDING`；`V1 AWAITING USER`
+
+当前检查基线：`8202bb3`（2026-08-18，Asia/Shanghai）
+
 目标资源包：`run/resourcepacks/SPBR-21.zip`
+
 目标格式：ShaderLABS LabPBR 1.3
 
-## 1. 本阶段目标
+本文从当前源码、ABI 断言、测试和 Git 历史重新建立事实。旧的 PBR-0 至 PBR-12
+编号只描述 2026-08-12 至 2026-08-15 的实施过程，不再作为当前阶段状态或 ABI
+事实来源。
 
-把 Minecraft 已拼接进方块纹理图集的精灵及其 LabPBR 伴随纹理转换成 Cycles 可直接采样的材质数据。第一版支持：
+## 1. 当前实现结论
 
-- 原版与使用标准方块图集的 NeoForge 模组纹理；
-- LabPBR 1.3 `_n` 法线纹理；
-- LabPBR 1.3 `_s` 粗糙度、介电 F0、金属和逐像素自发光；
-- 资源包切换和资源重载后的完整重建；
-- 缺图、尺寸不匹配和不支持格式的安全回退；
-- F9 控制与 F10 覆盖率、图集内存和有效通道诊断。
+当前方块 Section 的 LabPBR 主链已经接通：
 
-本阶段不改变 Minecraft 区块几何捕获、世界帧接管、Vulkan swapchain、Pass ID、RGBA16F 帧租约以及 F8/F9/F10 键位。
+- 从 Minecraft 最终方块图集中的实际 Sprite 发现 `_n.png` 和 `_s.png`；
+- 识别 `format=lab-pbr/1.3`，并支持 `AUTO / OFF / LAB_PBR_1_3`；
+- 生成 Base Color、Normal、Material、Auxiliary 共四张同布局图集；
+- 支持 DirectX Normal、Roughness、介电 F0、金属、自发光、材质 AO、孔隙度、
+  湿润度、SSS 和高度；
+- 支持 Bump 与图集边界约束的 Parallax Occlusion Mapping；
+- 支持 Cutout、Alpha Blend，以及实验性的玻璃、水和植被材质；
+- 资源重载、PBR 模式或 fallback 值变化时完整重建场景资源；
+- F9 提供材质控制，F10 提供格式、覆盖率、图集和错误诊断。
 
-## 2. 数据流与兼容边界
+当前没有实现真实置换/细分或运行时动画区域上传。实体、方块实体、物品和自定义
+渲染器不经过当前 Section 方块图集路径。
+
+## 2. 当前数据流与所有权
 
 ```text
-Minecraft ResourceManager（已应用资源包优先级）
-  -> 方块图集中的实际 Sprite 标识符
-  -> 基础纹理 + 同命名 _n.png / _s.png
-  -> 与基础图集完全相同的槽位和 UV 布局
-  -> Base Color / Cycles Normal / Cycles Material 三张图集
-  -> Java SceneResources
-  -> FFM / C ABI
-  -> Cycles ImageTexture + Principled BSDF
+Minecraft ResourceManager + AtlasIds.BLOCKS
+  -> LabPbrResources：格式声明、Sprite companion 发现
+  -> LabPbrAtlasBuilder：Normal / Material / Auxiliary RGBA8 数据图集
+  -> SectionSceneResourceBuilder：Base Color + 固定材质/纹理描述符
+  -> SectionSceneManager：资源 revision、重建触发和当前诊断状态
+  -> NativeSceneUploadQueue：有序异步 Scene reset / section mutation / commit
+  -> Java FFM / C ABI 45
+  -> Cycles MemoryImageLoader + LabPBR shader graph
+  -> realtime Section mesh
 ```
 
-只扫描 Minecraft 实际拼接进方块图集的 Sprite，而不是遍历 ZIP 中所有 PNG。因此：
+职责边界：
 
-- 标准方块模型和标准图集纹理可以自动继承 PBR；
-- 仅存在于 OptiFine CTM 目录、实体、物品、方块实体或自定义渲染器中的纹理，不会被误报为已支持；
-- MTR 等自定义几何只有在其最终进入当前 Section 方块图集捕获路径时才会自动兼容；
-- Distant Horizons 的 LOD 几何与材质仍属于独立兼容层，本阶段不承诺 PBR；
-- 不猜测其他旧 PBR 格式。未声明 `format=lab-pbr/1.3` 时使用普通材质回退。
+- `LabPbrResources` 只负责资源发现和覆盖率；
+- `LabPbrAtlasBuilder` 只负责 companion 解码和三张数据图集；
+- `SectionSceneResourceBuilder` 只负责不可变 SceneResources 描述符；
+- `SectionSceneManager` 继续拥有 Minecraft 资源生命周期，不重新吸收图集复制逻辑；
+- Native 材质图由 `labpbr_material` 编排，height、parallax、metal 和 surface 逻辑
+  分别位于独立私有组件中。
 
-## 3. LabPBR 1.3 输入合约
+## 3. LabPBR 1.3 输入合同
 
-格式声明从最终 ResourceManager 中的 `minecraft:optifine/texture.properties` 读取。支持值固定为：
+格式声明位置：
+
+```text
+minecraft:optifine/texture.properties
+```
+
+支持值：
 
 ```properties
 format=lab-pbr/1.3
 ```
 
-对基础 Sprite `namespace:path`，伴随资源为：
+标准 Sprite `namespace:path` 的 companion 路径为：
 
 ```text
 namespace:textures/path_n.png
 namespace:textures/path_s.png
 ```
 
-原始通道语义：
+已经由 Minecraft 或其他模组拼入方块图集的 `optifine/ctm` 与 `mcpatcher/ctm`
+Sprite 还会从资源根和 `textures/` 根依次查找 companion。桥本身不实现 CTM 邻接、
+模型替换或连接规则。
 
-| 纹理 | 通道 | LabPBR 1.3 语义 | 第一版处理 |
-| --- | --- | --- | --- |
-| `_n` | R/G | DirectX 切线空间 X/Y | 解码并重建 Z，交给 Cycles DirectX Normal Map |
-| `_n` | B | 材质 AO | 检测并统计，不乘入 Base Color |
-| `_n` | A | 高度/位移 | 保留格式能力信息，第一版不做 POM/位移 |
-| `_s` | R | 感知光滑度 | 按 LabPBR 解码为线性粗糙度 `(1 - smoothness)^2` |
-| `_s` | G 0..229 | 线性介电 F0 | 转为 Principled Specular IOR Level |
-| `_s` | G 230..255 | 预定义/反照率金属 | 第一版统一作为 Metalness 1，颜色取 Base Color |
-| `_s` | B | 孔隙度或 SSS | 检测并统计，第一版不接入着色器 |
-| `_s` | A 0..254 | 自发光强度 | 使用 Base Color 作为发光颜色并按强度缩放 |
-| `_s` | A 255 | 忽略/无自发光 | 转为零自发光 |
+| 输入 | LabPBR 1.3 语义 | 当前 Cycles 输入 |
+| --- | --- | --- |
+| `_n.RG` | DirectX 切线空间 X/Y | 重建 Z 后写入 Normal RGB |
+| `_n.B` | 线性材质 AO | 写入 Auxiliary R，普通非透射表面乘入 Albedo |
+| `_n.A` | 线性高度/深度 | 写入 Auxiliary G，供 Bump/POM 使用 |
+| `_s.R` | 感知光滑度 | 写入 `1 - smoothness`，由 Cycles Roughness socket 形成 GGX alpha |
+| `_s.G 0..229` | 线性介电 F0 | 写入 Material B，再换算为 Specular IOR Level |
+| `_s.G 230..237` | 八种预定义金属 | 使用对应复折射率 conductor closure |
+| `_s.G 238..255` | 金属范围 | 使用 Base Color 的通用 metallic fallback |
+| `_s.B 0..64` | 孔隙度 | 写入 Auxiliary A，按全局 Wetness 调制 |
+| `_s.B 65..255` | SSS | 写入 Auxiliary A，驱动 Principled Subsurface Weight |
+| `_s.A 0..254` | 线性自发光 | 归一化写入 Material A |
+| `_s.A 255` | 忽略/无自发光 | 写入零强度 |
 
-LabPBR 的 R 通道保存感知光滑度。桥接层严格按格式定义先解码为线性粗糙度 `(1 - smoothness)^2`，再写入材质图集供 Cycles Principled 使用，避免把感知编码值误当成已经线性的粗糙度。
+缺失 companion 时使用：中性切线法线、配置 fallback roughness、零 metallic、
+配置 fallback F0、零 emission、AO 1.0、内部中性高度和零 porosity/SSS。尺寸不匹配
+或解码失败只回退对应 Sprite 区域。
 
-介电 F0 使用 Principled 默认 IOR 1.5 的基准 F0 0.04，换算为：
+## 4. SceneResources 与稳定 ABI
+
+当前公共 ABI 为 45。PBR 继续使用现有稳定结构：
+
+- `CyclesBridgeMaterial`：32 bytes；
+- `CyclesBridgeTexture`：32 bytes；
+- `CyclesBridgeRenderSettings`：392 bytes；
+- `CyclesBridgeDiagnostics`：672 bytes。
+
+固定纹理槽：
+
+| 索引 | 资源 | 角色 |
+| ---: | --- | --- |
+| 0 | Minecraft Block Atlas | `COLOR_SRGB` |
+| 1 | `cyclesrenderer:blocks_normal` | `DATA_LINEAR` |
+| 2 | `cyclesrenderer:blocks_material` | `DATA_LINEAR` |
+| 3 | `cyclesrenderer:blocks_labpbr_auxiliary` | `DATA_LINEAR` |
+
+固定材质槽保留现有数值和顺序：Solid、Cutout、Blend、Glass、Water、Foliage。
+Java 与 Native 继续拒绝越界纹理索引、错误纹理角色、未知 PBR 格式、非法 flag
+组合及 PBR/非 PBR 索引不一致。
+
+PBR-C 第一里程碑不修改 ABI、结构大小、offset、enum/flag 数值、设置键、默认值、
+资源 ID 或 reset 级别。
+
+## 5. 当前材质行为
+
+- 普通材质：Principled Base Color、Normal、Roughness、F0/Metal、AO、Wetness、
+  SSS 和 Emission；
+- Cutout：固定 alpha cutoff 0.5；
+- Blend：使用基础纹理 alpha 混合 Transparent closure；
+- Glass：Glass BSDF、有限纹理染色、Fresnel 阴影透射和纹理 alpha 表面混合；
+- Water：Principled Transmission 1.0、IOR 1.333、Thin Wall；
+- Foliage：专用 Principled 参数；部分植物卡片增加 0.01 block 背面和竖向轮廓壁；
+- Height：默认 Bump；可选 POM 使用逐三角形 UV bounds 限制图集采样。
+
+玻璃、水和植被已经存在于当前生产代码。旧文档中“玻璃/水等待 ABI 窗口”以及
+“仍未实现玻璃折射和水材质”的表述已失效。
+
+## 6. 动画、覆盖范围与明确延期
+
+`SpriteAnimationStateMixin` 会记录 Minecraft 当前选中的 image frame，资源首次构建和
+资源重载时 Base/Normal/Material/Auxiliary 使用同一个 frame。当前不会在动画 tick 后
+更新 Native 图集；完整动画需要新的有序纹理区域更新合同，禁止通过每帧完整重建 Scene
+模拟。
+
+当前覆盖：
+
+- 原版和使用标准方块图集的 NeoForge 静态 Section 几何；
+- 已进入同一方块图集的 CTM Sprite；
+- 方块颜色和动态 tint 已进入顶点颜色路径。
+
+明确延期：
+
+- 运行时 Base/Normal/Material/Auxiliary 区域更新；
+- 真实置换和线性细分；
+- 实体、方块实体、物品、手持物品和自定义渲染器；
+- 独立 CTM 邻接/模型规则；
+- oldPBR 或其他未声明格式；
+- Distant Horizons；
+- 与 LabPBR 正确性无关的 BVH、重投影、降噪或线程调度修改。
+
+## 7. 当前资源与验证证据
+
+2026-08-18 对本地 `SPBR-21.zip` 做只读清单检查：
+
+- `format=lab-pbr/1.3`；
+- 3055 张 `_n.png`；
+- 4379 张 `_s.png`；
+- 72 个基础动画 metadata，其中 55 个同时具有 `_n` 和 `_s`；
+- 2593 个 `optifine/ctm` 或 `mcpatcher/ctm` 条目。
+
+已有自动证据：
+
+- `LabPbrResourcesTest` 锁定标准/OptiFine/MCPatcher companion 路径；
+- `SectionSceneResourceBuilderTest` 锁定 Base/PBR 槽位、纹理角色、材质 flag 和尺寸
+  mismatch fallback；
+- `FoliageSolidifierTest` 锁定轮廓、背面、竖向壁和 partial UV 保护；
+- Java/Native ABI contract 覆盖 PBR texture indexes、roles 和非法组合；
+- Native render smoke 能创建 LabPBR shader 并证明基础纹理出帧。
+
+自动证据缺口：
+
+- 没有逐字节锁定 Normal、Roughness、F0/Metal、Emission、AO、Height、Porosity/SSS；
+- Native render smoke 的活动三角形仍只使用 Cutout，没有真正渲染 Glass/Water；
+- 没有独立 PBR CTest 域；
+- F10 把三张 PBR 数据图集误写成 `x2`。
+
+`60e43dc` 上的 V0 综合实机矩阵曾覆盖方块、玻璃、水、植被和 LabPBR 呈现并由用户
+确认未见异常；它不等于逐通道数值或同场景视觉 oracle。当前 PBR-C 完成后由用户执行
+新的 V1 定向实机矩阵。
+
+## 8. PBR-C 第一里程碑
 
 ```text
-specular_ior_level = F0 / 0.08
+F0  当前事实、ABI 与阶段文档重建                 DONE
+F1  LabPBR atlas 逐字节 characterization          PENDING
+F2  独立 Native PBR material smoke               PENDING
+F3  Section glass/water/foliage classification    PENDING
+F4  F10 PBR 数据图集计数修正                      PENDING
+V1  用户定向 Minecraft 实机验收                   AWAITING USER
 ```
 
-这样 Principled 内部的 `F0 = 0.04 * 2 * specular_ior_level` 可恢复原始 F0。
+每个 F 子阶段必须形成独立提交。任一阶段发现当前实现与测试 oracle 冲突时，保留失败
+证据并停止，不把行为修复混入 characterization 提交。F0-F4 不进入运行时动画、真实
+置换、ABI 扩展或主观材质调参。
 
-## 4. Cycles 数据图集
+## 9. V1 用户实机矩阵
 
-现有 Section 顶点继续只携带全局方块图集 UV，不增加逐顶点 PBR 字段。资源构建阶段生成三张尺寸、槽位和 UV 完全一致的图集：
+F4 提交后，由用户使用当前 SPBR-21 同场景检查：
 
-1. `Base Color atlas`：当前 Minecraft 方块颜色图集，按 sRGB 颜色纹理加载。
-2. `Cycles Normal atlas`：线性数据纹理。CPU 将 LabPBR R/G 解码为 `[-1, 1]`，按 `sqrt(max(0, 1-x²-y²))` 重建 Z，再编码成 RGB。
-3. `Cycles Material atlas`：线性数据纹理，通道预解码为：
-   - R：Principled Roughness 输入；
-   - G：Metalness；
-   - B：线性介电 F0；
-   - A：归一化逐像素 Emission。
+- PBR `OFF / AUTO`；
+- Normal Strength `0 / 1`；
+- Roughness、介电 F0、金属和 Emission；
+- Wetness `0 / 1` 与 SSS Scale `0 / 当前值`；
+- Bump / POM 的正视和掠射角；
+- Glass、Water、Leaves 和 solidified plants；
+- 资源重载、资源包切换、F8 关闭/重新启用和退出；
+- F10 requested/effective、coverage、三张数据图集、错误计数；
+- default 与 experimental DLSS 的实际执行边界。
 
-Material atlas 第一版使用 RGBA8。介电 F0 的有效范围可高于 0.08，换算后的 Specular IOR Level 也会高于 1，不能直接编码进 UNORM 通道。因此 B 保存原始线性 F0，Cycles 节点图采样后再执行 `F0 / 0.08`。这不会改变上一节定义的 Principled 换算关系。
-
-Normal 与 Material 图集不是对原始 `_n`/`_s` 文件的无损复制，而是当前 Cycles shader 的稳定输入契约。这样避免每次采样重复执行格式分支，也避免把 `_n.B` 的 AO 错当法线 Z。
-
-缺失纹理默认值：
-
-| 缺失项 | 默认值 |
-| --- | --- |
-| `_n` | 中性切线法线 `(0.5, 0.5, 1.0)` |
-| `_s` Roughness | F9 的回退粗糙度，初始沿用当前普通材质 0.8 |
-| `_s` Metalness | 0 |
-| `_s` F0 | 0.04，即 Specular IOR Level 0.5 |
-| `_s` Emission | 0 |
-
-伴随纹理尺寸或动画布局不兼容时，只回退该 Sprite 对应区域，不得破坏整张图集或导致客户端退出。
-
-## 5. ABI 与稳定合约
-
-PBR-3 已在优化线程提交后修改 Java/FFM/C ABI。实施前检查并确认以下路径已无外部未提交改动：
-
-- `native/include/cycles_bridge.h`
-- `native/src/cycles_bridge.cpp`
-- `native/src/cycles_engine.cpp`
-- `native/tests/cycles_bridge_smoke.cpp`
-- `src/main/java/dev/cyclesrenderer/nativebridge/NativeBridge.java`
-
-存在未提交的外部改动时，不进入 PBR-3，也不暂存这些文件。
-
-ABI v28 保持 `CyclesBridgeMaterial` 与 `CyclesBridgeTexture` 的 32 字节结构大小不变，并定义了原有保留槽位：
-
-- Material 增加 normal/material texture index 和 PBR 格式标志；
-- Texture 增加 `COLOR_SRGB` 或 `DATA_LINEAR` 角色；
-- 缺失索引使用 `UINT32_MAX`（Java 侧为 `-1`）；
-- ABI 从 v27 递增到 v28，未重排既有字段；
-- Java 和 C 两侧都拒绝越界索引、错误纹理角色、未知 PBR 格式及不一致的回退材质；
-- Native smoke 覆盖结构大小、偏移、无效索引和纹理角色错误路径。
-
-若当前代码证明保留槽位不足，必须先停止并重新确认结构扩展方案。
-
-## 6. 设置与诊断
-
-F9 第一版开放：
-
-- PBR 模式：`Auto / Off / LabPBR 1.3`；
-- Normal Strength；
-- Emission Scale；
-- 缺失 `_s` 时的 Roughness；
-- 缺失 `_s` 时的 dielectric F0。
-
-F10 按动态诊断区显示：
-
-- 检测到的格式、声明来源资源包和当前模式；
-- 方块图集 Sprite 总数、`_n`/`_s` 命中数和覆盖率；
-- Base/Normal/Material 图集尺寸与总内存；
-- Normal、Roughness、F0、Metal、Emission 的实际启用状态；
-- 缺失、尺寸不匹配、解码失败和不支持格式计数。
-
-固定格式与配置放在静态信息区，不与 FPS、samples/s、帧延迟等速率数据混排。
-
-## 7. 子阶段与提交边界
-
-- PBR-0：本文档与验收基线。
-- PBR-1：ResourceManager 格式检测、伴随纹理发现和覆盖率遥测。
-- PBR-2：同布局 Normal/Material 数据图集与缺失默认值。
-- PBR-3：Java/FFM/C ABI 纹理角色和材质索引。
-- PBR-4：Cycles Principled、DirectX Normal、Roughness、F0/Metal 和 Emission。
-- PBR-5：F9 材质设置、ABI 29 着色倍率与 F10 PBR 诊断。
-- PBR-6：自动和游戏内验收、文档收口。
-
-每个子阶段独立提交，只暂存该子阶段自己的文件或可精确隔离的 hunk。不得带入其他线程的性能、BVH、场景时序或互操作改动。
-
-## 8. 验收基线
-
-自动验证：
-
-- Java 离线编译通过；
-- Native smoke 通过（从 PBR-3 开始）；
-- 普通无 PBR 资源包路径行为不变；
-- SPBR-21 被识别为 LabPBR 1.3；
-- 资源重载后格式、覆盖率和数据图集同步重建；
-- 缺图和坏尺寸能回退且有诊断；
-- diff 与暂存区不包含外部线程文件。
-
-游戏内手动验证：
-
-- F8 开关、F9 页面、F10 调试仍响应；
-- 普通方块基础颜色和透明裁剪不回归；
-- 法线朝向正确，移动相机时凹凸不反转；
-- 光滑/粗糙表面反射宽度明显不同；
-- 金属不再表现为普通介电漫反射；
-- 自发光纹理仅在有效像素发光；
-- 切换资源包或执行资源重载后材质更新；
-- 关闭 PBR 后回到现有普通 Cycles 材质。
-
-## 9. PBR-7 至 PBR-12 扩展状态
-
-在第一版稳定合约之上，后续阶段按可独立验证、可独立提交的边界扩展：
-
-| 阶段 | 能力 | 当前状态 |
-| --- | --- | --- |
-| PBR-7 | 无损 Auxiliary atlas，保留 AO、高度、原始金属 ID、孔隙度/SSS | 已完成 |
-| PBR-8 | AO、孔隙度/湿润、SSS、预定义金属复折射率 | 已完成 |
-| PBR-9 | Bump、图集安全的 POM、逐 Sprite UV 边界 | Bump/POM 已完成；真实位移与细分延期 |
-| PBR-10 | 玻璃折射与水材质分类、传输闭包 | 等待原生 ABI 与材质分类窗口 |
-| PBR-11 | Base/Normal/Material/Aux 动画帧同步 | 初始帧和资源重载同步已完成；运行时局部图集更新待实现 |
-| PBR-12 | CTM 伴随纹理解析 | 已支持已拼入方块图集的 OptiFine/MCPatcher CTM Sprite；独立 CTM 几何规则延期 |
-
-PBR-11a 直接读取 Minecraft `SpriteContents.AnimationState` 已选中的实际图像帧，四张图集不再各自推算动画时钟。它保证首次构建和资源重载时相位一致。完整的运行时动画仍需要原生局部纹理区域更新；不得通过每帧重建场景来伪造动画。
-
-PBR-12a 只解析已经由 Minecraft 或其他 CTM 模组拼入方块图集的 Sprite，并在 `optifine/ctm`、`mcpatcher/ctm` 以及标准纹理根目录中寻找 `_n`/`_s` 伴随纹理。它不自行实现连接纹理的邻接选择或模型替换。
-
-## 10. 仍明确延期
-
-以下内容不属于本阶段完成标准：
-
-- 真实位移或细分；
-- 玻璃折射和水材质；
-- OptiFine CTM 专用几何/纹理解析；
-- 运行时动画 PBR 局部图集更新；
-- 实体、方块实体、物品和自定义模组渲染器；
-- Distant Horizons PBR；
-- oldPBR 或其他未声明格式；
-- 性能热点、BVH 或线程调度优化。
-
-## 11. PBR-6 自动验收记录
-
-2026-08-12 对当前开发资源包 `run/resourcepacks/SPBR-21.zip` 做了只读检查：
-
-- 声明为 `format=lab-pbr/1.3`；
-- 包内发现 3055 张 `_n.png` 与 4379 张 `_s.png`；
-- Java 离线编译与资源处理通过；
-- 公共 ABI 已更新到 29；
-- OptiX 原生烟测通过，包含三纹理 LabPBR 场景；
-- 原生增量场景更新测试通过。
-
-仍需游戏内确认法线方向、粗糙/金属差异、自发光范围以及 F9/F10 文案；这些视觉结果无法由离线烟测代替。
+V1 结果必须逐项记录 `PASS / FAIL / NOT RUN`。F0-F4 提交不预先宣称 V1 通过。
