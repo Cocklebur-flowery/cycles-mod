@@ -79,7 +79,8 @@ final class NativeLibrary implements AutoCloseable {
     }
 
     static NativeLibrary open(Path libraryPath) {
-        Arena arena = Arena.ofConfined();
+        // Scene mutations use a dedicated worker while frame calls remain on the render thread.
+        Arena arena = Arena.ofShared();
         try {
             return new NativeLibrary(arena, SymbolLookup.libraryLookup(libraryPath, arena));
         } catch (Throwable error) {

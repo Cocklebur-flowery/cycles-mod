@@ -218,6 +218,7 @@ final class CyclesRendererController {
     void onGameShuttingDown() {
         performanceMonitor.shutdown();
         interopBuffer.drainPendingCopy();
+        sceneManager.close();
         if (interopBuffer.telemetry().nativeBound() && NativeBridge.isReady()) {
             NativeBridge.close();
             invalidateNativeBridgeState();
@@ -300,6 +301,7 @@ final class CyclesRendererController {
                 settings.resolutionPercentage());
 
         interopBuffer.drainPendingCopy();
+        sceneManager.reset();
         NativeBridge.close();
         invalidateNativeBridgeState();
         interopBuffer.close();

@@ -1,7 +1,6 @@
 package dev.cyclesrenderer.scene;
 
 import dev.cyclesrenderer.config.CyclesRenderSettings;
-import dev.cyclesrenderer.nativebridge.NativeBridge;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.renderer.texture.TextureAtlas;
@@ -29,6 +28,7 @@ public final class SectionSceneManager {
 
     private final Map<Long, CachedSection> sections = new HashMap<>();
     private final ConcurrentLinkedQueue<Long> unloadedChunks = new ConcurrentLinkedQueue<>();
+    private final NativeSceneUploadQueue uploadQueue = new NativeSceneUploadQueue();
 
     private ClientLevel level;
     private LabPbrResources.Discovery pbrDiscovery = LabPbrResources.empty();
@@ -43,6 +43,7 @@ public final class SectionSceneManager {
     private int lastCameraSectionY = Integer.MIN_VALUE;
     private int lastCameraSectionZ = Integer.MIN_VALUE;
     private int lastViewDistance = Integer.MIN_VALUE;
+    private boolean rangeEvictionPending;
     private boolean pendingCommit;
     private boolean hasCommittedScene;
     private long lastMutationNanos;
@@ -54,16 +55,8 @@ public final class SectionSceneManager {
     private long lastUpdateMicros;
     private long emaUpdateMicros;
     private long maxUpdateMicros;
-    private long lastUpsertMicros;
-    private long emaUpsertMicros;
-    private long maxUpsertMicros;
-    private long lastRemoveMicros;
-    private long emaRemoveMicros;
-    private long maxRemoveMicros;
-    private long lastCommitMicros;
-    private long emaCommitMicros;
-    private long maxCommitMicros;
     private int lastAcceptedSections;
+    private SectionGeometrySnapshot deferredSnapshot;
 
     public UpdateResult update(
             Minecraft minecraft,
@@ -72,6 +65,7 @@ public final class SectionSceneManager {
             long currentResourceRevision,
             CyclesRenderSettings settings) {
         long updateStart = System.nanoTime();
+        uploadQueue.throwIfFailed();
         int cameraSectionX = SectionPos.blockToSectionCoord(Mth.floor(cameraPosition.x));
         int cameraSectionY = SectionPos.blockToSectionCoord(Mth.floor(cameraPosition.y));
         int cameraSectionZ = SectionPos.blockToSectionCoord(Mth.floor(cameraPosition.z));
@@ -99,16 +93,19 @@ public final class SectionSceneManager {
                 || cameraSectionZ != lastCameraSectionZ
                 || viewDistance != lastViewDistance;
         if (rangeChanged) {
-            evictOutsideVanillaRange(
+            lastCameraSectionX = cameraSectionX;
+            lastCameraSectionY = cameraSectionY;
+            lastCameraSectionZ = cameraSectionZ;
+            lastViewDistance = viewDistance;
+            rangeEvictionPending = true;
+        }
+        if (rangeEvictionPending) {
+            rangeEvictionPending = !evictOutsideVanillaRange(
                     currentLevel,
                     cameraSectionX,
                     cameraSectionY,
                     cameraSectionZ,
                     viewDistance);
-            lastCameraSectionX = cameraSectionX;
-            lastCameraSectionY = cameraSectionY;
-            lastCameraSectionZ = cameraSectionZ;
-            lastViewDistance = viewDistance;
         }
         processChunkUnloads();
 
@@ -124,10 +121,11 @@ public final class SectionSceneManager {
                 ? UPDATE_SCENE_QUIET_NANOS
                 : INITIAL_SCENE_QUIET_NANOS;
         if (pendingCommit && now - lastMutationNanos >= quietInterval) {
-            commitNative();
-            pendingCommit = false;
-            hasCommittedScene = true;
-            committed = true;
+            if (uploadQueue.enqueueCommit()) {
+                pendingCommit = false;
+                hasCommittedScene = true;
+                committed = true;
+            }
         }
 
         lastAcceptedSections = accepted;
@@ -151,6 +149,7 @@ public final class SectionSceneManager {
     }
 
     public void reset() {
+        uploadQueue.reset();
         level = null;
         resourceRevision = Long.MIN_VALUE;
         pbrResourceFingerprint = 0;
@@ -163,6 +162,7 @@ public final class SectionSceneManager {
         lastCameraSectionY = Integer.MIN_VALUE;
         lastCameraSectionZ = Integer.MIN_VALUE;
         lastViewDistance = Integer.MIN_VALUE;
+        rangeEvictionPending = false;
         pendingCommit = false;
         hasCommittedScene = false;
         uploadedSectionCount = 0L;
@@ -173,17 +173,13 @@ public final class SectionSceneManager {
         lastUpdateMicros = 0L;
         emaUpdateMicros = 0L;
         maxUpdateMicros = 0L;
-        lastUpsertMicros = 0L;
-        emaUpsertMicros = 0L;
-        maxUpsertMicros = 0L;
-        lastRemoveMicros = 0L;
-        emaRemoveMicros = 0L;
-        maxRemoveMicros = 0L;
-        lastCommitMicros = 0L;
-        emaCommitMicros = 0L;
-        maxCommitMicros = 0L;
         lastAcceptedSections = 0;
+        deferredSnapshot = null;
         SectionGeometryCollector.setActiveLevel(null);
+    }
+
+    public void close() {
+        uploadQueue.close();
     }
 
     private void resetScene(
@@ -200,7 +196,7 @@ public final class SectionSceneManager {
         sceneOriginZ = snapOrigin(Mth.floor(cameraPosition.z));
         SectionGeometrySnapshot.SceneResources resources = createResources(
                 minecraft, sceneOriginX, sceneOriginY, sceneOriginZ, settings);
-        NativeBridge.resetScene(resources);
+        uploadQueue.resetNativeScene(resources);
         level = currentLevel;
         resourceRevision = currentResourceRevision;
         pbrResourceFingerprint = settings.pbrResourceFingerprint();
@@ -209,6 +205,7 @@ public final class SectionSceneManager {
         lastCameraSectionY = Integer.MIN_VALUE;
         lastCameraSectionZ = Integer.MIN_VALUE;
         lastViewDistance = Integer.MIN_VALUE;
+        rangeEvictionPending = false;
         pendingCommit = false;
         hasCommittedScene = false;
         lastMutationNanos = System.nanoTime();
@@ -216,6 +213,7 @@ public final class SectionSceneManager {
         removedSectionCount = 0L;
         activeVertexCount = 0;
         activeTriangleCount = 0;
+        deferredSnapshot = null;
         minecraft.levelExtractor.allChanged();
     }
 
@@ -237,7 +235,11 @@ public final class SectionSceneManager {
         long deadline = System.nanoTime() + SECTION_UPLOAD_BUDGET_NANOS;
         int accepted = 0;
         while (accepted < MAX_SECTION_UPLOADS_PER_FRAME && System.nanoTime() < deadline) {
-            SectionGeometrySnapshot snapshot = SectionGeometryCollector.poll();
+            SectionGeometrySnapshot snapshot = deferredSnapshot;
+            deferredSnapshot = null;
+            if (snapshot == null) {
+                snapshot = SectionGeometryCollector.poll();
+            }
             if (snapshot == null) {
                 break;
             }
@@ -262,14 +264,22 @@ public final class SectionSceneManager {
             }
 
             if (snapshot.empty()) {
-                CachedSection removed = sections.remove(snapshot.sectionNode());
+                CachedSection removed = sections.get(snapshot.sectionNode());
                 if (removed != null) {
+                    if (!uploadQueue.enqueueRemove(snapshot.sectionNode())) {
+                        deferredSnapshot = snapshot;
+                        break;
+                    }
+                    sections.remove(snapshot.sectionNode());
                     subtractCounts(removed);
-                    removeNative(snapshot.sectionNode());
                     removedSectionCount++;
                     markMutation();
                 }
             } else {
+                if (!uploadQueue.enqueueUpsert(snapshot)) {
+                    deferredSnapshot = snapshot;
+                    break;
+                }
                 sections.put(snapshot.sectionNode(), new CachedSection(
                         snapshot.sequence(), snapshot.vertexCount(), snapshot.triangleCount()));
                 if (previous != null) {
@@ -277,7 +287,6 @@ public final class SectionSceneManager {
                 }
                 activeVertexCount = Math.addExact(activeVertexCount, snapshot.vertexCount());
                 activeTriangleCount = Math.addExact(activeTriangleCount, snapshot.triangleCount());
-                upsertNative(snapshot);
                 uploadedSectionCount++;
                 markMutation();
             }
@@ -286,7 +295,7 @@ public final class SectionSceneManager {
         return accepted;
     }
 
-    private void evictOutsideVanillaRange(
+    private boolean evictOutsideVanillaRange(
             ClientLevel currentLevel,
             int cameraSectionX,
             int cameraSectionY,
@@ -308,12 +317,15 @@ public final class SectionSceneManager {
                     cameraType == CyclesRenderSettings.CameraType.PANORAMA)) {
                 continue;
             }
+            if (!uploadQueue.enqueueRemove(sectionNode)) {
+                return false;
+            }
             iterator.remove();
             subtractCounts(entry.getValue());
-            removeNative(sectionNode);
             removedSectionCount++;
             markMutation();
         }
+        return true;
     }
 
     private void processChunkUnloads() {
@@ -326,9 +338,12 @@ public final class SectionSceneManager {
                 Map.Entry<Long, CachedSection> entry = iterator.next();
                 long sectionNode = entry.getKey();
                 if (SectionPos.x(sectionNode) == chunkX && SectionPos.z(sectionNode) == chunkZ) {
+                    if (!uploadQueue.enqueueRemove(sectionNode)) {
+                        unloadedChunks.add(packedChunk);
+                        return;
+                    }
                     iterator.remove();
                     subtractCounts(entry.getValue());
-                    removeNative(sectionNode);
                     removedSectionCount++;
                     markMutation();
                 }
@@ -342,20 +357,21 @@ public final class SectionSceneManager {
     }
 
     public Telemetry telemetry() {
+        NativeSceneUploadQueue.Metrics upload = uploadQueue.metrics();
         return new Telemetry(
                 updateCount,
                 lastUpdateMicros,
                 emaUpdateMicros,
                 maxUpdateMicros,
-                lastUpsertMicros,
-                emaUpsertMicros,
-                maxUpsertMicros,
-                lastRemoveMicros,
-                emaRemoveMicros,
-                maxRemoveMicros,
-                lastCommitMicros,
-                emaCommitMicros,
-                maxCommitMicros,
+                upload.lastUpsertMicros(),
+                upload.emaUpsertMicros(),
+                upload.maxUpsertMicros(),
+                upload.lastRemoveMicros(),
+                upload.emaRemoveMicros(),
+                upload.maxRemoveMicros(),
+                upload.lastCommitMicros(),
+                upload.emaCommitMicros(),
+                upload.maxCommitMicros(),
                 lastAcceptedSections,
                 pendingCommit);
     }
@@ -366,33 +382,6 @@ public final class SectionSceneManager {
 
     public LabPbrAtlasBuilder.Atlases pbrAtlases() {
         return pbrAtlases;
-    }
-
-    private void upsertNative(SectionGeometrySnapshot snapshot) {
-        long start = System.nanoTime();
-        NativeBridge.upsertSection(snapshot);
-        long micros = nanosToMicros(System.nanoTime() - start);
-        lastUpsertMicros = micros;
-        emaUpsertMicros = updateEma(emaUpsertMicros, micros);
-        maxUpsertMicros = Math.max(maxUpsertMicros, micros);
-    }
-
-    private void removeNative(long sectionNode) {
-        long start = System.nanoTime();
-        NativeBridge.removeSection(sectionNode);
-        long micros = nanosToMicros(System.nanoTime() - start);
-        lastRemoveMicros = micros;
-        emaRemoveMicros = updateEma(emaRemoveMicros, micros);
-        maxRemoveMicros = Math.max(maxRemoveMicros, micros);
-    }
-
-    private void commitNative() {
-        long start = System.nanoTime();
-        NativeBridge.commitScene();
-        long micros = nanosToMicros(System.nanoTime() - start);
-        lastCommitMicros = micros;
-        emaCommitMicros = updateEma(emaCommitMicros, micros);
-        maxCommitMicros = Math.max(maxCommitMicros, micros);
     }
 
     private void recordUpdate(long elapsedNanos) {
