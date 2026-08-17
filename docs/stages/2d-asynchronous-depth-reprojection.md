@@ -1,8 +1,8 @@
 # 2D 异步深度重投影
 
-状态：`2D-R0`、`2D-R1` 完成；`2D-R2`～`2D-R6` 未实现
+状态：`2D-R0`～`2D-R6a` 已实现并通过自动门禁；`2D-R6b` 收口本文，游戏内人工验收待执行
 设计基线：`337d3bf`
-生产基线：ABI43、单 Cycles Session、现有 Vulkan 三槽 interop
+生产基线：ABI45、单 Cycles Session、Vulkan 三槽原子颜色/深度/metadata interop
 
 ## 1. 目标
 
@@ -28,15 +28,18 @@
 
 ## 3. 当前事实
 
-- Java 与 Native 当前 ABI 均为 43。
-- Vulkan interop state 为 80 字节，报告颜色尺寸、generation、slot 和深度尺寸。
-- interop 已能把 `RGBA16_FLOAT` 颜色与 `R32_FLOAT` 深度复制到 Minecraft Vulkan 纹理。
-- Native 当前只在 Post Process DoF 需要时导出深度；重投影不能继续依赖该偶然条件。
-- Presenter 能消费颜色与深度，但只有当前相机参数，没有与源颜色严格匹配的源相机。
-- 当前 pipeline 顺序是可选 Post DoF、自动曝光、显示变换和主目标 presentation。
+- Java 与 Native 当前 ABI 均为 45；ABI44 属于已废弃 C2，不复用其编号或布局。
+- 独立 144 字节 metadata 结构携带 generation/slot、源相机、投影、裁剪面和轴向深度语义。
+- Native 在同一 slot 的 `WRITING -> READY` 临界区冻结颜色、完整尺寸 R32F 深度和 metadata；
+  Java 通过单次 acquire 原子取得状态与 metadata，再保留到 Vulkan copy 完成。
+- interop descriptor 的可选 `REPROJECTION_INPUTS` 位显式请求额外深度；正式配置关闭时不请求。
+- 显示链已实现 forward splat、硬件最近深度、GPU coverage 精确计数、98% 全帧安全门和
+  1 像素有界邻域解析；其输出位于 Post Process DoF 之前。
+- F9 正式键为 `performance.reprojection.enabled=false`；F10 已显示 requested/actual、源帧年龄、
+  相机 revision、颜色/深度尺寸、invalid coverage、旁路计数/原因和可选 Vulkan GPU 时间。
 
-2D 不从已废弃 C2 复制 ABI44 数值、布局、Shader 或相机历史实现。任何新契约都从 ABI43
-和当前源代码重新推导。
+2D 没有从已废弃 C2 复制 ABI44 数值、布局、Shader 或相机历史实现；全部新契约从 ABI43
+生产基线和当时源码重新推导，最终以 ABI45 发布。
 
 ## 4. 帧包与所有权
 
@@ -161,6 +164,24 @@ F10 只读诊断至少报告：requested/actual、source age、source/current ca
 7. `2D-R6`：F10 诊断、双变体实机矩阵和最终证据收口。
    - Commit：`docs(runtime): record 2D reprojection evidence`
 
+实际提交链如下；每个检查点均先验证再提交，未把后续阶段混入前一提交：
+
+| 阶段 | 提交 |
+|---|---|
+| R0 | `72564ca docs(runtime): define asynchronous depth reprojection` |
+| R1 | `977e237 test(presentation): characterize depth reprojection math` |
+| R2 | `f368a16 feat(abi): expose reprojection frame metadata` |
+| R3a | `9456501 feat(interop): retain reprojection metadata per slot` |
+| R3b | `b0a18a6 feat(interop): expose atomic reprojection acquisition` |
+| R3c | `d58335a feat(interop): publish matched reprojection inputs` |
+| R4a1 | `6e43ae3 feat(interop): negotiate reprojection inputs` |
+| R4a2 | `2a73e27 feat(interop): gate reprojection depth inputs` |
+| R4b | `dee5e79 feat(presentation): build depth reprojection stage` |
+| R4c | `febacc7 feat(presentation): add gated depth reprojection` |
+| R5 | `ea702c5 feat(config): expose reprojection controls` |
+| R6a | `27645c1 feat(diagnostics): report reprojection safety state` |
+| R6b | `docs(runtime): record 2D reprojection evidence`（本文） |
+
 新文件必须在创建阶段立即进入可见 diff。提交只暂存当前阶段批准的精确路径；A1、D3
 和其他实验内容不得混入 2D 提交。
 
@@ -190,6 +211,36 @@ F10 只读诊断至少报告：requested/actual、source age、source/current ca
 
 GPU pass 时间、显存和 invalid coverage 必须记录，但 R0 不预设未经测量的性能百分比。
 编译成功、单个 smoke frame 或主观“更流畅”都不等于 2D 验收通过。
+
+### 2026-08-17 自动证据
+
+| 门禁 | 结果 | 证据 |
+|---|---|---|
+| R1 数值 oracle | `PASS` | identity、旋转、平移、FOV/aspect/shift、near/far、nearest-depth、无效深度测试通过 |
+| Java/ABI/config | `PASS` | `gradlew test jar -x createMinecraftArtifacts`，JDK 25 |
+| ShaderC | `PASS` | 临时测试编译并反射 splat vertex/fragment、resolve、depth coverage 和 sum coverage 五个变体；临时文件已删除 |
+| Default 完整门禁 | `PASS` | `gradlew verifyProject -x createMinecraftArtifacts`，Java build 与 Native CTest 6/6 |
+| Experimental DLSS 完整门禁 | `PASS` | `gradlew -PexperimentalDlss=true verifyProject -x createMinecraftArtifacts`，独立 `native-dlss` 构建与 CTest 6/6 |
+| staged diff | `PASS` | 每个子阶段精确暂存批准路径并通过 `git diff --cached --check` |
+
+两次 `verifyProject` 在沙箱外执行，因为同一 MSBuild 命令已在沙箱内明确因无法读取
+`C:\Users\cang\AppData\Local\Microsoft SDKs` 而失败。`createMinecraftArtifacts` 被排除，原因是
+外部 Java 进程持有 NeoForge patched jar；测试和打包使用已有且可用的 patched artifact。
+
+### 游戏内人工验收：`NOT RUN`
+
+用户已明确由人工启动客户端，因此下列项目不能写成通过：
+
+- 默认关闭：F8 首帧、F9 Performance 默认值、无额外深度/目标/pass、画面与关闭基线一致。
+- 开启与运动：转向、步行、横移、跳跃、贴近方块、快速 180°；确认无黑帧和大面积旧像素伪造。
+- F10：requested/actual、source age、相机 revision、尺寸、coverage、旁路原因和 GPU 时间持续更新。
+- 生命周期：窗口缩放、F8 关闭/重开、world unload、interop rebuild、正常退出和 pending readback 回调。
+- 模式矩阵：Post DoF 开/关；Physical DoF、全景、鱼眼明确旁路；新 generation 到达时无错 slot/旧 metadata。
+- Default 与 experimental DLSS 客户端各跑一次。DLSS RR 的低分辨率深度不会冒充完整尺寸输入，
+  因此尺寸不匹配时应安全旁路，并在 F10 中给出非 actual 状态。
+
+在上述人工矩阵完成前，2D 的代码和自动门禁已收口，但不能宣称游戏内视觉/性能验收完成，
+也不能据自动结果调整 98% coverage 门槛或给出性能提升百分比。
 
 ## 10. 停止条件
 
