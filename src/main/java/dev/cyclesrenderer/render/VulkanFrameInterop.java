@@ -25,8 +25,6 @@ import org.lwjgl.vulkan.VkMemoryBarrier2;
 import java.util.Optional;
 
 public final class VulkanFrameInterop implements AutoCloseable {
-    static final String DEVELOPMENT_REPROJECTION_PROPERTY =
-            "cyclesrenderer.reprojection.development";
     public static final int BYTES_PER_PIXEL = 8;
     private static final int DEPTH_BYTES_PER_PIXEL = 4;
     private static final int SLOT_BYTES_PER_PIXEL =
@@ -74,8 +72,7 @@ public final class VulkanFrameInterop implements AutoCloseable {
         logicalBytes = capacity.logicalBytes();
         slotStrideBytes = Math.toIntExact(logicalBytes);
 
-        boolean requestReprojectionInputs =
-                Boolean.getBoolean(DEVELOPMENT_REPROJECTION_PROPERTY);
+        boolean requestReprojectionInputs = settings.reprojectionEnabled();
         VulkanSharedAllocation.Initialization initialization = allocation.initialize(
                 minecraft,
                 capacityWidth,
@@ -113,6 +110,11 @@ public final class VulkanFrameInterop implements AutoCloseable {
     public boolean requiresLargerCapacity(CyclesRenderSettings settings) {
         return allocation.nativeBound()
                 && Capacity.from(settings).logicalBytes() > logicalBytes;
+    }
+
+    public boolean requiresReprojectionRebuild(CyclesRenderSettings settings) {
+        return allocation.nativeBound()
+                && settings.reprojectionEnabled() != reprojectionInputsRequested;
     }
 
     public void pollCompletedFrame() {

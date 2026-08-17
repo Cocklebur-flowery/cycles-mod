@@ -264,7 +264,9 @@ final class CyclesRendererController {
             return;
         }
         try {
-            if (testFrameEnabled && interopBuffer.requiresLargerCapacity(settings)) {
+            if (testFrameEnabled
+                    && (interopBuffer.requiresLargerCapacity(settings)
+                        || interopBuffer.requiresReprojectionRebuild(settings))) {
                 rebuildInteropForSettings(settings);
                 return;
             }
@@ -293,12 +295,15 @@ final class CyclesRendererController {
     private void rebuildInteropForSettings(CyclesRenderSettings settings) {
         VulkanFrameInterop.Telemetry previous = interopBuffer.telemetry();
         logger.info(
-                "Rebuilding Vulkan interop capacity from {}x{} for output {}x{}@{}%",
+                "Rebuilding Vulkan interop from {}x{} / reprojection={} "
+                        + "for output {}x{}@{}% / reprojection={}",
                 previous.capacityWidth(),
                 previous.capacityHeight(),
+                interopBuffer.reprojectionInputsRequested(),
                 settings.renderWidth(),
                 settings.renderHeight(),
-                settings.resolutionPercentage());
+                settings.resolutionPercentage(),
+                settings.reprojectionEnabled());
 
         interopBuffer.drainPendingCopy();
         sceneManager.reset();

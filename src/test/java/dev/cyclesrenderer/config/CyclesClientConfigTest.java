@@ -19,7 +19,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class CyclesClientConfigTest {
     private static final String EXPECTED_CATALOG_SHA256 =
-            "ae522977c363d2d12d9b36d9ab4f452f91893606d677179f6482399b78f0e362";
+            "fc06bcebebbb4075b2330083a2837dde84bc5b27c70a01cf82d1c2df2dc882b6";
 
     @Test
     void optionCatalogKeepsStableOrderAndMetadata() {
@@ -47,6 +47,16 @@ class CyclesClientConfigTest {
         String actualFingerprint = catalogFingerprint(options);
         assertEquals(EXPECTED_CATALOG_SHA256, actualFingerprint,
                 "configuration option catalog changed: " + actualFingerprint);
+        SettingsOption<?> reprojection = options.stream()
+                .filter(option -> option.id().equals("performance.reprojection.enabled"))
+                .findFirst()
+                .orElseThrow();
+        assertEquals(CyclesClientConfig.Category.PERFORMANCE, reprojection.category());
+        assertEquals(CyclesClientConfig.ValueKind.BOOLEAN, reprojection.kind());
+        assertEquals(
+                List.of("performance", "reprojection", "enabled"),
+                CyclesClientConfig.REPROJECTION_ENABLED.getPath());
+        assertFalse(CyclesClientConfig.REPROJECTION_ENABLED.getDefault());
         assertThrows(UnsupportedOperationException.class, options::clear);
     }
 

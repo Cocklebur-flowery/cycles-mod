@@ -273,6 +273,8 @@ final class SettingsCatalog {
         options.add(booleanOption("diagnostics.debugOverlay", Category.DIAGNOSTICS,
                 "config.cyclesrenderer.diagnostics.debugOverlay", DEBUG_OVERLAY));
         CAMERA_AUTOMATION.appendOptions(options);
+        options.add(booleanOption("performance.reprojection.enabled", Category.PERFORMANCE,
+                "config.cyclesrenderer.performance.reprojection", REPROJECTION_ENABLED));
         return List.copyOf(options);
     }
 

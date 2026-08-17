@@ -120,7 +120,8 @@ public record CyclesRenderSettings(
         float centerTitleSafeY,
         float centerActionSafeX,
         float centerActionSafeY,
-        CameraAutomationSettings cameraAutomation) {
+        CameraAutomationSettings cameraAutomation,
+        boolean reprojectionEnabled) {
 
     public int pbrResourceFingerprint() {
         int result = pbrMode.hashCode();

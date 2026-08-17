@@ -122,6 +122,7 @@ public final class CyclesClientConfig {
     static final ModConfigSpec.DoubleValue WHITE_BALANCE_TINT;
     static final ModConfigSpec.EnumValue<CyclesRenderSettings.PassView> ACTIVE_PASS;
     static final ModConfigSpec.BooleanValue DEBUG_OVERLAY;
+    static final ModConfigSpec.BooleanValue REPROJECTION_ENABLED;
     static final CameraAutomationConfig CAMERA_AUTOMATION;
 
     static {
@@ -411,6 +412,15 @@ public final class CyclesClientConfig {
                 .define("debugOverlay", false);
         builder.pop();
 
+        builder.push("performance");
+        builder.push("reprojection");
+        REPROJECTION_ENABLED = builder
+                .translation("config.cyclesrenderer.performance.reprojection")
+                .comment("Reproject the latest complete Cycles color/depth frame to the current camera.")
+                .define("enabled", false);
+        builder.pop();
+        builder.pop();
+
         CAMERA_AUTOMATION = CameraAutomationConfig.define(builder);
 
         SPEC = builder.build();
@@ -498,7 +508,8 @@ public final class CyclesClientConfig {
                 CAMERA_CENTER_TITLE_SAFE_Y.get().floatValue(),
                 CAMERA_CENTER_ACTION_SAFE_X.get().floatValue(),
                 CAMERA_CENTER_ACTION_SAFE_Y.get().floatValue(),
-                CAMERA_AUTOMATION.snapshot());
+                CAMERA_AUTOMATION.snapshot(),
+                REPROJECTION_ENABLED.get());
     }
 
     public static void markReloaded() {
@@ -547,7 +558,8 @@ public final class CyclesClientConfig {
         ATMOSPHERE,
         MATERIALS,
         COLOR,
-        DIAGNOSTICS
+        DIAGNOSTICS,
+        PERFORMANCE
     }
 
     public enum ValueKind {
