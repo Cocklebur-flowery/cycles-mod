@@ -20,6 +20,7 @@ import java.util.Optional;
 
 public final class CyclesFramePresenter {
     private final AutomaticExposureStage automaticExposure = new AutomaticExposureStage();
+    private final DepthReprojectionStage depthReprojection = new DepthReprojectionStage();
     private final PostDepthOfFieldStage postDepthOfField = new PostDepthOfFieldStage();
     private TextureTarget nativeFrameTarget;
     private boolean ready;
@@ -151,13 +152,47 @@ public final class CyclesFramePresenter {
             GpuTextureView depth,
             DisplayPerformanceProbe performanceProbe) {
         RenderSystem.assertOnRenderThread();
+        presentExternal(
+                output,
+                settings,
+                depthFar,
+                focusDistance,
+                source,
+                depth,
+                false,
+                null,
+                null,
+                performanceProbe);
+    }
+
+    public void presentExternal(
+            RenderTarget output,
+            CyclesRenderSettings settings,
+            float depthFar,
+            float focusDistance,
+            GpuTextureView source,
+            GpuTextureView depth,
+            boolean reprojectionRequested,
+            NativeBridge.ReprojectionMetadata sourceMetadata,
+            NativeBridge.CameraInput targetCamera,
+            DisplayPerformanceProbe performanceProbe) {
+        RenderSystem.assertOnRenderThread();
+        DepthReprojectionStage.Result reprojection = depthReprojection.apply(
+                reprojectionRequested,
+                Objects.requireNonNull(source),
+                Objects.requireNonNull(depth),
+                sourceMetadata,
+                targetCamera,
+                settings,
+                output.width,
+                output.height);
         presentTexture(
                 output,
                 settings,
                 depthFar,
                 focusDistance,
-                Objects.requireNonNull(source),
-                Objects.requireNonNull(depth),
+                reprojection.color(),
+                reprojection.depth(),
                 performanceProbe);
     }
 
@@ -281,6 +316,7 @@ public final class CyclesFramePresenter {
         displayExposureBits = 0;
         displayTransform = null;
         automaticExposure.reset();
+        depthReprojection.reset();
         postDepthOfField.reset();
         if (nativeFrameTarget != null) {
             nativeFrameTarget.destroyBuffers();

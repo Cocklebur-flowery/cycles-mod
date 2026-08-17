@@ -61,6 +61,7 @@ public final class VulkanFrameInterop implements AutoCloseable {
     private long emaCopyMicros;
     private long maxCopyMicros;
     private boolean nativeActive;
+    private boolean reprojectionInputsRequested;
     private Telemetry telemetry = Telemetry.inactive("not initialized");
 
     public void initialize(Minecraft minecraft, CyclesRenderSettings settings) {
@@ -73,6 +74,8 @@ public final class VulkanFrameInterop implements AutoCloseable {
         logicalBytes = capacity.logicalBytes();
         slotStrideBytes = Math.toIntExact(logicalBytes);
 
+        boolean requestReprojectionInputs =
+                Boolean.getBoolean(DEVELOPMENT_REPROJECTION_PROPERTY);
         VulkanSharedAllocation.Initialization initialization = allocation.initialize(
                 minecraft,
                 capacityWidth,
@@ -80,7 +83,8 @@ public final class VulkanFrameInterop implements AutoCloseable {
                 logicalBytes,
                 SLOT_COUNT,
                 slotStrideBytes,
-                Boolean.getBoolean(DEVELOPMENT_REPROJECTION_PROPERTY));
+                requestReprojectionInputs);
+        reprojectionInputsRequested = requestReprojectionInputs;
         if (initialization.nativeBound()) {
             telemetry = new Telemetry(
                     true, true, true,
@@ -227,6 +231,10 @@ public final class VulkanFrameInterop implements AutoCloseable {
 
     public Optional<NativeBridge.ReprojectionMetadata> reprojectionMetadata() {
         return Optional.ofNullable(displayedReprojectionMetadata);
+    }
+
+    public boolean reprojectionInputsRequested() {
+        return reprojectionInputsRequested;
     }
 
     public CopyTelemetry copyTelemetry() {
@@ -527,6 +535,7 @@ public final class VulkanFrameInterop implements AutoCloseable {
         pendingDepthHeight = 0;
         pendingReprojectionMetadata = null;
         nativeActive = false;
+        reprojectionInputsRequested = false;
         copyCount = 0L;
         generationGaps = 0L;
         lastCopyMicros = 0L;

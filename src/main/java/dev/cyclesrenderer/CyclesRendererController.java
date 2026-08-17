@@ -380,6 +380,9 @@ final class CyclesRendererController {
                     cameraInput.focusDistance(),
                     interopBuffer.frameTextureView(),
                     interopBuffer.depthTextureView(),
+                    interopBuffer.reprojectionInputsRequested(),
+                    interopBuffer.reprojectionMetadata().orElse(null),
+                    cameraInput,
                     performanceMonitor);
         } else {
             framePresenter.presentExternal(
