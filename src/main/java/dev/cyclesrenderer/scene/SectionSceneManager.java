@@ -31,6 +31,8 @@ public final class SectionSceneManager {
     private final Map<Long, CachedSection> sections = new HashMap<>();
     private final ConcurrentLinkedQueue<Long> unloadedChunks = new ConcurrentLinkedQueue<>();
     private final NativeSceneUploadQueue uploadQueue = new NativeSceneUploadQueue();
+    private final LabPbrAnimationUploadGate animationUploadGate =
+            new LabPbrAnimationUploadGate();
 
     private ClientLevel level;
     private LabPbrResources.Discovery pbrDiscovery = LabPbrResources.empty();
@@ -65,6 +67,7 @@ public final class SectionSceneManager {
             Minecraft minecraft,
             ClientLevel currentLevel,
             Vec3 cameraPosition,
+            long presentedFrameGeneration,
             long currentResourceRevision,
             CyclesRenderSettings settings) {
         long updateStart = System.nanoTime();
@@ -83,6 +86,7 @@ public final class SectionSceneManager {
                     minecraft,
                     currentLevel,
                     cameraPosition,
+                    presentedFrameGeneration,
                     currentResourceRevision,
                     settings);
             cameraSectionX = SectionPos.blockToSectionCoord(Mth.floor(cameraPosition.x));
@@ -118,11 +122,8 @@ public final class SectionSceneManager {
                 cameraSectionY,
                 cameraSectionZ,
                 viewDistance);
-        boolean committed = publishAnimationUpdates();
-        if (committed) {
-            pendingCommit = false;
-            hasCommittedScene = true;
-        }
+        boolean committed = animationUploadGate.observe(presentedFrameGeneration)
+                && publishAnimationUpdates();
         long now = System.nanoTime();
         long quietInterval = hasCommittedScene
                 ? UPDATE_SCENE_QUIET_NANOS
@@ -165,6 +166,7 @@ public final class SectionSceneManager {
         pbrAtlases = LabPbrAtlasBuilder.empty();
         animationSources = LabPbrAnimationSources.empty();
         LabPbrAnimationFrames.beginGeneration();
+        animationUploadGate.reset(0L);
         sections.clear();
         unloadedChunks.clear();
         lastCameraSectionX = Integer.MIN_VALUE;
@@ -195,6 +197,7 @@ public final class SectionSceneManager {
             Minecraft minecraft,
             ClientLevel currentLevel,
             Vec3 cameraPosition,
+            long presentedFrameGeneration,
             long currentResourceRevision,
             CyclesRenderSettings settings) {
         sections.clear();
@@ -204,6 +207,7 @@ public final class SectionSceneManager {
         sceneOriginY = snapOrigin(Mth.floor(cameraPosition.y));
         sceneOriginZ = snapOrigin(Mth.floor(cameraPosition.z));
         animationSources = LabPbrAnimationSources.empty();
+        animationUploadGate.reset(presentedFrameGeneration);
         ResourceBuild resourceBuild = createResources(
                 minecraft, sceneOriginX, sceneOriginY, sceneOriginZ, settings);
         uploadQueue.resetNativeScene(resourceBuild.resources());

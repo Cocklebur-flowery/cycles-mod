@@ -170,6 +170,7 @@ final class CyclesRendererController {
                     minecraft,
                     level,
                     camera.pos,
+                    Math.max(interopBuffer.generation(), framePresenter.generation()),
                     resourceRevision,
                     renderSettings);
             performanceMonitor.endCpuStage(
