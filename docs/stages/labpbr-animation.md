@@ -1,9 +1,9 @@
 # LabPBR 运行时动画图集同步第二里程碑
 
-状态：`A0 / A1 / A2 / A3 DONE`；`A4 / A5 / A6 / A7 NOT STARTED`；
+状态：`A0 / A1 / A2 / A3 / A4 DONE`；`A5 / A6 / A7 NOT STARTED`；
 `V2 NOT STARTED`
 
-A0 调查与设计基线：`3a3bf86`（2026-08-20，Asia/Shanghai）
+A0 调查与设计基线：`323a8f2`（2026-08-20，Asia/Shanghai）
 
 目标资源包：`run/resourcepacks/SPBR-21.zip`
 
@@ -289,3 +289,28 @@ A3 还验证并拒绝 Sprite/generation 不匹配、无效进度、越界 atlas 
 网格、错误 RGBA8 stride/byte count 和非固定槽序。8 项 focused tests 覆盖离散、插值、
 逐字节四槽输出、fallback、输入所有权、row order 与非法输入；完整 Java tests 与 Jar
 组装通过。资源建立阶段如何填充只读 `FramePixels`、何时编码和提交仍属于 A6。
+
+## 14. A4 实施结果
+
+A4 新增 Native 私有 `TextureRegionUpdateAccumulator`，ABI 保持 45。一个待提交批次必须
+包含固定 `0..3` 四槽、相同 rectangle、紧密 RGBA8 stride 和完整像素所有权；atlas
+布局、越界、generation、revision 或部分批次不合法时整体拒绝。
+
+累积器按 Sprite 保留最新 revision，commit snapshot 按 revision、Sprite index 稳定排序。
+acknowledge 只删除与 snapshot 同一共享对象的项，因此 commit 之后到达的新 revision 不会
+被旧 acknowledge 误删。reset 只接受严格递增 generation，并原子清空旧 generation 的
+revision 与 pending 状态。该对象本身不提供第二套锁；A5/A6 必须把它置于现有单写者和
+`request_mutex_` 顺序内。
+
+`SceneRuntime` 现在保留创建材质时使用的四个 `ImageHandle`。私有应用适配器会先验证
+全部 region 与 resident image，再调用 A1 的 `ImageManager::update_image_region`，并在
+每次写入后确认 `device_image` identity 未变化。A4 没有新增 bridge 导出函数，也没有把
+累积器接入 worker；因此区域更新尚不能从 Java 发布，实际公开链路属于 A5/A6。
+
+新增第 8 项 CTest 覆盖 latest-wins、排序、旧 acknowledge、generation barrier，以及
+partial/order/bounds/stride/byte-count/revision 拒绝。Default 与 experimental DLSS 均
+成功编译并链接 Native DLL、辅助测试和 smoke；两者的 contract、color 与 focused
+texture-region 测试通过。Default 的完整 GPU smoke 中 5 项既有 OptiX 渲染测试仍在
+camera shift 附近进程崩溃；切换到工作区可写 OptiX cache 后警告消失但崩溃仍可复现。
+由于 A4 尚无公开 region 调用，该结果不构成区域写入运行证据，A5/A7 仍必须补齐实际
+区域内/外像素与 image identity 验证。

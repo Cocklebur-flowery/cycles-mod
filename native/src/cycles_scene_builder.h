@@ -4,6 +4,7 @@
 #include "labpbr_material.h"
 #include "realtime_section_mesh.h"
 #include "scene_update.h"
+#include "texture_region_update.h"
 
 #include <algorithm>
 #include <cstdint>
@@ -60,6 +61,7 @@ inline ccl::Transform rec709_to_working_space(std::uint32_t working_space) {
 
 struct SceneRuntime {
     std::shared_ptr<const SceneResourcesData> resources;
+    std::vector<ccl::ImageHandle> images;
     std::vector<ccl::Shader*> shaders;
     std::unordered_map<
         std::int64_t,
@@ -71,6 +73,7 @@ struct SceneRuntime {
 
     void clear() {
         resources.reset();
+        images.clear();
         shaders.clear();
         sections.clear();
         free_sections.clear();
@@ -269,13 +272,13 @@ inline void build_scene(
     scene->integrator->set_max_volume_bounce(0);
     scene->integrator->set_use_adaptive_sampling(false);
 
-    const std::vector<ccl::ImageHandle> images = create_images(scene, request);
+    runtime.images = create_images(scene, request);
     const SceneResourcesData& resources = *request.resources;
     runtime.shaders.assign(resources.materials.size(), nullptr);
     for (std::size_t index = 0; index < resources.materials.size(); ++index) {
         const CyclesBridgeMaterial& material = resources.materials[index];
         runtime.shaders[index] = create_material_shader(
-            scene, material, images, settings, index);
+            scene, material, runtime.images, settings, index);
     }
 
     for (const auto& entry : request.sections) {
@@ -287,6 +290,65 @@ inline void build_scene(
                 entry.second,
                 runtime.shaders,
                 runtime.rec709_to_working));
+    }
+}
+
+inline std::vector<texture_update::TextureLayout> texture_layouts(
+    const SceneRuntime& runtime) {
+    std::vector<texture_update::TextureLayout> layouts;
+    if (!runtime.resources) {
+        return layouts;
+    }
+    layouts.reserve(runtime.resources->textures.size());
+    for (const CyclesBridgeTexture& texture : runtime.resources->textures) {
+        layouts.push_back({texture.width, texture.height});
+    }
+    return layouts;
+}
+
+inline void apply_texture_region_batch(
+    ccl::Scene* scene,
+    const texture_update::TextureRegionBatch& batch,
+    SceneRuntime& runtime) {
+    if (scene == nullptr || !runtime.resources
+        || runtime.images.size() != runtime.resources->textures.size()) {
+        throw std::logic_error("texture region update requires active scene resources");
+    }
+    const std::vector<texture_update::TextureLayout> layouts =
+        texture_layouts(runtime);
+    std::string error;
+    if (!texture_update::validate_texture_region_batch(batch, layouts, error)) {
+        throw std::invalid_argument(error);
+    }
+
+    std::vector<ccl::device_image*> identities;
+    identities.reserve(batch.regions.size());
+    for (const texture_update::TextureRegion& region : batch.regions) {
+        ccl::ImageHandle& image = runtime.images[region.texture_index];
+        ccl::device_image* identity = image.vdb_image_memory();
+        if (image.empty() || image.get_manager() != scene->image_manager.get()
+            || identity == nullptr) {
+            throw std::logic_error("texture region image is not resident");
+        }
+        identities.push_back(identity);
+    }
+
+    for (std::size_t index = 0; index < batch.regions.size(); ++index) {
+        const texture_update::TextureRegion& region = batch.regions[index];
+        ccl::ImageHandle& image = runtime.images[region.texture_index];
+        if (!scene->image_manager->update_image_region(
+                image,
+                static_cast<int>(region.x),
+                static_cast<int>(region.y),
+                static_cast<int>(region.width),
+                static_cast<int>(region.height),
+                region.pixels.data(),
+                region.row_stride)) {
+            throw std::runtime_error("Cycles rejected a validated texture region");
+        }
+        if (image.vdb_image_memory() != identities[index]) {
+            throw std::runtime_error("Cycles texture region changed image identity");
+        }
     }
 }
 

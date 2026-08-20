@@ -102,6 +102,7 @@ add_library(cyclesrenderer_native SHARED
     src/labpbr_surface.cpp
     src/realtime_section_mesh.cpp
     src/scene_update.cpp
+    src/texture_region_update.cpp
 )
 
 target_compile_features(cyclesrenderer_native PRIVATE cxx_std_20)
@@ -276,6 +277,22 @@ set_target_properties(cyclesrenderer_scene_update_test PROPERTIES
 )
 add_dependencies(cyclesrenderer_smoke cyclesrenderer_scene_update_test)
 
+add_executable(cyclesrenderer_texture_region_test
+    src/texture_region_update.cpp
+    tests/texture_region_update_test.cpp
+)
+target_compile_features(cyclesrenderer_texture_region_test PRIVATE cxx_std_20)
+target_include_directories(cyclesrenderer_texture_region_test PRIVATE src)
+set_target_properties(cyclesrenderer_texture_region_test PROPERTIES
+    CXX_EXTENSIONS OFF
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
+    RUNTIME_OUTPUT_DIRECTORY_DEBUG "${CMAKE_BINARY_DIR}/bin"
+    RUNTIME_OUTPUT_DIRECTORY_RELEASE "${CMAKE_BINARY_DIR}/bin"
+    RUNTIME_OUTPUT_DIRECTORY_RELWITHDEBINFO "${CMAKE_BINARY_DIR}/bin"
+    RUNTIME_OUTPUT_DIRECTORY_MINSIZEREL "${CMAKE_BINARY_DIR}/bin"
+)
+add_dependencies(cyclesrenderer_smoke cyclesrenderer_texture_region_test)
+
 enable_testing()
 set(CYCLESRENDERER_SMOKE_SUITES
     contract
@@ -308,4 +325,13 @@ set_tests_properties(
     cyclesrenderer_scene_update
     PROPERTIES
         TIMEOUT 60
+)
+add_test(
+    NAME cyclesrenderer_texture_region
+    COMMAND cyclesrenderer_texture_region_test
+)
+set_tests_properties(
+    cyclesrenderer_texture_region
+    PROPERTIES
+        TIMEOUT 30
 )
