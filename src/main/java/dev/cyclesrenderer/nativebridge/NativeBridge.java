@@ -9,7 +9,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 
 public final class NativeBridge {
-    public static final int ABI_VERSION = 45;
+    public static final int ABI_VERSION = 46;
     public static final int DEVICE_UPDATE_PHASE_COUNT = 8;
     public static final int PIXEL_FORMAT_RGBA16_FLOAT = 2;
     public static final int PIXEL_FORMAT_RGBA32_FLOAT = 3;
@@ -298,7 +298,7 @@ public final class NativeBridge {
         }
     }
 
-    private static NativeBridgeSession requireState() {
+    static NativeBridgeSession requireState() {
         NativeBridgeSession state = bridgeState;
         if (state == null) {
             throw new IllegalStateException("native bridge is not initialized");

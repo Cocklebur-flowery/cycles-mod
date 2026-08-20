@@ -269,6 +269,20 @@ final class NativeBridgeSession implements AutoCloseable {
                 "section removal");
     }
 
+    void stageTextureRegion(TextureRegionUpdate update) throws Throwable {
+        try (Arena arena = Arena.ofConfined()) {
+            NativeTextureRegionMarshaller.Arguments arguments =
+                    NativeTextureRegionMarshaller.write(arena, STRUCT_VERSION, update);
+            checkRendererStatus(
+                    (int) library.stageTextureRegion.invokeExact(
+                            renderer,
+                            arguments.descriptor(),
+                            arguments.pixels(),
+                            arguments.pixelCapacity()),
+                    "texture region stage");
+        }
+    }
+
     void commitScene() throws Throwable {
         checkRendererStatus((int) library.commitScene.invokeExact(renderer), "scene commit");
     }

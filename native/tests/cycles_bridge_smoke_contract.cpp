@@ -76,6 +76,83 @@ bool verify_material_flag_contract(CyclesBridgeRenderer* renderer) {
     return true;
 }
 
+bool verify_texture_region_contract(CyclesBridgeRenderer* renderer) {
+    const std::array<std::uint8_t, 16> texture_pixels{};
+    const std::array<CyclesBridgeTexture, 4> textures = {{
+        {1U, 1U, 0U, 4U, CYCLES_BRIDGE_TEXTURE_COLOR_SRGB, {0U, 0U, 0U}},
+        {1U, 1U, 4U, 4U, CYCLES_BRIDGE_TEXTURE_DATA_LINEAR, {0U, 0U, 0U}},
+        {1U, 1U, 8U, 4U, CYCLES_BRIDGE_TEXTURE_DATA_LINEAR, {0U, 0U, 0U}},
+        {1U, 1U, 12U, 4U, CYCLES_BRIDGE_TEXTURE_DATA_LINEAR, {0U, 0U, 0U}},
+    }};
+    const std::array<CyclesBridgeMaterial, 1> materials = {{
+        {0U, 0U, 0.0F, 0.5F, 1U, 2U, CYCLES_BRIDGE_PBR_LAB_1_3, 3U},
+    }};
+    CyclesBridgeSceneResources resources{};
+    resources.struct_size = sizeof(resources);
+    resources.struct_version = 1U;
+    resources.material_count = 1U;
+    resources.texture_count = 4U;
+    resources.texture_byte_count = static_cast<std::uint32_t>(texture_pixels.size());
+    const auto reset = [&] {
+        return cycles_bridge_reset_scene(
+            renderer, &resources, materials.data(), textures.data(), texture_pixels.data());
+    };
+    if (!require_ok(reset(), "texture region resource reset")) {
+        return false;
+    }
+
+    const std::array<std::uint8_t, 16> update_pixels = {{
+        1U, 2U, 3U, 4U, 5U, 6U, 7U, 8U,
+        9U, 10U, 11U, 12U, 13U, 14U, 15U, 16U,
+    }};
+    CyclesBridgeTextureRegionUpdate update{};
+    update.struct_size = sizeof(update);
+    update.struct_version = 1U;
+    update.generation = 1U;
+    update.revision = 1U;
+    update.sprite_index = 2U;
+    update.width = 1U;
+    update.height = 1U;
+    update.row_stride = 4U;
+    update.pixel_byte_count = 4U;
+    update.normal_pixel_offset = 4U;
+    update.material_pixel_offset = 8U;
+    update.auxiliary_pixel_offset = 12U;
+    if (!require_ok(
+            cycles_bridge_stage_texture_region(
+                renderer, &update, update_pixels.data(), update_pixels.size()),
+            "texture region stage")
+        || cycles_bridge_stage_texture_region(
+               renderer, &update, update_pixels.data(), update_pixels.size())
+            != CYCLES_BRIDGE_STATUS_RENDER_ERROR) {
+        std::cerr << "texture region revision ordering was not enforced\n";
+        return false;
+    }
+    update.revision = 2U;
+    update.auxiliary_pixel_offset = 11U;
+    if (cycles_bridge_stage_texture_region(
+            renderer, &update, update_pixels.data(), update_pixels.size())
+        != CYCLES_BRIDGE_STATUS_INVALID_ARGUMENT) {
+        std::cerr << "non-canonical texture region offsets were accepted\n";
+        return false;
+    }
+    update.auxiliary_pixel_offset = 12U;
+    if (!require_ok(reset(), "texture region generation reset")) {
+        return false;
+    }
+    if (cycles_bridge_stage_texture_region(
+            renderer, &update, update_pixels.data(), update_pixels.size())
+            != CYCLES_BRIDGE_STATUS_RENDER_ERROR) {
+        std::cerr << "stale texture region generation crossed reset\n";
+        return false;
+    }
+    update.generation = 2U;
+    return require_ok(
+        cycles_bridge_stage_texture_region(
+            renderer, &update, update_pixels.data(), update_pixels.size()),
+        "texture region generation advance");
+}
+
 }  // namespace
 
 bool run_bridge_contract_scenarios(SmokeContext& context) {
@@ -83,7 +160,7 @@ bool run_bridge_contract_scenarios(SmokeContext& context) {
     CyclesBridgeCapabilities& capabilities = context.capabilities;
     CyclesBridgeRenderSettings& settings = context.settings;
     std::cerr << "[smoke] ABI check\n";
-    if (cycles_bridge_abi_version() != 45U) {
+    if (cycles_bridge_abi_version() != 46U) {
         std::cerr << "unexpected native ABI " << cycles_bridge_abi_version() << '\n';
         return false;
     }
@@ -384,7 +461,9 @@ bool run_bridge_contract_scenarios(SmokeContext& context) {
     if (!verify_material_flag_contract(renderer)) {
         return false;
     }
-
+    if (!verify_texture_region_contract(renderer)) {
+        return false;
+    }
 
     return true;
 }

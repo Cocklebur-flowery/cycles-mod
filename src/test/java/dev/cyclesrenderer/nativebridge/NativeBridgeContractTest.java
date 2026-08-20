@@ -41,11 +41,11 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 
 class NativeBridgeContractTest {
     private static final String EXPECTED_PUBLIC_SURFACE_SHA256 =
-            "8084d91c9f33913fb2394789e8e21d9d63dbd50234f8d9cef413ba7c737dae22";
+            "ccdc646935589f0a58b353a6aabda25624acb9eb88128c7db970817aae01118b";
     private static final String EXPECTED_LAYOUT_SHA256 =
-            "d578c93283f841b1f794e406c537094858e397ebed6d9e520654dcda0b97a16f";
+            "019e735e0aef141709695307503dbd5e5ca3d049afb243acad53023f2da9c369";
     private static final String EXPECTED_SYMBOL_TABLE_SHA256 =
-            "551df1c47b20753383771432020bcb072e64ec879555ce20da4a8af51195935e";
+            "3ddd60ae5226516ed3657ee53953690fcf9391ee1435b54a5d01fa53e5d6ecdf";
     private static final String EXPECTED_SETTINGS_BYTES_SHA256 =
             "5fe2085228a3b850f95ce957d70ac2a6a64544fb53d3a072ef6ab8e6fc52f4d8";
     private static final String EXPECTED_SCENE_RESOURCES_BYTES_SHA256 =
@@ -61,7 +61,7 @@ class NativeBridgeContractTest {
 
     @Test
     void publicFacadeRemainsStable() throws IllegalAccessException {
-        assertEquals(45, NativeBridge.ABI_VERSION);
+        assertEquals(46, NativeBridge.ABI_VERSION);
         assertEquals(8, NativeBridge.DEVICE_UPDATE_PHASE_COUNT);
         assertEquals(2, NativeBridge.PIXEL_FORMAT_RGBA16_FLOAT);
         assertEquals(3, NativeBridge.PIXEL_FORMAT_RGBA32_FLOAT);

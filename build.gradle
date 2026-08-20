@@ -40,6 +40,8 @@ def abiSchemaFile = layout.projectDirectory.file(
         'abi/cycles_bridge_vulkan_interop_state.json').asFile
 def reprojectionAbiSchemaFile = layout.projectDirectory.file(
         'abi/cycles_bridge_reprojection_metadata.json').asFile
+def textureRegionAbiSchemaFile = layout.projectDirectory.file(
+        'abi/cycles_bridge_texture_region_update.json').asFile
 def abiGeneratorScript = layout.projectDirectory.file(
         'native/cmake/GenerateAbiLayout.cmake').asFile
 def generatedAbiJavaDirectory = layout.buildDirectory.dir(
@@ -50,6 +52,9 @@ def generatedAbiJavaFile = new File(
 def generatedReprojectionAbiJavaFile = new File(
         generatedAbiJavaDirectory,
         'dev/cyclesrenderer/nativebridge/ReprojectionMetadataAbi.java')
+def generatedTextureRegionAbiJavaFile = new File(
+        generatedAbiJavaDirectory,
+        'dev/cyclesrenderer/nativebridge/TextureRegionUpdateAbi.java')
 def experimentalDlss = providers.gradleProperty('experimentalDlss')
         .map { it.toBoolean() }
         .getOrElse(false)
@@ -210,8 +215,21 @@ tasks.register('generateReprojectionAbiLayout', Exec) {
             '-P', abiGeneratorScript.absolutePath
 }
 
+tasks.register('generateTextureRegionAbiLayout', Exec) {
+    group = 'build setup'
+    description = 'Generates the Java texture region update ABI layout.'
+    inputs.file(textureRegionAbiSchemaFile)
+    inputs.file(abiGeneratorScript)
+    outputs.file(generatedTextureRegionAbiJavaFile)
+    commandLine 'cmake',
+            "-DABI_SCHEMA_FILE=${textureRegionAbiSchemaFile.absolutePath}",
+            "-DABI_JAVA_OUTPUT=${generatedTextureRegionAbiJavaFile.absolutePath}",
+            '-P', abiGeneratorScript.absolutePath
+}
+
 tasks.named('compileJava').configure {
-    dependsOn 'generateAbiLayouts', 'generateReprojectionAbiLayout'
+    dependsOn 'generateAbiLayouts', 'generateReprojectionAbiLayout',
+            'generateTextureRegionAbiLayout'
 }
 
 tasks.register('configureNative', Exec) {
@@ -220,6 +238,7 @@ tasks.register('configureNative', Exec) {
     inputs.dir(nativeSourceDirectory)
     inputs.file(abiSchemaFile)
     inputs.file(reprojectionAbiSchemaFile)
+    inputs.file(textureRegionAbiSchemaFile)
     outputs.file(new File(nativeBuildDirectory, 'CMakeCache.txt'))
     commandLine 'cmake',
             '-S', nativeSourceDirectory.asFile.absolutePath,

@@ -36,6 +36,7 @@ final class NativeLibrary implements AutoCloseable {
     final MethodHandle resetScene;
     final MethodHandle upsertSection;
     final MethodHandle removeSection;
+    final MethodHandle stageTextureRegion;
     final MethodHandle commitScene;
     final MethodHandle updateCamera;
     final MethodHandle acquireFrame;
@@ -74,6 +75,7 @@ final class NativeLibrary implements AutoCloseable {
         resetScene = downcall(linker, symbols, Symbol.RESET_SCENE);
         upsertSection = downcall(linker, symbols, Symbol.UPSERT_SECTION);
         removeSection = downcall(linker, symbols, Symbol.REMOVE_SECTION);
+        stageTextureRegion = downcall(linker, symbols, Symbol.STAGE_TEXTURE_REGION);
         commitScene = downcall(linker, symbols, Symbol.COMMIT_SCENE);
         updateCamera = downcall(linker, symbols, Symbol.UPDATE_CAMERA);
         acquireFrame = downcall(linker, symbols, Symbol.ACQUIRE_FRAME);
@@ -176,6 +178,9 @@ final class NativeLibrary implements AutoCloseable {
         REMOVE_SECTION(
                 "cycles_bridge_remove_section",
                 FunctionDescriptor.of(JAVA_INT, ADDRESS, JAVA_LONG)),
+        STAGE_TEXTURE_REGION(
+                "cycles_bridge_stage_texture_region",
+                FunctionDescriptor.of(JAVA_INT, ADDRESS, ADDRESS, ADDRESS, JAVA_LONG)),
         COMMIT_SCENE(
                 "cycles_bridge_commit_scene",
                 FunctionDescriptor.of(JAVA_INT, ADDRESS)),

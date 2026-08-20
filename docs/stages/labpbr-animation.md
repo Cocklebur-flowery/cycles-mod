@@ -1,6 +1,6 @@
 # LabPBR 运行时动画图集同步第二里程碑
 
-状态：`A0 / A1 / A2 / A3 / A4 DONE`；`A5 / A6 / A7 NOT STARTED`；
+状态：`A0 / A1 / A2 / A3 / A4 / A5 DONE`；`A6 / A7 NOT STARTED`；
 `V2 NOT STARTED`
 
 A0 调查与设计基线：`323a8f2`（2026-08-20，Asia/Shanghai）
@@ -314,3 +314,43 @@ texture-region 测试通过。Default 的完整 GPU smoke 中 5 项既有 OptiX 
 camera shift 附近进程崩溃；切换到工作区可写 OptiX cache 后警告消失但崩溃仍可复现。
 由于 A4 尚无公开 region 调用，该结果不构成区域写入运行证据，A5/A7 仍必须补齐实际
 区域内/外像素与 image identity 验证。
+
+## 15. A5 实施结果
+
+A5 将 bridge ABI 从 45 升级为 46，并只追加一个
+`cycles_bridge_stage_texture_region` 导出。所有既有 struct 字段、大小、offset、enum、
+flag、配置序列化和导出函数语义保持不变；Jar 与 DLL 因严格 ABI 检查必须配套发布。
+
+新增 `abi/cycles_bridge_texture_region_update.json` 是 88-byte descriptor 的唯一布局源。
+同一 schema 为 Java 生成 `MemoryLayout`、byte size 和 offset 常量，也为 C++ 生成
+`sizeof/offsetof` 断言。descriptor 使用固定宽度标量记录 generation、revision、Sprite
+index、共享 rectangle、紧密 RGBA8 stride/byte count，以及四槽 pixel offset。
+
+pixel buffer 合同固定为四段等长连续数据：
+
+```text
+offset 0 * byteCount -> Color
+offset 1 * byteCount -> Normal
+offset 2 * byteCount -> Material
+offset 3 * byteCount -> Auxiliary
+capacity              -> 4 * byteCount
+```
+
+Native 在复制前拒绝非 canonical offset/capacity、无效 header、零 generation/revision、
+尺寸溢出或错误 stride；复制完成后才交给 A4 accumulator。reset 会清空 pending update 并
+建立“下一批 generation 必须严格大于上次”的屏障，不依赖 Java 与 Native 各自计数恰好
+同步。现有 `commit_scene` 同时冻结 scene 与 texture snapshot；worker 在已有
+`request_mutex_` / Cycles scene mutex 单写者路径应用区域，并用共享 snapshot identity
+acknowledge，未增加第二写者。
+
+Java 新增拥有像素副本的 `TextureRegionUpdate`、独立 marshaller 和窄入口
+`NativeTextureRegions.stage`。生成布局、FFM symbol descriptor、ABI public surface 与
+wire offsets 均由 focused contract tests 固定。A6 仍需把 A3 `RegionBatch` 转换为该类型，
+并在现有 `NativeSceneUploadQueue` 中按 stage 后 commit 的顺序调用。
+
+Default 与 experimental DLSS 的 A1 `cycles_device` / `cycles_scene` 依赖均已从固定源码树
+重建，ABI 46 DLL、辅助测试和 smoke 成功链接。两种 variant 的 ABI contract 与 A4
+texture-region CTest 均 2/2 通过；Java focused tests、完整 tests 和 Jar 组装通过。A5
+contract smoke 验证合法 staging、重复 revision 拒绝、非 canonical offset 拒绝，以及
+reset 后旧/new generation 行为。公开链路的区域内/外像素、device image identity 与
+可见动画仍属于 A7 自动 smoke 和 V2 游戏内验收。

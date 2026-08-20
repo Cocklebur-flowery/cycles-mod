@@ -23,6 +23,10 @@ set(
     "${CYCLESRENDERER_ROOT}/abi/cycles_bridge_reprojection_metadata.json"
 )
 set(
+    CYCLESRENDERER_TEXTURE_REGION_ABI_SCHEMA
+    "${CYCLESRENDERER_ROOT}/abi/cycles_bridge_texture_region_update.json"
+)
+set(
     CYCLESRENDERER_ABI_GENERATOR
     "${CMAKE_CURRENT_SOURCE_DIR}/cmake/GenerateAbiLayout.cmake"
 )
@@ -38,10 +42,15 @@ set(
     CYCLESRENDERER_REPROJECTION_METADATA_ASSERTS
     "${CYCLESRENDERER_GENERATED_ABI_DIR}/cycles_bridge_reprojection_metadata_asserts.h"
 )
+set(
+    CYCLESRENDERER_TEXTURE_REGION_UPDATE_ASSERTS
+    "${CYCLESRENDERER_GENERATED_ABI_DIR}/cycles_bridge_texture_region_update_asserts.h"
+)
 set_property(
     DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
     "${CYCLESRENDERER_ABI_SCHEMA}"
     "${CYCLESRENDERER_REPROJECTION_ABI_SCHEMA}"
+    "${CYCLESRENDERER_TEXTURE_REGION_ABI_SCHEMA}"
     "${CYCLESRENDERER_ABI_GENERATOR}"
 )
 execute_process(
@@ -65,6 +74,17 @@ execute_process(
 )
 if(NOT CYCLESRENDERER_REPROJECTION_ABI_GENERATION_RESULT EQUAL 0)
     message(FATAL_ERROR "Failed to generate reprojection metadata ABI assertions")
+endif()
+execute_process(
+    COMMAND
+        "${CMAKE_COMMAND}"
+        "-DABI_SCHEMA_FILE=${CYCLESRENDERER_TEXTURE_REGION_ABI_SCHEMA}"
+        "-DABI_CPP_OUTPUT=${CYCLESRENDERER_TEXTURE_REGION_UPDATE_ASSERTS}"
+        -P "${CYCLESRENDERER_ABI_GENERATOR}"
+    RESULT_VARIABLE CYCLESRENDERER_TEXTURE_REGION_ABI_GENERATION_RESULT
+)
+if(NOT CYCLESRENDERER_TEXTURE_REGION_ABI_GENERATION_RESULT EQUAL 0)
+    message(FATAL_ERROR "Failed to generate texture region update ABI assertions")
 endif()
 
 set(CYCLES_RELEASE_LIB_DIR "${CYCLES_BUILD_DIR}/lib/Release")
@@ -102,6 +122,8 @@ add_library(cyclesrenderer_native SHARED
     src/labpbr_surface.cpp
     src/realtime_section_mesh.cpp
     src/scene_update.cpp
+    src/texture_region_bridge.cpp
+    src/texture_region_staging.cpp
     src/texture_region_update.cpp
 )
 

@@ -1,0 +1,23 @@
+{
+  "name": "CyclesBridgeTextureRegionUpdate",
+  "java_class": "TextureRegionUpdateAbi",
+  "java_package": "dev.cyclesrenderer.nativebridge",
+  "size": 88,
+  "fields": [
+    { "name": "struct_size", "type": "uint32", "offset": 0 },
+    { "name": "struct_version", "type": "uint32", "offset": 4 },
+    { "name": "generation", "type": "uint64", "offset": 8 },
+    { "name": "revision", "type": "uint64", "offset": 16 },
+    { "name": "sprite_index", "type": "uint32", "offset": 24 },
+    { "name": "x", "type": "uint32", "offset": 28 },
+    { "name": "y", "type": "uint32", "offset": 32 },
+    { "name": "width", "type": "uint32", "offset": 36 },
+    { "name": "height", "type": "uint32", "offset": 40 },
+    { "name": "row_stride", "type": "uint32", "offset": 44 },
+    { "name": "pixel_byte_count", "type": "uint64", "offset": 48 },
+    { "name": "color_pixel_offset", "type": "uint64", "offset": 56 },
+    { "name": "normal_pixel_offset", "type": "uint64", "offset": 64 },
+    { "name": "material_pixel_offset", "type": "uint64", "offset": 72 },
+    { "name": "auxiliary_pixel_offset", "type": "uint64", "offset": 80 }
+  ]
+}

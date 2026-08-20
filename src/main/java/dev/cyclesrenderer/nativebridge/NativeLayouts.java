@@ -399,6 +399,7 @@ final class NativeLayouts {
             JAVA_INT.withName("reserved_1"),
             JAVA_INT.withName("reserved_2"),
             JAVA_INT.withName("reserved_3"));
+    static final MemoryLayout TEXTURE_REGION_UPDATE_LAYOUT = TextureRegionUpdateAbi.LAYOUT;
 
     static {
         if (CAMERA_LAYOUT.byteSize() != 80L
@@ -417,7 +418,9 @@ final class NativeLayouts {
                 || VERTEX_LAYOUT.byteSize() != 40L
                 || TRIANGLE_LAYOUT.byteSize() != 16L
                 || MATERIAL_LAYOUT.byteSize() != 32L
-                || TEXTURE_LAYOUT.byteSize() != 32L) {
+                || TEXTURE_LAYOUT.byteSize() != 32L
+                || TEXTURE_REGION_UPDATE_LAYOUT.byteSize()
+                        != TextureRegionUpdateAbi.BYTE_SIZE) {
             throw new ExceptionInInitializerError("native bridge structure layout mismatch");
         }
     }

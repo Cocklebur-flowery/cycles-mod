@@ -9,6 +9,7 @@
 #include "labpbr_material.h"
 #include "realtime_section_mesh.h"
 #include "scene_update.h"
+#include "texture_region_staging.h"
 #include "vulkan_interop_display.h"
 
 #include <Windows.h>
@@ -85,7 +86,9 @@ using cyclesrenderer::camera_adapter::same_camera;
 using cyclesrenderer::camera_adapter::valid_camera;
 using cyclesrenderer::scene_builder::SceneRuntime;
 using cyclesrenderer::scene_builder::apply_scene_delta;
+using cyclesrenderer::scene_builder::apply_texture_region_batch;
 using cyclesrenderer::scene_builder::build_scene;
+namespace texture_update = cyclesrenderer::texture_update;
 using cyclesrenderer::session_config::DenoiserSchedule;
 using cyclesrenderer::session_config::SettingsChange;
 using cyclesrenderer::session_config::classify_settings_change;
@@ -384,6 +387,8 @@ class CyclesEngine::Impl final {
                 return false;
             }
             scene_updates_.replace(resources, std::move(sections));
+            texture_region_staging_.reset();
+            requested_texture_regions_.clear();
             requested_scene_ = scene_updates_.commit(++scene_revision_);
         }
         set_state("scene-queued", {});
@@ -416,6 +421,8 @@ class CyclesEngine::Impl final {
                 return false;
             }
             scene_updates_.reset(std::move(copied));
+            texture_region_staging_.reset();
+            requested_texture_regions_.clear();
             requested_scene_.reset();
             requested_camera_.reset();
             ++scene_reset_revision_;
@@ -472,6 +479,28 @@ class CyclesEngine::Impl final {
         return true;
     }
 
+    bool stage_texture_region(
+        texture_update::TextureRegionBatch update,
+        std::string& error) {
+        std::lock_guard lock(request_mutex_);
+        if (stopping_) {
+            error = "Cycles worker is stopping";
+            return false;
+        }
+        const std::shared_ptr<const SceneResourcesData>& resources =
+            scene_updates_.resources();
+        if (!resources) {
+            error = "scene resources have not been reset";
+            return false;
+        }
+        std::vector<texture_update::TextureLayout> layouts;
+        layouts.reserve(resources->textures.size());
+        for (const CyclesBridgeTexture& texture : resources->textures) {
+            layouts.push_back({texture.width, texture.height});
+        }
+        return texture_region_staging_.stage(std::move(update), layouts, error);
+    }
+
     bool commit_scene(std::string& error) {
         const auto commit_start = std::chrono::steady_clock::now();
         std::uint64_t committed_revision = 0U;
@@ -486,6 +515,7 @@ class CyclesEngine::Impl final {
                 return false;
             }
             requested_scene_ = scene_updates_.commit(++scene_revision_);
+            requested_texture_regions_ = texture_region_staging_.commit();
             committed_revision = requested_scene_->revision;
             if (requested_camera_) {
                 requested_camera_->sample_count =
@@ -1296,6 +1326,8 @@ class CyclesEngine::Impl final {
         try {
             while (true) {
                 std::shared_ptr<const SceneUpdate> requested_scene;
+                std::vector<texture_update::TextureRegionBatchPtr>
+                    requested_texture_regions;
                 std::optional<CameraRequest> requested_camera;
                 std::uint64_t requested_reset_revision = 0;
                 CyclesBridgeRenderSettings requested_settings{};
@@ -1324,6 +1356,7 @@ class CyclesEngine::Impl final {
                         break;
                     }
                     requested_scene = requested_scene_;
+                    requested_texture_regions = requested_texture_regions_;
                     requested_camera = requested_camera_;
                     requested_reset_revision = scene_reset_revision_;
                     requested_settings = requested_settings_;
@@ -1443,6 +1476,7 @@ class CyclesEngine::Impl final {
                             continue;
                         }
                         requested_scene = requested_scene_;
+                        requested_texture_regions = requested_texture_regions_;
                         requested_camera = requested_camera_;
                     }
                     if (!requested_scene
@@ -1474,7 +1508,18 @@ class CyclesEngine::Impl final {
                             continue;
                         }
                         render_in_flight = false;
-                    } else if (requested_camera) {
+                    }
+                    if (!requested_texture_regions.empty()) {
+                        if (!resources_changed && !scene_lock.owns_lock()) {
+                            throw std::logic_error(
+                                "texture region update requires the Cycles scene lock");
+                        }
+                        for (const auto& update : requested_texture_regions) {
+                            apply_texture_region_batch(
+                                session->scene.get(), *update, scene_runtime);
+                        }
+                    }
+                    if (!resources_changed && requested_camera) {
                         if (!scene_lock.owns_lock()) {
                             throw std::logic_error(
                                 "incremental render started without the Cycles scene lock");
@@ -1493,7 +1538,7 @@ class CyclesEngine::Impl final {
                         active_camera_revision = requested_camera->revision;
                         render_in_flight = true;
                         scene_render_started = true;
-                    } else {
+                    } else if (!resources_changed) {
                         if (!scene_lock.owns_lock()) {
                             throw std::logic_error(
                                 "incremental update started without the Cycles scene lock");
@@ -1512,6 +1557,7 @@ class CyclesEngine::Impl final {
                     {
                         std::lock_guard lock(request_mutex_);
                         scene_updates_.acknowledge(*requested_scene);
+                        texture_region_staging_.acknowledge(requested_texture_regions);
                     }
                     if (!scene_render_started) {
                         active_camera_revision = 0;
@@ -1562,7 +1608,9 @@ class CyclesEngine::Impl final {
     bool requested_pass_only_change_ = false;
     CyclesBridgeRenderSettings requested_settings_{};
     cyclesrenderer::scene::SceneUpdateAccumulator scene_updates_;
+    texture_update::TextureRegionStaging texture_region_staging_;
     std::shared_ptr<const SceneUpdate> requested_scene_;
+    std::vector<texture_update::TextureRegionBatchPtr> requested_texture_regions_;
     std::optional<CameraRequest> requested_camera_;
     std::chrono::steady_clock::time_point last_camera_change_{};
 
@@ -1669,6 +1717,12 @@ bool CyclesEngine::upsert_section(
 
 bool CyclesEngine::remove_section(std::int64_t section_id, std::string& error) {
     return impl_->remove_section(section_id, error);
+}
+
+bool CyclesEngine::stage_texture_region(
+    cyclesrenderer::texture_update::TextureRegionBatch update,
+    std::string& error) {
+    return impl_->stage_texture_region(std::move(update), error);
 }
 
 bool CyclesEngine::commit_scene(std::string& error) {

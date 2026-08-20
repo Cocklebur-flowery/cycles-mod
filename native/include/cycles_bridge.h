@@ -919,3 +919,5 @@ CYCLES_BRIDGE_API std::uint32_t cycles_bridge_render_frame(
     std::uint64_t rgba_capacity);
 
 }
+
+#include "cycles_bridge_texture_region.h"

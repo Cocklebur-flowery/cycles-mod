@@ -1,6 +1,7 @@
 #pragma once
 
 #include "cycles_bridge.h"
+#include "texture_region_update.h"
 
 #include <cstdint>
 #include <memory>
@@ -37,6 +38,10 @@ class CyclesEngine final {
         std::string& error);
 
     bool remove_section(std::int64_t section_id, std::string& error);
+
+    bool stage_texture_region(
+        cyclesrenderer::texture_update::TextureRegionBatch update,
+        std::string& error);
 
     bool commit_scene(std::string& error);
 

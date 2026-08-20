@@ -1,5 +1,6 @@
 #include "cycles_bridge.h"
 
+#include "cycles_bridge_renderer.h"
 #include "cycles_engine.h"
 #include "cycles_bridge_reprojection_metadata_asserts.h"
 #include "cycles_bridge_vulkan_interop_state_asserts.h"
@@ -14,15 +15,11 @@
 #include <new>
 #include <string>
 
-struct CyclesBridgeRenderer {
-    std::unique_ptr<CyclesEngine> engine;
-};
-
 namespace {
 
-constexpr std::uint32_t kAbiVersion = 45;
+constexpr std::uint32_t kAbiVersion = 46;
 constexpr std::uint32_t kStructVersion = 1;
-constexpr char kBuildInfo[] = "cyclesrenderer-native/cycles-5.2;abi=45";
+constexpr char kBuildInfo[] = "cyclesrenderer-native/cycles-5.2;abi=46";
 
 static_assert(sizeof(CyclesBridgeCamera) == 80);
 static_assert(offsetof(CyclesBridgeCamera, frame_id) == 8);
