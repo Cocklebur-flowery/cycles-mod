@@ -123,6 +123,7 @@ add_library(cyclesrenderer_native SHARED
     src/realtime_section_mesh.cpp
     src/scene_update.cpp
     src/texture_region_bridge.cpp
+    src/texture_region_replay.cpp
     src/texture_region_staging.cpp
     src/texture_region_update.cpp
 )

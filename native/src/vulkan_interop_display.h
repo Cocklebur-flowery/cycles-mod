@@ -420,6 +420,15 @@ class VulkanInteropBinding final {
         return fallback_frames.produced_camera_revision();
     }
 
+    [[nodiscard]] std::uint64_t produced_frame_generation(
+        const FrameStore& fallback_frames) const {
+        std::lock_guard lock(mutex_);
+        if ((state_.flags & CYCLES_BRIDGE_VULKAN_INTEROP_ACTIVE) != 0U) {
+            return state_.generation;
+        }
+        return fallback_frames.generation();
+    }
+
     void set_sample_count(std::uint32_t sample_count) {
         std::lock_guard lock(mutex_);
         state_.sample_count = sample_count;

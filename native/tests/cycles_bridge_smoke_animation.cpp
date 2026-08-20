@@ -107,23 +107,25 @@ ColorClass classify(const std::uint8_t* pixel) {
 
 bool verify_region_transition(
     const std::vector<std::uint8_t>& before,
-    const std::vector<std::uint8_t>& after) {
+    const std::vector<std::uint8_t>& after,
+    ColorClass expected_before,
+    ColorClass expected_after) {
     if (before.size() != after.size()) {
         return false;
     }
-    std::size_t red_before = 0U;
-    std::size_t cyan_after = 0U;
+    std::size_t expected_before_count = 0U;
+    std::size_t expected_after_count = 0U;
     std::size_t target_transitions = 0U;
     std::size_t outside_transitions = 0U;
     for (std::size_t offset = 0U; offset + 3U < before.size(); offset += 4U) {
         const ColorClass previous = classify(before.data() + offset);
         const ColorClass current = classify(after.data() + offset);
-        red_before += previous == ColorClass::Red ? 1U : 0U;
-        cyan_after += current == ColorClass::Cyan ? 1U : 0U;
+        expected_before_count += previous == expected_before ? 1U : 0U;
+        expected_after_count += current == expected_after ? 1U : 0U;
         if (previous == current) {
             continue;
         }
-        if (previous == ColorClass::Red && current == ColorClass::Cyan) {
+        if (previous == expected_before && current == expected_after) {
             target_transitions++;
         } else if (previous == ColorClass::Green || previous == ColorClass::Blue
                    || previous == ColorClass::Yellow
@@ -132,15 +134,25 @@ bool verify_region_transition(
             outside_transitions++;
         }
     }
-    if (red_before < 64U || cyan_after < 64U
+    if (expected_before_count < 64U || expected_after_count < 64U
         || target_transitions < 64U || outside_transitions != 0U) {
-        std::cerr << "animation region pixels were not isolated: red-before="
-                  << red_before << ";cyan-after=" << cyan_after
+        std::cerr << "animation region pixels were not isolated: target-before="
+                  << expected_before_count << ";target-after=" << expected_after_count
                   << ";target-transitions=" << target_transitions
                   << ";outside-transitions=" << outside_transitions << '\n';
         return false;
     }
     return true;
+}
+
+std::size_t count_color_class(
+    const std::vector<std::uint8_t>& pixels,
+    ColorClass expected) {
+    std::size_t count = 0U;
+    for (std::size_t offset = 0U; offset + 3U < pixels.size(); offset += 4U) {
+        count += classify(pixels.data() + offset) == expected ? 1U : 0U;
+    }
+    return count;
 }
 
 }  // namespace
@@ -189,6 +201,25 @@ bool run_animation_region_scenarios(SmokeContext& context) {
     section.section_id = 7001;
     section.vertex_count = static_cast<std::uint32_t>(vertices.size());
     section.triangle_count = static_cast<std::uint32_t>(triangles.size());
+    const std::array<std::uint8_t, 16> cyan_update_pixels{{
+        16U, 255U, 255U, 255U,
+        128U, 128U, 255U, 255U,
+        204U, 0U, 10U, 0U,
+        255U, 128U, 10U, 0U,
+    }};
+    CyclesBridgeTextureRegionUpdate update{};
+    update.struct_size = sizeof(update);
+    update.struct_version = 1U;
+    update.generation = 3U;
+    update.revision = 1U;
+    update.sprite_index = 0U;
+    update.width = 1U;
+    update.height = 1U;
+    update.row_stride = 4U;
+    update.pixel_byte_count = 4U;
+    update.normal_pixel_offset = 4U;
+    update.material_pixel_offset = 8U;
+    update.auxiliary_pixel_offset = 12U;
     if (!require_ok(
             cycles_bridge_reset_scene(
                 context.renderer,
@@ -201,6 +232,13 @@ bool run_animation_region_scenarios(SmokeContext& context) {
             cycles_bridge_upsert_section(
                 context.renderer, &section, vertices.data(), triangles.data()),
             "animation section upsert")
+        || !require_ok(
+            cycles_bridge_stage_texture_region(
+                context.renderer,
+                &update,
+                cyan_update_pixels.data(),
+                cyan_update_pixels.size()),
+            "animation pre-resident region stage")
         || !require_ok(
             cycles_bridge_commit_scene(context.renderer),
             "animation initial commit")) {
@@ -238,6 +276,26 @@ bool run_animation_region_scenarios(SmokeContext& context) {
             CYCLES_BRIDGE_PASS_DIFFUSE_COLOR)) {
         return false;
     }
+    if (count_color_class(context.pixels, ColorClass::Cyan) < 64U) {
+        const std::uint64_t baseline_checksum = checksum(context.pixels);
+        if (!wait_for_checksum_change(
+                context.renderer,
+                context.camera,
+                context.frame,
+                context.pixels,
+                baseline_checksum,
+                "animation deferred pre-resident region",
+                context.info)) {
+            return false;
+        }
+    }
+    if (count_color_class(context.pixels, ColorClass::Cyan) < 64U
+        || count_color_class(context.pixels, ColorClass::Green) < 64U
+        || count_color_class(context.pixels, ColorClass::Blue) < 64U
+        || count_color_class(context.pixels, ColorClass::Yellow) < 64U) {
+        std::cerr << "pre-resident animation region did not reach the rendered frame\n";
+        return false;
+    }
     if (context.require_optix && context.info.find("backend=OPTIX") == std::string::npos) {
         std::cerr << "OptiX was required but animation used another backend: "
                   << context.info << '\n';
@@ -253,29 +311,20 @@ bool run_animation_region_scenarios(SmokeContext& context) {
         return false;
     }
 
-    const std::array<std::uint8_t, 16> update_pixels{{
-        16U, 255U, 255U, 255U,
+    const std::array<std::uint8_t, 16> red_update_pixels{{
+        255U, 16U, 16U, 255U,
         128U, 128U, 255U, 255U,
         204U, 0U, 10U, 0U,
         255U, 128U, 10U, 0U,
     }};
-    CyclesBridgeTextureRegionUpdate update{};
-    update.struct_size = sizeof(update);
-    update.struct_version = 1U;
-    update.generation = 3U;
-    update.revision = 1U;
-    update.sprite_index = 0U;
-    update.width = 1U;
-    update.height = 1U;
-    update.row_stride = 4U;
-    update.pixel_byte_count = 4U;
-    update.normal_pixel_offset = 4U;
-    update.material_pixel_offset = 8U;
-    update.auxiliary_pixel_offset = 12U;
+    update.revision = 2U;
     const std::uint64_t previous_checksum = checksum(context.pixels);
     if (!require_ok(
             cycles_bridge_stage_texture_region(
-                context.renderer, &update, update_pixels.data(), update_pixels.size()),
+                context.renderer,
+                &update,
+                red_update_pixels.data(),
+                red_update_pixels.size()),
             "animation region stage")
         || !require_ok(
             cycles_bridge_commit_scene(context.renderer),
@@ -288,7 +337,8 @@ bool run_animation_region_scenarios(SmokeContext& context) {
             previous_checksum,
             "animation region render",
             context.info)
-        || !verify_region_transition(before, context.pixels)) {
+        || !verify_region_transition(
+            before, context.pixels, ColorClass::Cyan, ColorClass::Red)) {
         return false;
     }
 

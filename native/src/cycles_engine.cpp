@@ -9,6 +9,7 @@
 #include "labpbr_material.h"
 #include "realtime_section_mesh.h"
 #include "scene_update.h"
+#include "texture_region_replay.h"
 #include "texture_region_staging.h"
 #include "vulkan_interop_display.h"
 
@@ -86,7 +87,6 @@ using cyclesrenderer::camera_adapter::same_camera;
 using cyclesrenderer::camera_adapter::valid_camera;
 using cyclesrenderer::scene_builder::SceneRuntime;
 using cyclesrenderer::scene_builder::apply_scene_delta;
-using cyclesrenderer::scene_builder::apply_texture_region_batch;
 using cyclesrenderer::scene_builder::build_scene;
 namespace texture_update = cyclesrenderer::texture_update;
 using cyclesrenderer::session_config::DenoiserSchedule;
@@ -1018,11 +1018,17 @@ class CyclesEngine::Impl final {
             session->scene.get(),
             registered_pass_mask | required_output_pass_mask(settings)
                 | (reprojection_inputs ? 1ULL << CYCLES_BRIDGE_PASS_DEPTH : 0ULL));
-        build_scene(session->scene.get(), scene_request, settings, runtime);
-        const DenoiserSchedule denoiser_schedule = configure_scene_settings(
-            session->scene.get(), device, settings,
-            CYCLES_BRIDGE_SAMPLING_INTERACTIVE,
-            static_cast<int>(settings.interactive_samples));
+        DenoiserSchedule denoiser_schedule{};
+        try {
+            build_scene(session->scene.get(), scene_request, settings, runtime);
+            denoiser_schedule = configure_scene_settings(
+                session->scene.get(), device, settings,
+                CYCLES_BRIDGE_SAMPLING_INTERACTIVE,
+                static_cast<int>(settings.interactive_samples));
+        } catch (...) {
+            runtime.clear();
+            throw;
+        }
         {
             std::lock_guard lock(state_mutex_);
             selected_denoiser_ = denoiser_schedule.selected;
@@ -1043,9 +1049,11 @@ class CyclesEngine::Impl final {
         std::size_t& device_index) {
         if (session) {
             session->cancel(true);
+            runtime.clear();
             session.reset();
+        } else {
+            runtime.clear();
         }
-        runtime.clear();
         while (device_index < devices_.size()) {
             const ccl::DeviceInfo device = devices_[device_index];
             if (!device_matches_policy(device, settings.device_policy)) {
@@ -1065,8 +1073,8 @@ class CyclesEngine::Impl final {
                 return true;
             } catch (const std::exception& exception) {
                 set_device_state(device, "fallback", exception.what());
-                session.reset();
                 runtime.clear();
+                session.reset();
                 device_index++;
             }
         }
@@ -1104,15 +1112,17 @@ class CyclesEngine::Impl final {
         set_state("scene-ready", {});
     }
 
-    void start_render(
+    bool start_render(
         ccl::Session& session,
         const ccl::SessionParams& params,
         const SceneRequest& scene_request,
         std::uint64_t scene_revision,
         const CameraRequest& camera_request,
         const CyclesBridgeRenderSettings& settings,
+        texture_update::TextureRegionReplay& texture_region_replay,
+        std::span<const texture_update::TextureRegionBatchPtr> texture_regions,
+        SceneRuntime& scene_runtime,
         const SceneUpdate* scene_update = nullptr,
-        SceneRuntime* scene_runtime = nullptr,
         ccl::thread_scoped_lock* acquired_scene_lock = nullptr) {
         ccl::BufferParams buffer;
         DenoiserSchedule denoiser_schedule{};
@@ -1122,8 +1132,10 @@ class CyclesEngine::Impl final {
         std::uint32_t render_prepare_micros = 0U;
         std::uint32_t session_start_micros = 0U;
         std::uint32_t scene_delta_micros = 0U;
-        const bool apply_delta = scene_update != nullptr && scene_runtime != nullptr;
-        if (apply_delta) {
+        const bool apply_delta = scene_update != nullptr;
+        const bool apply_texture_regions = texture_region_replay.resident()
+            && !texture_regions.empty();
+        if (apply_delta || apply_texture_regions) {
             set_state("scene-updating", {});
         }
         const auto delta_start = std::chrono::steady_clock::now();
@@ -1140,7 +1152,7 @@ class CyclesEngine::Impl final {
         {
             if (apply_delta) {
                 apply_scene_delta(
-                    session.scene.get(), scene_request, *scene_update, *scene_runtime);
+                    session.scene.get(), scene_request, *scene_update, scene_runtime);
                 scene_delta_micros = elapsed_micros(
                     delta_start, std::chrono::steady_clock::now());
             }
@@ -1162,6 +1174,13 @@ class CyclesEngine::Impl final {
             session.reset(render_params, buffer);
             reset_end = std::chrono::steady_clock::now();
             reset_wait_micros = elapsed_micros(reset_start, reset_end);
+            const auto texture_update_start = std::chrono::steady_clock::now();
+            const bool texture_regions_applied = texture_region_replay.apply(
+                session.scene.get(), texture_regions, scene_runtime);
+            if (texture_regions_applied) {
+                scene_delta_micros += elapsed_micros(
+                    texture_update_start, std::chrono::steady_clock::now());
+            }
             interop_.set_configured_reprojection_metadata(make_reprojection_metadata(
                 camera_request, scene_revision, settings));
             frames_.configure(
@@ -1171,7 +1190,7 @@ class CyclesEngine::Impl final {
                 denoiser_schedule.effective != 0U,
                 camera_request.revision);
         }
-        if (apply_delta) {
+        if (apply_delta || apply_texture_regions) {
             record_scene_delta(scene_delta_micros);
         }
         frames_.set_sample_count(0);
@@ -1252,6 +1271,7 @@ class CyclesEngine::Impl final {
         record_render_start(elapsed_micros(
             start_time, session_started_time));
         set_state("rendering", {});
+        return apply_texture_regions;
     }
 
     void record_scene_commit(std::uint32_t micros) {
@@ -1280,6 +1300,10 @@ class CyclesEngine::Impl final {
 
     [[nodiscard]] std::uint64_t produced_camera_revision() const {
         return interop_.produced_camera_revision(frames_);
+    }
+
+    [[nodiscard]] std::uint64_t produced_frame_generation() const {
+        return interop_.produced_frame_generation(frames_);
     }
 
     void update_sampling_progress(ccl::Session& session) {
@@ -1319,8 +1343,10 @@ class CyclesEngine::Impl final {
         std::uint64_t observed_scene_revision = 0;
         std::uint64_t observed_camera_revision = 0;
         std::uint64_t render_camera_revision = 0;
+        std::uint64_t render_frame_generation = 0;
         std::uint64_t registered_pass_mask = 1ULL << CYCLES_BRIDGE_PASS_COMBINED;
         bool render_in_flight = false;
+        texture_update::TextureRegionReplay texture_region_replay;
         std::size_t device_index = 0;
 
         try {
@@ -1340,7 +1366,8 @@ class CyclesEngine::Impl final {
                                                            active_reset_revision,
                                                            active_settings_revision,
                                                            &render_in_flight,
-                                                           &render_camera_revision] {
+                                                           &render_camera_revision,
+                                                           &render_frame_generation] {
                         return stopping_
                             || scene_reset_revision_ != active_reset_revision
                             || settings_revision_ != active_settings_revision
@@ -1350,7 +1377,9 @@ class CyclesEngine::Impl final {
                                 && requested_camera_->revision != observed_camera_revision)
                             || (render_in_flight
                                 && produced_camera_revision()
-                                    == render_camera_revision);
+                                    == render_camera_revision
+                                && produced_frame_generation()
+                                    > render_frame_generation);
                     });
                     if (stopping_) {
                         break;
@@ -1371,6 +1400,7 @@ class CyclesEngine::Impl final {
                 }
 
                 bool pass_only_settings_update = false;
+                bool schedule_texture_replay = false;
                 if (requested_settings.revision != active_settings_revision) {
                     const bool pass_changed = requested_settings.active_pass
                         != active_settings.active_pass;
@@ -1391,9 +1421,10 @@ class CyclesEngine::Impl final {
                                     || pass_changed
                                     || pass_registration_required)) {
                         session->cancel(true);
-                        session.reset();
                         scene_runtime.clear();
+                        session.reset();
                         active_scene_revision = 0;
+                        texture_region_replay.reset();
                         device_index = 0;
                         if (pass_registration_required) {
                             std::lock_guard lock(state_mutex_);
@@ -1426,33 +1457,67 @@ class CyclesEngine::Impl final {
                 if (requested_reset_revision != active_reset_revision) {
                     if (session) {
                         session->cancel(true);
+                        scene_runtime.clear();
                         session.reset();
+                    } else {
+                        scene_runtime.clear();
                     }
-                    scene_runtime.clear();
                     active_scene.clear();
                     active_scene_revision = 0;
                     active_camera_revision = 0;
                     active_reset_revision = requested_reset_revision;
                     render_in_flight = false;
+                    texture_region_replay.reset();
                     frames_.clear();
                 } else if (render_in_flight
                            && produced_camera_revision()
-                                == render_camera_revision) {
+                                == render_camera_revision
+                           && produced_frame_generation()
+                                > render_frame_generation) {
                     scene_timing_.complete_scene_update(active_scene_revision);
                     render_in_flight = false;
+                    texture_region_replay.mark_resident();
+                    schedule_texture_replay = !requested_texture_regions.empty();
                 }
 
                 if (session && session->progress.get_error()) {
                     const std::string backend_error = session->progress.get_error_message();
                     session->cancel(true);
-                    session.reset();
                     scene_runtime.clear();
+                    session.reset();
                     device_index++;
                     active_scene_revision = 0;
                     active_camera_revision = 0;
                     render_in_flight = false;
+                    texture_region_replay.reset();
                     frames_.clear();
                     set_state("fallback", backend_error);
+                }
+
+                if (schedule_texture_replay) {
+                    bool scheduled = false;
+                    {
+                        std::lock_guard lock(request_mutex_);
+                        if (!requested_texture_regions_.empty() && requested_scene_
+                            && requested_scene_->revision == active_scene_revision) {
+                            requested_scene_ = scene_updates_.commit(++scene_revision_);
+                            if (requested_camera_) {
+                                requested_camera_->sample_count = static_cast<int>(
+                                    requested_settings_.interactive_samples);
+                                requested_camera_->sampling_state =
+                                    CYCLES_BRIDGE_SAMPLING_INTERACTIVE;
+                                requested_camera_->preserve_pass_cache = false;
+                                requested_camera_->revision = ++camera_revision_;
+                                last_camera_change_ = std::chrono::steady_clock::now();
+                            }
+                            scheduled = true;
+                        }
+                    }
+                    if (scheduled) {
+                        set_state("scene-queued", {});
+                        request_changed_.notify_all();
+                        continue;
+                    }
                 }
 
                 if (requested_scene
@@ -1508,32 +1573,27 @@ class CyclesEngine::Impl final {
                             continue;
                         }
                         render_in_flight = false;
+                        texture_region_replay.reset();
                     }
-                    if (!requested_texture_regions.empty()) {
-                        if (!resources_changed && !scene_lock.owns_lock()) {
-                            throw std::logic_error(
-                                "texture region update requires the Cycles scene lock");
-                        }
-                        for (const auto& update : requested_texture_regions) {
-                            apply_texture_region_batch(
-                                session->scene.get(), *update, scene_runtime);
-                        }
-                    }
+                    bool texture_regions_applied = false;
                     if (!resources_changed && requested_camera) {
                         if (!scene_lock.owns_lock()) {
                             throw std::logic_error(
                                 "incremental render started without the Cycles scene lock");
                         }
                         render_camera_revision = requested_camera->revision;
-                        start_render(
+                        render_frame_generation = produced_frame_generation();
+                        texture_regions_applied = start_render(
                             *session,
                             session_params,
                             active_scene,
                             requested_scene->revision,
                             *requested_camera,
                             active_settings,
+                            texture_region_replay,
+                            requested_texture_regions,
+                            scene_runtime,
                             requested_scene.get(),
-                            &scene_runtime,
                             &scene_lock);
                         active_camera_revision = requested_camera->revision;
                         render_in_flight = true;
@@ -1557,7 +1617,15 @@ class CyclesEngine::Impl final {
                     {
                         std::lock_guard lock(request_mutex_);
                         scene_updates_.acknowledge(*requested_scene);
-                        texture_region_staging_.acknowledge(requested_texture_regions);
+                        if (texture_regions_applied) {
+                            texture_region_replay.acknowledge(
+                                texture_region_staging_,
+                                requested_texture_regions,
+                                requested_texture_regions_);
+                        }
+                    }
+                    if (texture_regions_applied) {
+                        requested_texture_regions.clear();
                     }
                     if (!scene_render_started) {
                         active_camera_revision = 0;
@@ -1570,15 +1638,27 @@ class CyclesEngine::Impl final {
                         frames_.invalidate_pass_cache();
                     }
                     render_camera_revision = requested_camera->revision;
-                    start_render(
+                    render_frame_generation = produced_frame_generation();
+                    const bool texture_regions_applied = start_render(
                         *session,
                         session_params,
                         active_scene,
                         active_scene_revision,
                         *requested_camera,
-                        active_settings);
+                        active_settings,
+                        texture_region_replay,
+                        requested_texture_regions,
+                        scene_runtime);
                     active_camera_revision = requested_camera->revision;
                     render_in_flight = true;
+                    if (texture_regions_applied) {
+                        std::lock_guard lock(request_mutex_);
+                        texture_region_replay.acknowledge(
+                            texture_region_staging_,
+                            requested_texture_regions,
+                            requested_texture_regions_);
+                        requested_texture_regions.clear();
+                    }
                 }
             }
         } catch (const std::exception& exception) {
@@ -1590,8 +1670,8 @@ class CyclesEngine::Impl final {
         if (session) {
             try {
                 session->cancel(true);
-                session.reset();
                 scene_runtime.clear();
+                session.reset();
             } catch (...) {
             }
         }
