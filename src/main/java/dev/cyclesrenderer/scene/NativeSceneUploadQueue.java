@@ -14,10 +14,10 @@ final class NativeSceneUploadQueue implements AutoCloseable {
 
     private final Object lock = new Object();
     private final ArrayDeque<Command> commands = new ArrayDeque<>();
-    private final Map<Long, MutationCommand> coalescedMutations = new HashMap<>();
+    private final CoalescingState<MutationCommand, AnimationCommand> coalescing =
+            new CoalescingState<>();
     private final Thread worker;
 
-    private AnimationCommand coalescedAnimation;
     private boolean running = true;
     private boolean busy;
     private RuntimeException failure;
@@ -54,8 +54,9 @@ final class NativeSceneUploadQueue implements AutoCloseable {
             if (!running) {
                 return false;
             }
-            if (coalescedAnimation != null) {
-                coalescedAnimation.merge(tasks);
+            AnimationCommand existing = coalescing.animation();
+            if (existing != null) {
+                existing.merge(tasks);
                 return true;
             }
             if (commands.size() >= MAX_QUEUED_COMMANDS) {
@@ -63,8 +64,7 @@ final class NativeSceneUploadQueue implements AutoCloseable {
             }
             AnimationCommand command = new AnimationCommand(tasks);
             commands.addLast(command);
-            coalescedAnimation = command;
-            coalescedMutations.clear();
+            coalescing.trackAnimation(command);
             lock.notifyAll();
             return true;
         }
@@ -77,8 +77,7 @@ final class NativeSceneUploadQueue implements AutoCloseable {
                 return false;
             }
             commands.addLast(CommitCommand.INSTANCE);
-            coalescedMutations.clear();
-            coalescedAnimation = null;
+            coalescing.commitBarrier();
             lock.notifyAll();
             return true;
         }
@@ -118,8 +117,7 @@ final class NativeSceneUploadQueue implements AutoCloseable {
     public void close() {
         synchronized (lock) {
             commands.clear();
-            coalescedMutations.clear();
-            coalescedAnimation = null;
+            coalescing.clear();
             failure = null;
             running = false;
             lock.notifyAll();
@@ -139,7 +137,7 @@ final class NativeSceneUploadQueue implements AutoCloseable {
             if (!running) {
                 return false;
             }
-            MutationCommand existing = coalescedMutations.get(sectionNode);
+            MutationCommand existing = coalescing.mutation(sectionNode);
             if (existing != null) {
                 existing.snapshot = snapshot;
                 return true;
@@ -149,8 +147,7 @@ final class NativeSceneUploadQueue implements AutoCloseable {
             }
             MutationCommand command = new MutationCommand(sectionNode, snapshot);
             commands.addLast(command);
-            coalescedMutations.put(sectionNode, command);
-            coalescedAnimation = null;
+            coalescing.trackMutation(sectionNode, command);
             lock.notifyAll();
             return true;
         }
@@ -177,9 +174,9 @@ final class NativeSceneUploadQueue implements AutoCloseable {
                 }
                 command = commands.removeFirst();
                 if (command instanceof MutationCommand mutation) {
-                    coalescedMutations.remove(mutation.sectionNode, mutation);
-                } else if (command == coalescedAnimation) {
-                    coalescedAnimation = null;
+                    coalescing.untrackMutation(mutation.sectionNode, mutation);
+                } else if (command instanceof AnimationCommand animation) {
+                    coalescing.untrackAnimation(animation);
                 }
                 busy = true;
             }
@@ -192,8 +189,7 @@ final class NativeSceneUploadQueue implements AutoCloseable {
                 synchronized (lock) {
                     failure = error;
                     commands.clear();
-                    coalescedMutations.clear();
-                    coalescedAnimation = null;
+                    coalescing.clear();
                 }
             } finally {
                 synchronized (lock) {
@@ -227,8 +223,7 @@ final class NativeSceneUploadQueue implements AutoCloseable {
     private void clearAndAwaitIdle(boolean resetMetrics) {
         synchronized (lock) {
             commands.clear();
-            coalescedMutations.clear();
-            coalescedAnimation = null;
+            coalescing.clear();
             lock.notifyAll();
             awaitIdleLocked();
             failure = null;
@@ -270,6 +265,47 @@ final class NativeSceneUploadQueue implements AutoCloseable {
 
     private static long updateEma(long previous, long value) {
         return previous == 0L ? value : (previous * 7L + value) / 8L;
+    }
+
+    static final class CoalescingState<M, A> {
+        private final Map<Long, M> mutations = new HashMap<>();
+        private A animation;
+
+        M mutation(long sectionNode) {
+            return mutations.get(sectionNode);
+        }
+
+        A animation() {
+            return animation;
+        }
+
+        void trackMutation(long sectionNode, M command) {
+            mutations.put(sectionNode, command);
+            animation = null;
+        }
+
+        void trackAnimation(A command) {
+            animation = command;
+        }
+
+        void untrackMutation(long sectionNode, M command) {
+            mutations.remove(sectionNode, command);
+        }
+
+        void untrackAnimation(A command) {
+            if (animation == command) {
+                animation = null;
+            }
+        }
+
+        void commitBarrier() {
+            mutations.clear();
+            animation = null;
+        }
+
+        void clear() {
+            commitBarrier();
+        }
     }
 
     record Metrics(
