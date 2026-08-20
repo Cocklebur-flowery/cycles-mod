@@ -2,6 +2,9 @@
 
 状态：`F0 / F1 / F2 / F3 / F4 DONE`；`V1 PASS`
 
+第二里程碑的 `A0` 动画合同已经建立；运行时动画仍未实现。后续阶段、稳定边界与
+go/no-go 门槛见 [`labpbr-animation.md`](labpbr-animation.md)。
+
 当前代码与 V1 验收基线：`e46f53c`（2026-08-20，Asia/Shanghai）
 
 目标资源包：`run/resourcepacks/SPBR-21.zip`
