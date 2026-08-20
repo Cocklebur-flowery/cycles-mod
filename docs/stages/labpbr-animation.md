@@ -1,6 +1,6 @@
 # LabPBR 运行时动画图集同步第二里程碑
 
-状态：`A0 / A1 DONE`；`A2 / A3 / A4 / A5 / A6 / A7 NOT STARTED`；
+状态：`A0 / A1 / A2 DONE`；`A3 / A4 / A5 / A6 / A7 NOT STARTED`；
 `V2 NOT STARTED`
 
 A0 调查与设计基线：`3a3bf86`（2026-08-20，Asia/Shanghai）
@@ -249,3 +249,22 @@ Default 与 experimental DLSS 受控源码树均通过 patch 正向/反向检查
 `memory.cpp`、CUDA `device_impl.cpp` 和 `image.cpp` 均通过 MSVC `/Zs` 独立语法编译。
 完整 MSBuild 在当前沙箱中被父环境的 `Path/PATH` 重复键阻断，未形成 Native link 或
 运行时像素证据；A4/A7 仍必须补齐该证据，不能从语法编译推断运行时通过。
+
+## 12. A2 实施结果
+
+A2 将 Minecraft `AnimationState.drawToAtlas` 的实际离散/插值选择记录为轻量状态：
+
+- 离散状态只以当前 image frame 为有效内容，忽略 next/progress 差异；
+- 插值状态记录 old frame、next frame 和 Minecraft 已量化的 `0..999` progress；
+- 每个 Sprite 仅保留最新 dirty 状态，不同 Sprite 按单调 sequence 发布；
+- 等价状态不重复发布，旧 snapshot 的 acknowledge 不会删除其后到达的新状态；
+- `SpriteContents` identity 替换不会误用旧帧，弱 identity 失效后状态可被回收；
+- generation barrier 清空当前与 dirty 状态，并拒绝旧 generation 事件。
+
+状态跟踪只执行内存操作，不读取资源、不解码图片、不调用 Native。A2 还没有把 generation
+barrier 或 pending/acknowledge 接入资源生命周期和上传队列；这些接线仍属于 A6。
+
+针对当前 Minecraft 26.2 patched bytecode 的静态检查确认 `oldFrame`、
+`frameProgressAsInt`、`newFrame` 分别是整数 local ordinal `0/1/2`，插值分支中的
+`NextSprite` 是目标 `bindTexture` 的 ordinal `1`。完整 Java tests 与 Jar 组装通过；
+Mixin 注入的游戏内应用仍需 A7/V2 运行时验证。

@@ -16,6 +16,12 @@ abstract class SpriteAnimationStateMixin {
     @Unique
     private SpriteContents cyclesrenderer$contents;
 
+    @Unique
+    private int cyclesrenderer$nextImageFrame;
+
+    @Unique
+    private boolean cyclesrenderer$interpolated;
+
     @Inject(method = "<init>", at = @At("RETURN"))
     private void cyclesrenderer$captureContents(
             CallbackInfo callback,
@@ -27,12 +33,33 @@ abstract class SpriteAnimationStateMixin {
             method = "drawToAtlas",
             at = @At(
                     value = "INVOKE",
+                    target = "Lcom/mojang/blaze3d/systems/RenderPass;bindTexture(Ljava/lang/String;Lcom/mojang/blaze3d/textures/GpuTextureView;Lcom/mojang/blaze3d/textures/GpuSampler;)V",
+                    ordinal = 1))
+    private void cyclesrenderer$captureNextImageFrame(
+            RenderPass renderPass,
+            GpuBufferSlice spriteUbo,
+            CallbackInfo callback,
+            @Local(ordinal = 2) int nextImageFrame) {
+        cyclesrenderer$nextImageFrame = nextImageFrame;
+        cyclesrenderer$interpolated = true;
+    }
+
+    @Inject(
+            method = "drawToAtlas",
+            at = @At(
+                    value = "INVOKE",
                     target = "Lcom/mojang/blaze3d/systems/RenderPass;setUniform(Ljava/lang/String;Lcom/mojang/blaze3d/buffers/GpuBufferSlice;)V"))
     private void cyclesrenderer$recordImageFrame(
             RenderPass renderPass,
             GpuBufferSlice spriteUbo,
             CallbackInfo callback,
-            @Local(ordinal = 0) int imageFrame) {
-        LabPbrAnimationFrames.record(cyclesrenderer$contents, imageFrame);
+            @Local(ordinal = 0) int currentImageFrame,
+            @Local(ordinal = 1) int frameProgressAsInt) {
+        LabPbrAnimationFrames.record(
+                cyclesrenderer$contents,
+                currentImageFrame,
+                cyclesrenderer$interpolated ? cyclesrenderer$nextImageFrame : currentImageFrame,
+                cyclesrenderer$interpolated,
+                frameProgressAsInt);
     }
 }
