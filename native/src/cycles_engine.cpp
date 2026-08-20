@@ -9,6 +9,7 @@
 #include "labpbr_material.h"
 #include "realtime_section_mesh.h"
 #include "scene_update.h"
+#include "session_build_timing.h"
 #include "texture_region_replay.h"
 #include "texture_region_staging.h"
 #include "vulkan_interop_display.h"
@@ -807,7 +808,8 @@ class CyclesEngine::Impl final {
                << ";device=" << selected.description
                << ";state=" << state
                << ";frame=" << (frames_.ready() ? "ready" : "pending")
-               << ";resolution=" << width << 'x' << height;
+               << ";resolution=" << width << 'x' << height
+               << session_build_timing_.describe();
         if (!error.empty()) {
             output << ";error=" << error;
         }
@@ -968,12 +970,17 @@ class CyclesEngine::Impl final {
         std::uint64_t registered_pass_mask,
         ccl::SessionParams& session_params,
         SceneRuntime& runtime) {
+        using SessionBuildTiming = cyclesrenderer::timing::SessionBuildTiming;
+        SessionBuildTiming::Attempt build_timing(session_build_timing_);
+        build_timing.enter(SessionBuildTiming::Phase::WorkingSpace);
         std::string color_error;
         if (!color_management_->activate_working_space(
                 settings.working_space, color_error)) {
             throw std::runtime_error(
                 "failed to activate Cycles working space: " + color_error);
         }
+
+        build_timing.enter(SessionBuildTiming::Phase::Interop);
         VulkanInteropSnapshot interop_snapshot =
             interop_.snapshot(query_cuda_device_uuid(device));
         const bool use_graphics_interop = interop_snapshot.memory_handle != nullptr;
@@ -990,9 +997,12 @@ class CyclesEngine::Impl final {
             session_params.headless = false;
         }
 #endif
+        build_timing.enter(SessionBuildTiming::Phase::Session);
         ccl::SceneParams scene_params;
         scene_params.background = false;
         auto session = ccl::make_unique<ccl::Session>(session_params, scene_params);
+
+        build_timing.enter(SessionBuildTiming::Phase::Display);
         ccl::Session* session_pointer = session.get();
         session->progress.set_update_callback([this, session_pointer] {
             ccl::string status;
@@ -1020,12 +1030,15 @@ class CyclesEngine::Impl final {
                 | (reprojection_inputs ? 1ULL << CYCLES_BRIDGE_PASS_DEPTH : 0ULL));
         DenoiserSchedule denoiser_schedule{};
         try {
+            build_timing.enter(SessionBuildTiming::Phase::Scene);
             build_scene(session->scene.get(), scene_request, settings, runtime);
+            build_timing.enter(SessionBuildTiming::Phase::Configure);
             denoiser_schedule = configure_scene_settings(
                 session->scene.get(), device, settings,
                 CYCLES_BRIDGE_SAMPLING_INTERACTIVE,
                 static_cast<int>(settings.interactive_samples));
         } catch (...) {
+            build_timing.fail();
             runtime.clear();
             throw;
         }
@@ -1036,6 +1049,7 @@ class CyclesEngine::Impl final {
             effective_denoiser_start_sample_ = denoiser_schedule.start_sample;
             denoiser_schedule_reason_ = denoiser_schedule.reason;
         }
+        build_timing.complete();
         return session;
     }
 
@@ -1720,6 +1734,7 @@ class CyclesEngine::Impl final {
     std::uint32_t ema_render_start_micros_ = 0;
     std::uint32_t max_render_start_micros_ = 0;
     cyclesrenderer::timing::CyclesSceneTiming scene_timing_;
+    cyclesrenderer::timing::SessionBuildTiming session_build_timing_;
     std::uint64_t registered_pass_mask_diagnostic_ =
         1ULL << CYCLES_BRIDGE_PASS_COMBINED;
     std::uint32_t pass_registry_rebuild_count_ = 0;

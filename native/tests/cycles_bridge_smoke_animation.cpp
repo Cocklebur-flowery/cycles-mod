@@ -301,6 +301,15 @@ bool run_animation_region_scenarios(SmokeContext& context) {
                   << context.info << '\n';
         return false;
     }
+    if (context.info.find(";session-build=complete") == std::string::npos
+        || context.info.find(";session-build-attempt=") == std::string::npos
+        || context.info.find(";session-build-total-us=") == std::string::npos
+        || context.info.find(";session-build-phase-us=0") == std::string::npos
+        || context.info.find(";session-build-us=work:") == std::string::npos) {
+        std::cerr << "session build timing was not exposed after the first frame: "
+                  << context.info << '\n';
+        return false;
+    }
     const std::vector<std::uint8_t> before = context.pixels;
     CyclesBridgeDiagnostics diagnostics_before{};
     diagnostics_before.struct_size = sizeof(diagnostics_before);
