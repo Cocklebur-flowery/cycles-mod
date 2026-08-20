@@ -12,6 +12,7 @@ using ScenarioRunner = bool (*)(SmokeContext&);
 enum class SmokeSuite {
     Full,
     Contract,
+    Animation,
     Color,
     Render,
     Pbr,
@@ -31,10 +32,13 @@ struct SmokeStage {
     ScenarioRunner run;
 };
 
-constexpr std::array<SmokeStage, 6> kSmokeStages{{
+constexpr std::array<SmokeStage, 7> kSmokeStages{{
     {SmokeSuite::Contract,
      "contract",
      cyclesrenderer::smoke::run_bridge_contract_scenarios},
+    {SmokeSuite::Animation,
+     "animation",
+     cyclesrenderer::smoke::run_animation_region_scenarios},
     {SmokeSuite::Color,
      "color",
      cyclesrenderer::smoke::run_color_contract_scenarios},
@@ -78,7 +82,7 @@ void print_usage(const char* executable) {
     std::cerr
         << "Usage: " << executable
         << " [--require-optix]"
-        << " [--suite contract|color|render|pbr|denoiser|scene-lifecycle]\n";
+        << " [--suite contract|animation|color|render|pbr|denoiser|scene-lifecycle]\n";
 }
 
 SmokeOutcome run_suite(SmokeSuite suite, SmokeContext& context) {

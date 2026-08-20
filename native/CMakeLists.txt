@@ -266,6 +266,7 @@ add_executable(cyclesrenderer_smoke
     tests/cycles_bridge_smoke_color.cpp
     tests/cycles_bridge_smoke_contract.cpp
     tests/cycles_bridge_smoke_denoiser.cpp
+    tests/cycles_bridge_smoke_animation.cpp
     tests/cycles_bridge_smoke_pbr.cpp
     tests/cycles_bridge_smoke_render_scene.cpp
     tests/cycles_bridge_smoke_scene_lifecycle.cpp
@@ -318,6 +319,7 @@ add_dependencies(cyclesrenderer_smoke cyclesrenderer_texture_region_test)
 enable_testing()
 set(CYCLESRENDERER_SMOKE_SUITES
     contract
+    animation
     color
     render
     pbr

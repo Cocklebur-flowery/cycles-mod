@@ -1,7 +1,6 @@
 # LabPBR 运行时动画图集同步第二里程碑
 
-状态：`A0 / A1 / A2 / A3 / A4 / A5 / A6 DONE`；`A7 NOT STARTED`；
-`V2 NOT STARTED`
+状态：`A0 / A1 / A2 / A3 / A4 / A5 / A6 / A7 DONE`；`V2 NOT STARTED`
 
 A0 调查与设计基线：`323a8f2`（2026-08-20，Asia/Shanghai）
 
@@ -380,3 +379,32 @@ Native 命令。新增 focused tests 验证 generation/source 筛选、四槽到
 转换、稳定 Sprite index 传递、latest-wins 合并、sequence 排序和不匹配拒绝；完整 Java
 tests 与 Jar 组装通过。真实公开路径的 GPU 像素、image identity、Default/DLSS 综合 smoke
 和游戏内可见动画仍属于 A7/V2。
+
+## 17. A7 自动验证与里程碑收口
+
+A7 新增独立的 `animation` Native smoke suite，排列在 ABI contract 之后、既有 color/render
+场景之前。这样可以单独验证公开动画链路，不依赖已知会在 camera shift 附近崩溃的完整
+Default render suite，也不削弱或跳过原有测试。
+
+测试建立四个固定 UV 的 2×2 LabPBR 样本，依次调用公开
+`reset_scene -> upsert_section -> commit_scene -> stage_texture_region -> commit_scene`。区域更新
+只把 `(0,0)` Base texel 从红色改为青色，另三槽提交同一区域的既有 Normal、Material 和
+Auxiliary 值。更新后的帧必须出现足量 red-to-cyan transition，绿色、蓝色和黄色三个固定
+UV 样本不得发生分类转换。成功应用还必须穿过 A4 的每槽 `device_image*` identity guard；
+任何图像替换都会令 worker 失败并使 smoke 失败。
+
+公开 diagnostics 在更新前后必须保持一个 Section 和 Diffuse Color pass，并且只增加一次
+`scene_commit_count` 与一次 `scene_delta_count`。这证明区域命令使用已有资源的增量 scene
+路径，没有触发资源级 rebuild。测试不新增 diagnostics 字段、ABI 导出或测试专用运行时
+开关。
+
+Default 与 experimental DLSS 均重新配置并成功构建 ABI 46 DLL 和 smoke。两种 variant
+的 contract、animation 和 accumulator 聚焦 CTest 均 3/3 通过；附加
+`--require-optix --suite animation` 运行均确认 RTX 5080 OptiX 后端和 320×180 更新帧。
+当前固定 Cycles source 中的 image-region 与 realtime-partial-upload patch 也分别通过
+reverse-check。Java 98 项测试、编译和 Jar 组装通过。
+
+完整 Default GPU smoke 的既有 camera-shift OptiX 进程崩溃仍按 A4 记录为 known red，A7
+没有修改 camera、DLSS、降噪或线程调度来掩盖该问题。第二里程碑的自动开发到 A7 为止；
+V2 仍需用户在游戏内检查离散/插值方块的 Combined、Normal、Roughness、Emission，以及
+资源重载、资源包切换、F8 disable/re-enable 和退出流程。V2 结果应单独提交。

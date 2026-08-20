@@ -95,6 +95,7 @@ bool verify_progressive_sampling(
     CyclesBridgeDiagnostics& diagnostics);
 
 bool run_bridge_contract_scenarios(SmokeContext& context);
+bool run_animation_region_scenarios(SmokeContext& context);
 bool run_color_contract_scenarios(SmokeContext& context);
 bool run_render_scenarios(SmokeContext& context);
 bool run_pbr_material_scenarios(SmokeContext& context);
