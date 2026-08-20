@@ -42,7 +42,8 @@ $cyclesPatches = @(
     (Join-Path $projectRoot 'patches\cycles-v5.2-vulkan-interop-timeline.patch'),
     (Join-Path $projectRoot 'patches\cycles-v5.2-vulkan-interop-depth.patch'),
     (Join-Path $projectRoot 'patches\cycles-v5.2-nonemissive-geometry-light-update.patch'),
-    (Join-Path $projectRoot 'patches\cycles-v5.2-realtime-partial-upload.patch')
+    (Join-Path $projectRoot 'patches\cycles-v5.2-realtime-partial-upload.patch'),
+    (Join-Path $projectRoot 'patches\cycles-v5.2-image-region-update.patch')
 )
 if ($ExperimentalDlss) {
     $cyclesPatches += Join-Path $projectRoot 'patches\cycles-v5.2-dlss-experimental.patch'

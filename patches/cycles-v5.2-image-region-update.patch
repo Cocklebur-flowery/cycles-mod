@@ -1,0 +1,160 @@
+diff --git a/src/device/memory.cpp b/src/device/memory.cpp
+--- a/src/device/memory.cpp
++++ b/src/device/memory.cpp
+@@ -306,6 +306,25 @@ void *device_image::alloc(const size_t width, const size_t height)
+   return host_pointer;
+ }
+
++void device_image::copy_region_to_device(const size_t x,
++                                         const size_t y,
++                                         const size_t width,
++                                         const size_t height)
++{
++  assert(x <= data_width && width <= data_width - x);
++  assert(y <= data_height && height <= data_height - y);
++  if (width == 0 || height == 0 || device_is_cpu()) {
++    return;
++  }
++
++  const size_t pixel_size = datatype_size(data_type) * data_elements;
++  const size_t row_size = width * pixel_size;
++  for (size_t row = 0; row < height; row++) {
++    const size_t offset = ((y + row) * data_width + x) * pixel_size;
++    device_copy_to(offset, row_size);
++  }
++}
++
+ void device_image::copy_to_device()
+ {
+   device_copy_to();
+diff --git a/src/device/memory.h b/src/device/memory.h
+--- a/src/device/memory.h
++++ b/src/device/memory.h
+@@ -642,6 +642,10 @@ class device_image : public device_memory {
+   string log_name() const override;
+
+   void *alloc(const size_t width, const size_t height);
++  void copy_region_to_device(const size_t x,
++                             const size_t y,
++                             const size_t width,
++                             const size_t height);
+
+   template<typename T = void> T *data()
+   {
+diff --git a/src/device/cuda/device_impl.cpp b/src/device/cuda/device_impl.cpp
+--- a/src/device/cuda/device_impl.cpp
++++ b/src/device/cuda/device_impl.cpp
+@@ -755,6 +755,26 @@ static CUDA_MEMCPY2D tex_2d_copy_param(const device_image &mem, const int pitch_
+   return param;
+ }
+
++static CUDA_MEMCPY2D tex_2d_copy_param(const device_image &mem,
++                                       const int pitch_alignment,
++                                       const size_t byte_offset,
++                                       const size_t byte_count)
++{
++  const size_t src_pitch = tex_src_pitch(mem);
++  const size_t dst_pitch = align_up(src_pitch, pitch_alignment);
++  const size_t x = byte_offset % src_pitch;
++  const size_t y = byte_offset / src_pitch;
++  assert(byte_count <= src_pitch - x);
++  assert(y < mem.data_height);
++
++  CUDA_MEMCPY2D param = tex_2d_copy_param(mem, pitch_alignment);
++  param.dstDevice += y * dst_pitch + x;
++  param.srcHost = static_cast<const char *>(mem.host_pointer) + byte_offset;
++  param.WidthInBytes = byte_count;
++  param.Height = 1;
++  return param;
++}
++
+ void CUDADevice::image_alloc(device_image &mem)
+ {
+   CUDAContextScope scope(this);
+@@ -930,7 +950,10 @@ void CUDADevice::image_copy_to(device_image &mem)
+     /* Resident and fully allocated, only copy. */
+     if (mem.data_height > 0) {
+       CUDAContextScope scope(this);
+-      const CUDA_MEMCPY2D param = tex_2d_copy_param(mem, pitch_alignment);
++      const CUDA_MEMCPY2D param = (mem.copy_size_ == 0) ?
++                                     tex_2d_copy_param(mem, pitch_alignment) :
++                                     tex_2d_copy_param(
++                                         mem, pitch_alignment, mem.copy_offset_, mem.copy_size_);
+       cuda_assert(cuMemcpy2DUnaligned(&param));
+     }
+     else {
+diff --git a/src/scene/image.cpp b/src/scene/image.cpp
+--- a/src/scene/image.cpp
++++ b/src/scene/image.cpp
+@@ -245,6 +245,53 @@ bool ImageManager::set_animation_frame_update(const int frame)
+   return false;
+ }
+
++bool ImageManager::update_image_region(const ImageHandle &handle,
++                                       const int x,
++                                       const int y,
++                                       const int width,
++                                       const int height,
++                                       const uint8_t *pixels,
++                                       const size_t row_stride)
++{
++  if (handle.manager != this || handle.image_texture == nullptr || pixels == nullptr || x < 0 ||
++      y < 0 || width <= 0 || height <= 0 || handle.image_texture->type != ImageTexture::SINGLE)
++  {
++    return false;
++  }
++
++  const thread_scoped_lock images_lock(images_mutex);
++  ImageSingle *image = static_cast<ImageSingle *>(handle.image_texture);
++  const thread_scoped_lock image_lock(image->mutex);
++  if (image->need_load || image->vdb_memory == nullptr ||
++      image->metadata.type != IMAGE_DATA_TYPE_BYTE4 || image->metadata.channels != 4 ||
++      x > image->metadata.width || width > image->metadata.width - x ||
++      y > image->metadata.height || height > image->metadata.height - y ||
++      row_stride < size_t(width) * 4 ||
++      image->vdb_memory->data_width != size_t(image->metadata.width) ||
++      image->vdb_memory->data_height != size_t(image->metadata.height))
++  {
++    return false;
++  }
++
++  vector<uint8_t> conformed(size_t(width) * height * 4);
++  for (int row = 0; row < height; row++) {
++    std::memcpy(conformed.data() + size_t(row) * width * 4,
++                pixels + size_t(row) * row_stride,
++                size_t(width) * 4);
++  }
++  image->metadata.conform_pixels(
++      conformed.data(), width, height, 4, size_t(width) * 4, size_t(width) * 4);
++
++  uint8_t *target = image->vdb_memory->data<uint8_t>();
++  for (int row = 0; row < height; row++) {
++    std::memcpy(target + (size_t(y + row) * image->metadata.width + x) * 4,
++                conformed.data() + size_t(row) * width * 4,
++                size_t(width) * 4);
++  }
++  image->vdb_memory->copy_region_to_device(x, y, width, height);
++  return true;
++}
++
+ void ImageManager::load_image_metadata(ImageSingle *img, Progress &progress)
+ {
+   if (!img->need_metadata) {
+diff --git a/src/scene/image.h b/src/scene/image.h
+--- a/src/scene/image.h
++++ b/src/scene/image.h
+@@ -173,6 +173,14 @@ class ImageManager {
+
+   bool set_animation_frame_update(const int frame);
+
++  bool update_image_region(const ImageHandle &handle,
++                           int x,
++                           int y,
++                           int width,
++                           int height,
++                           const uint8_t *pixels,
++                           size_t row_stride);
++
+   void evict_unused(Device *device, Scene *scene);
+
+   void collect_statistics(RenderStats *stats, Scene *scene);

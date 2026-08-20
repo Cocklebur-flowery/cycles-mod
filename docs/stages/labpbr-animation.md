@@ -1,6 +1,6 @@
 # LabPBR 运行时动画图集同步第二里程碑
 
-状态：`A0 DONE`；`A1 / A2 / A3 / A4 / A5 / A6 / A7 NOT STARTED`；
+状态：`A0 / A1 DONE`；`A2 / A3 / A4 / A5 / A6 / A7 NOT STARTED`；
 `V2 NOT STARTED`
 
 A0 调查与设计基线：`3a3bf86`（2026-08-20，Asia/Shanghai）
@@ -231,3 +231,21 @@ V2 由用户在 A7 后执行，至少观察离散和插值动画方块的 Combin
 - Distant Horizons 或任何已删除的 DH/legacy debug 代码；
 - 新配置键、动画速度控制、材质调参或 UI；
 - 与动画正确性无关的 BVH、重投影、降噪、DLSS 算法或线程调度改造。
+
+## 11. A1 实施结果
+
+A1 新增正式 patch `cycles-v5.2-image-region-update.patch`，并将它登记在
+`setup-cycles.ps1` 的固定 patch 序列中。该 patch：
+
+- 为既有 `device_image` 增加按二维区域逐行上传入口；
+- 在 CUDA resident image 上使用带 byte offset/range 的 `cuMemcpy2DUnaligned`，
+  保持 device allocation 与 texture object identity；
+- 为 `ImageManager` 增加既有 `ImageHandle` 的 RGBA8 region 更新入口；
+- 在写入 Cycles host image 前复用原 metadata 的 alpha/colorspace conform 语义；
+- 拒绝未加载、非 RGBA8、缩放后尺寸不一致、越界或 stride 不足的更新；
+- CPU unified image memory 不执行无意义的重新分配或复制。
+
+Default 与 experimental DLSS 受控源码树均通过 patch 正向/反向检查；受影响的
+`memory.cpp`、CUDA `device_impl.cpp` 和 `image.cpp` 均通过 MSVC `/Zs` 独立语法编译。
+完整 MSBuild 在当前沙箱中被父环境的 `Path/PATH` 重复键阻断，未形成 Native link 或
+运行时像素证据；A4/A7 仍必须补齐该证据，不能从语法编译推断运行时通过。
