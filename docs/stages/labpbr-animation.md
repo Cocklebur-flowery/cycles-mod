@@ -1,6 +1,6 @@
 # LabPBR 运行时动画图集同步第二里程碑
 
-状态：`A0 / A1 / A2 DONE`；`A3 / A4 / A5 / A6 / A7 NOT STARTED`；
+状态：`A0 / A1 / A2 / A3 DONE`；`A4 / A5 / A6 / A7 NOT STARTED`；
 `V2 NOT STARTED`
 
 A0 调查与设计基线：`3a3bf86`（2026-08-20，Asia/Shanghai）
@@ -268,3 +268,24 @@ barrier 或 pending/acknowledge 接入资源生命周期和上传队列；这些
 `frameProgressAsInt`、`newFrame` 分别是整数 local ordinal `0/1/2`，插值分支中的
 `NextSprite` 是目标 `bindTexture` 的 ordinal `1`。完整 Java tests 与 Jar 组装通过；
 Mixin 注入的游戏内应用仍需 A7/V2 运行时验证。
+
+## 13. A3 实施结果
+
+A3 新增纯 Java `LabPbrAnimationRegionEncoder`，一个合并后的动画状态只产生一个固定
+四槽批次。四个 RGBA8 region 共享 Sprite 的 atlas rectangle、generation 和 revision，
+并按 Color、Normal、Material、Auxiliary 的 `0..3` 顺序持有独立像素缓冲。
+
+插值 oracle 直接对应当前 Minecraft shader：量化整数 progress 先除以 `1000.0F`，
+RGBA8_UNORM channel 转为 float 后按 GLSL `mix` 的
+`current * (1 - factor) + next * factor` 计算，最后 clamp 并转换回 RGBA8。规范允许精确
+中点选择任一最近整数，因此 CPU 合同使用 `Math.round` 固定中点向上，避免结果依赖驱动；
+A7/V2 仍需在目标 Vulkan 后端观察可见一致性。
+
+Normal 与 Specular companion 在原始输入 channel 上完成上述插值后，才复用现有
+LabPBR normal/material decode；这避免混合已重建的 normal Z、metal classification、
+emission 或 auxiliary channel。缺失 companion 会输出现有中性 fallback，但批次仍完整。
+
+A3 还验证并拒绝 Sprite/generation 不匹配、无效进度、越界 atlas rectangle、不完整帧
+网格、错误 RGBA8 stride/byte count 和非固定槽序。8 项 focused tests 覆盖离散、插值、
+逐字节四槽输出、fallback、输入所有权、row order 与非法输入；完整 Java tests 与 Jar
+组装通过。资源建立阶段如何填充只读 `FramePixels`、何时编码和提交仍属于 A6。
