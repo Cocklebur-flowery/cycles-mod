@@ -9,6 +9,7 @@ import net.minecraft.util.ARGB;
 
 import java.io.IOException;
 import java.io.InputStream;
+import java.util.HashMap;
 import java.util.Map;
 import java.util.Optional;
 
@@ -27,8 +28,35 @@ public final class LabPbrAtlasBuilder {
             int atlasHeight,
             float fallbackRoughness,
             float fallbackF0) {
+        return buildWithAnimationFrames(
+                resourceManager, sprites, discovery, atlasWidth, atlasHeight,
+                fallbackRoughness, fallbackF0, false).atlases();
+    }
+
+    static BuildResult buildWithAnimationFrames(
+            ResourceManager resourceManager,
+            Map<Identifier, TextureAtlasSprite> sprites,
+            LabPbrResources.Discovery discovery,
+            int atlasWidth,
+            int atlasHeight,
+            float fallbackRoughness,
+            float fallbackF0) {
+        return buildWithAnimationFrames(
+                resourceManager, sprites, discovery, atlasWidth, atlasHeight,
+                fallbackRoughness, fallbackF0, true);
+    }
+
+    private static BuildResult buildWithAnimationFrames(
+            ResourceManager resourceManager,
+            Map<Identifier, TextureAtlasSprite> sprites,
+            LabPbrResources.Discovery discovery,
+            int atlasWidth,
+            int atlasHeight,
+            float fallbackRoughness,
+            float fallbackF0,
+            boolean captureAnimationSources) {
         if (discovery.format() != LabPbrResources.Format.LAB_PBR_1_3) {
-            return empty();
+            return new BuildResult(empty(), Map.of(), Map.of());
         }
         int byteCount = Math.multiplyExact(Math.multiplyExact(atlasWidth, atlasHeight), 4);
         byte[] normalPixels = new byte[byteCount];
@@ -41,9 +69,14 @@ public final class LabPbrAtlasBuilder {
         int decodedSpeculars = 0;
         int sizeMismatches = 0;
         int decodeErrors = 0;
+        Map<Identifier, LabPbrAnimationRegionEncoder.FramePixels> normalFrames =
+                new HashMap<>();
+        Map<Identifier, LabPbrAnimationRegionEncoder.FramePixels> materialFrames =
+                new HashMap<>();
         for (TextureAtlasSprite sprite : sprites.values()) {
+            Identifier spriteId = sprite.contents().name();
             LabPbrResources.CompanionSet companionSet =
-                    discovery.companions(sprite.contents().name());
+                    discovery.companions(spriteId);
             if (companionSet == null) {
                 continue;
             }
@@ -52,42 +85,62 @@ public final class LabPbrAtlasBuilder {
             int width = sprite.contents().width();
             int height = sprite.contents().height();
             int imageFrame = LabPbrAnimationFrames.currentImageFrame(sprite);
+            boolean captureAnimationFrames = captureAnimationSources && sprite.isAnimated();
 
             DecodeResult normalResult = decodeCompanion(
                     resourceManager,
                     companionSet.normal(),
                     width,
                     height,
-                    image -> copyNormal(image, normalPixels, auxiliaryPixels,
-                            atlasWidth, atlasHeight,
-                            startX, startY, width, height, imageFrame));
+                    image -> {
+                        copyNormal(image, normalPixels, auxiliaryPixels,
+                                atlasWidth, atlasHeight,
+                                startX, startY, width, height, imageFrame);
+                        return captureAnimationFrames
+                                ? animationFrames(image, width, height)
+                                : null;
+                    });
             decodedNormals += normalResult.decoded() ? 1 : 0;
             sizeMismatches += normalResult.sizeMismatch() ? 1 : 0;
             decodeErrors += normalResult.error() ? 1 : 0;
+            if (normalResult.frames() != null) {
+                normalFrames.put(spriteId, normalResult.frames());
+            }
 
             DecodeResult specularResult = decodeCompanion(
                     resourceManager,
                     companionSet.specular(),
                     width,
                     height,
-                    image -> copyMaterial(image, materialPixels, auxiliaryPixels,
-                            atlasWidth, atlasHeight,
-                            startX, startY, width, height, imageFrame, fallbackF0));
+                    image -> {
+                        copyMaterial(image, materialPixels, auxiliaryPixels,
+                                atlasWidth, atlasHeight,
+                                startX, startY, width, height, imageFrame, fallbackF0);
+                        return captureAnimationFrames
+                                ? animationFrames(image, width, height)
+                                : null;
+                    });
             decodedSpeculars += specularResult.decoded() ? 1 : 0;
             sizeMismatches += specularResult.sizeMismatch() ? 1 : 0;
             decodeErrors += specularResult.error() ? 1 : 0;
+            if (specularResult.frames() != null) {
+                materialFrames.put(spriteId, specularResult.frames());
+            }
         }
 
-        return new Atlases(
-                atlasWidth,
-                atlasHeight,
-                normalPixels,
-                materialPixels,
-                auxiliaryPixels,
-                decodedNormals,
-                decodedSpeculars,
-                sizeMismatches,
-                decodeErrors);
+        return new BuildResult(
+                new Atlases(
+                        atlasWidth,
+                        atlasHeight,
+                        normalPixels,
+                        materialPixels,
+                        auxiliaryPixels,
+                        decodedNormals,
+                        decodedSpeculars,
+                        sizeMismatches,
+                        decodeErrors),
+                Map.copyOf(normalFrames),
+                Map.copyOf(materialFrames));
     }
 
     public static Atlases empty() {
@@ -141,8 +194,7 @@ public final class LabPbrAtlasBuilder {
                     image.getWidth(), image.getHeight(), frameWidth, frameHeight)) {
                 return DecodeResult.SIZE_MISMATCH;
             }
-            consumer.copy(image);
-            return DecodeResult.DECODED;
+            return new DecodeResult(true, false, false, consumer.copy(image));
         } catch (IOException | RuntimeException error) {
             return DecodeResult.ERROR;
         }
@@ -159,6 +211,22 @@ public final class LabPbrAtlasBuilder {
                 && imageHeight >= frameHeight
                 && imageWidth % frameWidth == 0
                 && imageHeight % frameHeight == 0;
+    }
+
+    private static LabPbrAnimationRegionEncoder.FramePixels animationFrames(
+            NativeImage image,
+            int frameWidth,
+            int frameHeight) {
+        int width = image.getWidth();
+        int height = image.getHeight();
+        int[] pixels = new int[Math.multiplyExact(width, height)];
+        for (int y = 0; y < height; y++) {
+            for (int x = 0; x < width; x++) {
+                pixels[y * width + x] = image.getPixel(x, y);
+            }
+        }
+        return new LabPbrAnimationRegionEncoder.FramePixels(
+                width, height, frameWidth, frameHeight, pixels);
     }
 
     private static void copyNormal(
@@ -300,14 +368,26 @@ public final class LabPbrAtlasBuilder {
 
     @FunctionalInterface
     private interface ImageConsumer {
-        void copy(NativeImage image);
+        LabPbrAnimationRegionEncoder.FramePixels copy(NativeImage image);
     }
 
-    private record DecodeResult(boolean decoded, boolean sizeMismatch, boolean error) {
-        private static final DecodeResult MISSING = new DecodeResult(false, false, false);
-        private static final DecodeResult DECODED = new DecodeResult(true, false, false);
-        private static final DecodeResult SIZE_MISMATCH = new DecodeResult(false, true, false);
-        private static final DecodeResult ERROR = new DecodeResult(false, false, true);
+    private record DecodeResult(
+            boolean decoded,
+            boolean sizeMismatch,
+            boolean error,
+            LabPbrAnimationRegionEncoder.FramePixels frames) {
+        private static final DecodeResult MISSING =
+                new DecodeResult(false, false, false, null);
+        private static final DecodeResult SIZE_MISMATCH =
+                new DecodeResult(false, true, false, null);
+        private static final DecodeResult ERROR =
+                new DecodeResult(false, false, true, null);
+    }
+
+    record BuildResult(
+            Atlases atlases,
+            Map<Identifier, LabPbrAnimationRegionEncoder.FramePixels> normalFrames,
+            Map<Identifier, LabPbrAnimationRegionEncoder.FramePixels> materialFrames) {
     }
 
     public record Atlases(

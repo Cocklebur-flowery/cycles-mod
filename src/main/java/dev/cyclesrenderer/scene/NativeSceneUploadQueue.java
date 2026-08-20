@@ -1,9 +1,11 @@
 package dev.cyclesrenderer.scene;
 
 import dev.cyclesrenderer.nativebridge.NativeBridge;
+import dev.cyclesrenderer.nativebridge.NativeTextureRegions;
 
 import java.util.ArrayDeque;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 /** Serializes native scene mutations away from Minecraft's render thread. */
@@ -15,6 +17,7 @@ final class NativeSceneUploadQueue implements AutoCloseable {
     private final Map<Long, MutationCommand> coalescedMutations = new HashMap<>();
     private final Thread worker;
 
+    private AnimationCommand coalescedAnimation;
     private boolean running = true;
     private boolean busy;
     private RuntimeException failure;
@@ -42,6 +45,31 @@ final class NativeSceneUploadQueue implements AutoCloseable {
         return enqueueMutation(sectionNode, null);
     }
 
+    boolean enqueueAnimations(List<LabPbrAnimationSources.Task> tasks) {
+        if (tasks.isEmpty()) {
+            return true;
+        }
+        synchronized (lock) {
+            throwFailureLocked();
+            if (!running) {
+                return false;
+            }
+            if (coalescedAnimation != null) {
+                coalescedAnimation.merge(tasks);
+                return true;
+            }
+            if (commands.size() >= MAX_QUEUED_COMMANDS) {
+                return false;
+            }
+            AnimationCommand command = new AnimationCommand(tasks);
+            commands.addLast(command);
+            coalescedAnimation = command;
+            coalescedMutations.clear();
+            lock.notifyAll();
+            return true;
+        }
+    }
+
     boolean enqueueCommit() {
         synchronized (lock) {
             throwFailureLocked();
@@ -50,6 +78,7 @@ final class NativeSceneUploadQueue implements AutoCloseable {
             }
             commands.addLast(CommitCommand.INSTANCE);
             coalescedMutations.clear();
+            coalescedAnimation = null;
             lock.notifyAll();
             return true;
         }
@@ -90,6 +119,7 @@ final class NativeSceneUploadQueue implements AutoCloseable {
         synchronized (lock) {
             commands.clear();
             coalescedMutations.clear();
+            coalescedAnimation = null;
             failure = null;
             running = false;
             lock.notifyAll();
@@ -120,6 +150,7 @@ final class NativeSceneUploadQueue implements AutoCloseable {
             MutationCommand command = new MutationCommand(sectionNode, snapshot);
             commands.addLast(command);
             coalescedMutations.put(sectionNode, command);
+            coalescedAnimation = null;
             lock.notifyAll();
             return true;
         }
@@ -147,6 +178,8 @@ final class NativeSceneUploadQueue implements AutoCloseable {
                 command = commands.removeFirst();
                 if (command instanceof MutationCommand mutation) {
                     coalescedMutations.remove(mutation.sectionNode, mutation);
+                } else if (command == coalescedAnimation) {
+                    coalescedAnimation = null;
                 }
                 busy = true;
             }
@@ -160,6 +193,7 @@ final class NativeSceneUploadQueue implements AutoCloseable {
                     failure = error;
                     commands.clear();
                     coalescedMutations.clear();
+                    coalescedAnimation = null;
                 }
             } finally {
                 synchronized (lock) {
@@ -194,6 +228,7 @@ final class NativeSceneUploadQueue implements AutoCloseable {
         synchronized (lock) {
             commands.clear();
             coalescedMutations.clear();
+            coalescedAnimation = null;
             lock.notifyAll();
             awaitIdleLocked();
             failure = null;
@@ -269,6 +304,27 @@ final class NativeSceneUploadQueue implements AutoCloseable {
             } else {
                 NativeBridge.removeSection(sectionNode);
             }
+        }
+    }
+
+    private static final class AnimationCommand implements Command {
+        private final LabPbrAnimationSources.PendingTasks pending =
+                new LabPbrAnimationSources.PendingTasks();
+
+        private AnimationCommand(List<LabPbrAnimationSources.Task> tasks) {
+            merge(tasks);
+        }
+
+        private void merge(List<LabPbrAnimationSources.Task> tasks) {
+            pending.merge(tasks);
+        }
+
+        @Override
+        public void execute() {
+            for (LabPbrAnimationSources.Task task : pending.ordered()) {
+                NativeTextureRegions.stage(task.encode());
+            }
+            NativeBridge.commitScene();
         }
     }
 

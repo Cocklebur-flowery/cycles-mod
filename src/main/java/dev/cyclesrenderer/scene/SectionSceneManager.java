@@ -35,6 +35,7 @@ public final class SectionSceneManager {
     private ClientLevel level;
     private LabPbrResources.Discovery pbrDiscovery = LabPbrResources.empty();
     private LabPbrAtlasBuilder.Atlases pbrAtlases = LabPbrAtlasBuilder.empty();
+    private LabPbrAnimationSources animationSources = LabPbrAnimationSources.empty();
     private long resourceRevision = Long.MIN_VALUE;
     private int pbrResourceFingerprint;
     private CyclesRenderSettings.CameraType cameraType;
@@ -117,8 +118,12 @@ public final class SectionSceneManager {
                 cameraSectionY,
                 cameraSectionZ,
                 viewDistance);
+        boolean committed = publishAnimationUpdates();
+        if (committed) {
+            pendingCommit = false;
+            hasCommittedScene = true;
+        }
         long now = System.nanoTime();
-        boolean committed = false;
         long quietInterval = hasCommittedScene
                 ? UPDATE_SCENE_QUIET_NANOS
                 : INITIAL_SCENE_QUIET_NANOS;
@@ -158,6 +163,8 @@ public final class SectionSceneManager {
         cameraType = null;
         pbrDiscovery = LabPbrResources.empty();
         pbrAtlases = LabPbrAtlasBuilder.empty();
+        animationSources = LabPbrAnimationSources.empty();
+        LabPbrAnimationFrames.beginGeneration();
         sections.clear();
         unloadedChunks.clear();
         lastCameraSectionX = Integer.MIN_VALUE;
@@ -196,9 +203,11 @@ public final class SectionSceneManager {
         sceneOriginX = snapOrigin(Mth.floor(cameraPosition.x));
         sceneOriginY = snapOrigin(Mth.floor(cameraPosition.y));
         sceneOriginZ = snapOrigin(Mth.floor(cameraPosition.z));
-        SectionGeometrySnapshot.SceneResources resources = createResources(
+        animationSources = LabPbrAnimationSources.empty();
+        ResourceBuild resourceBuild = createResources(
                 minecraft, sceneOriginX, sceneOriginY, sceneOriginZ, settings);
-        uploadQueue.resetNativeScene(resources);
+        uploadQueue.resetNativeScene(resourceBuild.resources());
+        animationSources = resourceBuild.animationSources();
         level = currentLevel;
         resourceRevision = currentResourceRevision;
         pbrResourceFingerprint = settings.pbrResourceFingerprint();
@@ -226,6 +235,24 @@ public final class SectionSceneManager {
         return Math.abs(cameraPosition.x - sceneOriginX) > ORIGIN_REBASE_DISTANCE
                 || Math.abs(cameraPosition.y - sceneOriginY) > ORIGIN_REBASE_DISTANCE
                 || Math.abs(cameraPosition.z - sceneOriginZ) > ORIGIN_REBASE_DISTANCE;
+    }
+
+    private boolean publishAnimationUpdates() {
+        List<LabPbrAnimationFrames.FrameUpdate> updates =
+                LabPbrAnimationFrames.pendingUpdates();
+        if (updates.isEmpty()) {
+            return false;
+        }
+        List<LabPbrAnimationSources.Task> tasks = animationSources.resolve(updates);
+        if (tasks.isEmpty()) {
+            LabPbrAnimationFrames.acknowledge(updates);
+            return false;
+        }
+        if (!uploadQueue.enqueueAnimations(tasks)) {
+            return false;
+        }
+        LabPbrAnimationFrames.acknowledge(updates);
+        return true;
     }
 
     private int drainCompiledSections(
@@ -432,7 +459,7 @@ public final class SectionSceneManager {
         return Math.floorDiv(blockCoordinate, ORIGIN_GRANULARITY) * ORIGIN_GRANULARITY;
     }
 
-    private SectionGeometrySnapshot.SceneResources createResources(
+    private ResourceBuild createResources(
             Minecraft minecraft,
             int originX,
             int originY,
@@ -468,23 +495,41 @@ public final class SectionSceneManager {
         SectionSceneResourceBuilder.AtlasLayout atlasLayout =
                 SectionSceneResourceBuilder.measure(spriteInputs);
 
-        pbrAtlases = LabPbrAtlasBuilder.build(
-                minecraft.getResourceManager(),
-                sprites,
-                pbrDiscovery,
+        LabPbrAtlasBuilder.BuildResult pbrBuild =
+                LabPbrAtlasBuilder.buildWithAnimationFrames(
+                        minecraft.getResourceManager(),
+                        sprites,
+                        pbrDiscovery,
+                        atlasLayout.width(),
+                        atlasLayout.height(),
+                        settings.pbrFallbackRoughness(),
+                        settings.pbrFallbackF0());
+        pbrAtlases = pbrBuild.atlases();
+        byte[] pixels = SectionSceneResourceBuilder.copyRgba(atlasLayout, spriteInputs);
+        SectionGeometrySnapshot.SceneResources resources =
+                SectionSceneResourceBuilder.build(
+                        originX,
+                        originY,
+                        originZ,
+                        atlas.location(),
+                        atlasLayout,
+                        pixels,
+                        pbrAtlases);
+        long animationGeneration = LabPbrAnimationFrames.beginGeneration();
+        LabPbrAnimationSources sources = LabPbrAnimationSources.create(
+                animationGeneration,
                 atlasLayout.width(),
                 atlasLayout.height(),
+                sprites,
+                pbrBuild,
                 settings.pbrFallbackRoughness(),
                 settings.pbrFallbackF0());
-        byte[] pixels = SectionSceneResourceBuilder.copyRgba(atlasLayout, spriteInputs);
-        return SectionSceneResourceBuilder.build(
-                originX,
-                originY,
-                originZ,
-                atlas.location(),
-                atlasLayout,
-                pixels,
-                pbrAtlases);
+        return new ResourceBuild(resources, sources);
+    }
+
+    private record ResourceBuild(
+            SectionGeometrySnapshot.SceneResources resources,
+            LabPbrAnimationSources animationSources) {
     }
 
     public record UpdateResult(

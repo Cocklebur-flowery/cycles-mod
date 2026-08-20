@@ -1,6 +1,6 @@
 # LabPBR 运行时动画图集同步第二里程碑
 
-状态：`A0 / A1 / A2 / A3 / A4 / A5 DONE`；`A6 / A7 NOT STARTED`；
+状态：`A0 / A1 / A2 / A3 / A4 / A5 / A6 DONE`；`A7 NOT STARTED`；
 `V2 NOT STARTED`
 
 A0 调查与设计基线：`323a8f2`（2026-08-20，Asia/Shanghai）
@@ -354,3 +354,29 @@ texture-region CTest 均 2/2 通过；Java focused tests、完整 tests 和 Jar 
 contract smoke 验证合法 staging、重复 revision 拒绝、非 canonical offset 拒绝，以及
 reset 后旧/new generation 行为。公开链路的区域内/外像素、device image identity 与
 可见动画仍属于 A7 自动 smoke 和 V2 游戏内验收。
+
+## 16. A6 实施结果
+
+A6 将资源 generation、只读动画源、区域编码和 ABI 46 staging 接入现有 Java 场景上传
+链路。Scene reset 先使用 tracker 中与当前 `SpriteContents` identity 匹配的帧建立完整
+图集快照，再开启新 generation；因此相机原点重置不会把初始快照无条件退回第 0 帧，
+而资源替换产生的新 identity 仍按既有规则回到第 0 帧。
+
+资源建立期间只为 animated Sprite 保留 Base、`_n` 和 `_s` 的只读原始帧。companion
+PNG 与静态 LabPBR 图集在同一次 ResourceManager 解码中产生，运行时不再读取资源或解码
+PNG。Sprite index 按 Identifier 排序后在 generation 内固定；缺失或不兼容 companion
+继续由 A3 输出完整的中性 Normal/Material/Auxiliary 槽，不改变既有静态诊断计数。
+
+`NativeSceneUploadQueue` 仍是唯一 Java Native 写者。渲染回调只写 A2 tracker；常规场景
+update 取得 latest dirty snapshot 后，把只读 source 与状态交给 upload worker。尚未执行
+的同一 Sprite 命令只保留最高 sequence，不同 Sprite 按 sequence 排序；worker 完成四槽
+RGBA8 编码后逐批调用 `NativeTextureRegions.stage`，最后只调用一次现有
+`NativeBridge.commitScene`。Animation command 自身形成 commit 边界，Section mutation、
+显式 commit 和后续动画不会跨边界错误合并；队列仍受既有 64-command 上限约束。
+
+reset/close 会清空排队动画命令并推进 tracker generation，旧 snapshot 不会进入新的
+Native 资源。PBR 未启用或当前 generation 没有可用 source 时，状态被消费但不会创建
+Native 命令。新增 focused tests 验证 generation/source 筛选、四槽到 ABI update 的逐字节
+转换、稳定 Sprite index 传递、latest-wins 合并、sequence 排序和不匹配拒绝；完整 Java
+tests 与 Jar 组装通过。真实公开路径的 GPU 像素、image identity、Default/DLSS 综合 smoke
+和游戏内可见动画仍属于 A7/V2。
