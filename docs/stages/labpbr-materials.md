@@ -1,8 +1,8 @@
 # LabPBR 1.3 材质桥与 PBR-C 第一里程碑
 
-状态：`F0 / F1 / F2 / F3 / F4 DONE`；`V1 AWAITING USER`
+状态：`F0 / F1 / F2 / F3 / F4 DONE`；`V1 PASS`
 
-当前检查基线：`8202bb3`（2026-08-18，Asia/Shanghai）
+当前代码与 V1 验收基线：`e46f53c`（2026-08-20，Asia/Shanghai）
 
 目标资源包：`run/resourcepacks/SPBR-21.zip`
 
@@ -187,8 +187,8 @@ PBR-C 新增自动证据：
 - F10 按实际资源拓扑报告三张 PBR 数据图集。
 
 `60e43dc` 上的 V0 综合实机矩阵曾覆盖方块、玻璃、水、植被和 LabPBR 呈现并由用户
-确认未见异常；它不等于逐通道数值或同场景视觉 oracle。当前 PBR-C 完成后由用户执行
-新的 V1 定向实机矩阵。
+确认未见异常；它不等于逐通道数值或同场景视觉 oracle。`e46f53c` 上的 V1 定向实机
+矩阵结果记录于第 9 节。
 
 ## 8. PBR-C 第一里程碑
 
@@ -198,25 +198,26 @@ F1  LabPBR atlas 逐字节 characterization          DONE
 F2  独立 Native PBR material smoke               DONE
 F3  Section glass/water/foliage classification    DONE
 F4  F10 PBR 数据图集计数修正                      DONE
-V1  用户定向 Minecraft 实机验收                   AWAITING USER
+V1  用户定向 Minecraft 实机验收                   PASS
 ```
 
 每个 F 子阶段必须形成独立提交。任一阶段发现当前实现与测试 oracle 冲突时，保留失败
 证据并停止，不把行为修复混入 characterization 提交。F0-F4 不进入运行时动画、真实
 置换、ABI 扩展或主观材质调参。
 
-## 9. V1 用户实机矩阵
+## 9. V1 用户实机验收结果
 
-F4 提交后，由用户使用当前 SPBR-21 同场景检查：
+用户于 2026-08-20 使用 `e46f53c` 和当前 SPBR-21 完成同场景检查，并统一报告
+“PBR 材质一切正常”。以下为用户提供的手工运行时证据，不替代自动测试日志：
 
-- PBR `OFF / AUTO`；
-- Normal Strength `0 / 1`；
-- Roughness、介电 F0、金属和 Emission；
-- Wetness `0 / 1` 与 SSS Scale `0 / 当前值`；
-- Bump / POM 的正视和掠射角；
-- Glass、Water、Leaves 和 solidified plants；
-- 资源重载、资源包切换、F8 关闭/重新启用和退出；
-- F10 requested/effective、coverage、三张数据图集、错误计数；
-- default 与 experimental DLSS 的实际执行边界。
+- `PASS` PBR `OFF / AUTO`；
+- `PASS` Normal Strength `0 / 1`；
+- `PASS` Roughness、介电 F0、金属和 Emission；
+- `PASS` Wetness `0 / 1` 与 SSS Scale `0 / 当前值`；
+- `PASS` Bump / POM 的正视和掠射角；
+- `PASS` Glass、Water、Leaves 和 solidified plants；
+- `PASS` 资源重载、资源包切换、F8 关闭/重新启用和退出；
+- `PASS` F10 requested/effective、coverage、三张数据图集和错误计数；
+- `PASS` default 与 experimental DLSS 的实际执行边界。
 
-V1 结果必须逐项记录 `PASS / FAIL / NOT RUN`。F0-F4 提交不预先宣称 V1 通过。
+F0-F4 的提交没有预先宣称 V1 通过；本节只记录 F4 之后收到的用户实机结果。
