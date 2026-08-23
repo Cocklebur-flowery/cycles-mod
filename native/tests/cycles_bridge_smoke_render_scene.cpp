@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <array>
+#include <bit>
 #include <cmath>
 #include <cstdint>
 #include <iostream>
@@ -136,6 +137,8 @@ bool run_render_scenarios(SmokeContext& context) {
 
     settings.transmission_bounces = 2U;
     settings.transparent_bounces = 32U;
+    settings.active_pass = CYCLES_BRIDGE_PASS_COMBINED;
+    settings.depth_of_field = 1U;
     settings.revision++;
     std::cerr << "[smoke] Streaming textured section; " << renderer_info(renderer) << '\n';
     if (!require_ok(
@@ -182,7 +185,8 @@ bool run_render_scenarios(SmokeContext& context) {
     frame.struct_version = 1;
     info.clear();
     if (!wait_for_updated_frame(
-            renderer, camera, frame, pixels, "initial section", info, false)) {
+            renderer, camera, frame, pixels, "initial section", info, true,
+            CYCLES_BRIDGE_PASS_COMBINED)) {
         return false;
     }
     if (require_optix && info.find("backend=OPTIX") == std::string::npos) {
@@ -310,6 +314,11 @@ bool run_render_scenarios(SmokeContext& context) {
         return false;
     }
 
+    const std::uint64_t all_passes_mask = (1ULL << CYCLES_BRIDGE_PASS_COUNT) - 1ULL;
+    const std::uint32_t expected_pass_registry_rebuilds = std::popcount(
+        all_passes_mask & ~physical_dof_diagnostics.registered_pass_mask);
+    const std::uint32_t initial_pass_registry_rebuilds =
+        physical_dof_diagnostics.pass_registry_rebuild_count;
     for (std::uint32_t pass = CYCLES_BRIDGE_PASS_DEPTH;
          pass < CYCLES_BRIDGE_PASS_COUNT;
          ++pass) {
@@ -339,7 +348,6 @@ bool run_render_scenarios(SmokeContext& context) {
         return false;
     }
 
-    const std::uint64_t all_passes_mask = (1ULL << CYCLES_BRIDGE_PASS_COUNT) - 1ULL;
     CyclesBridgeDiagnostics render_start_diagnostics{};
     render_start_diagnostics.struct_size = sizeof(render_start_diagnostics);
     render_start_diagnostics.struct_version = 1;
@@ -462,7 +470,7 @@ bool run_render_scenarios(SmokeContext& context) {
         || diagnostics.pass_cache_hit_count == 0U
         || diagnostics.registered_pass_mask != all_passes_mask
         || diagnostics.pass_registry_rebuild_count
-            < CYCLES_BRIDGE_PASS_COUNT - 1U
+            < initial_pass_registry_rebuilds + expected_pass_registry_rebuilds
         || diagnostics.pass_registry_hit_count == 0U
         || diagnostics.active_frame_variant != CYCLES_BRIDGE_FRAME_VARIANT_RAW
         || ((diagnostics.device_type == 1U || diagnostics.device_type == 2U)
