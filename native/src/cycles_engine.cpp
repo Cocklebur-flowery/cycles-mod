@@ -111,6 +111,11 @@ using SceneResourcesData = cyclesrenderer::scene::ResourcesData;
 using SceneRequest = cyclesrenderer::scene::SceneSnapshot;
 using SceneUpdate = cyclesrenderer::scene::SceneUpdate;
 
+bool affects_scene_geometry(const SceneUpdate* update) {
+    return update != nullptr
+        && (update->replace_all || !update->mutations.empty());
+}
+
 CyclesBridgeReprojectionMetadata make_reprojection_metadata(
     const CameraRequest& camera_request,
     std::uint64_t scene_revision,
@@ -1117,6 +1122,10 @@ class CyclesEngine::Impl final {
         if (!scene_lock.owns_lock()) {
             throw std::logic_error("scene update requires the Cycles scene lock");
         }
+        if (!affects_scene_geometry(&scene_update)) {
+            set_state("scene-ready", {});
+            return;
+        }
         const auto delta_start = std::chrono::steady_clock::now();
         set_state("scene-updating", {});
         apply_scene_delta(
@@ -1146,7 +1155,7 @@ class CyclesEngine::Impl final {
         std::uint32_t render_prepare_micros = 0U;
         std::uint32_t session_start_micros = 0U;
         std::uint32_t scene_delta_micros = 0U;
-        const bool apply_delta = scene_update != nullptr;
+        const bool apply_delta = affects_scene_geometry(scene_update);
         const bool apply_texture_regions = texture_region_replay.resident()
             && !texture_regions.empty();
         if (apply_delta || apply_texture_regions) {
@@ -1532,6 +1541,17 @@ class CyclesEngine::Impl final {
                         request_changed_.notify_all();
                         continue;
                     }
+                }
+
+                const bool texture_only_update = requested_scene
+                    && requested_scene->revision != active_scene_revision
+                    && !affects_scene_geometry(requested_scene.get())
+                    && !requested_texture_regions.empty();
+                if (render_in_flight && texture_only_update) {
+                    // Let the current atlas state reach a display frame before applying the
+                    // latest coalesced animation state. Otherwise frequent Sprite ticks can
+                    // continually reset PathTrace before DLSS produces its first sample.
+                    continue;
                 }
 
                 if (requested_scene
